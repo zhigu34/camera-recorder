@@ -7,6 +7,7 @@ from app.core.config import settings
 
 _PROXY_CACHE_MAX_AGE_SECONDS = 24 * 3600
 _LIVE_START_TIMEOUT_SECONDS = 20.0
+_PROXY_PROFILE_VERSION = "web-v2"
 MediaSource = Path | str
 
 
@@ -166,10 +167,10 @@ class RecordingPlaybackManager:
         self._semaphore = asyncio.Semaphore(1)
 
     def proxy_path(self, recording_id: int) -> Path:
-        return self.proxy_dir / f"{recording_id}.mp4"
+        return self.proxy_dir / f"{recording_id}.{_PROXY_PROFILE_VERSION}.mp4"
 
     def live_temp_path(self, recording_id: int) -> Path:
-        return self.proxy_dir / f".{recording_id}.live.part.mp4"
+        return self.proxy_dir / f".{recording_id}.{_PROXY_PROFILE_VERSION}.live.part.mp4"
 
     @staticmethod
     def can_direct_play(video_codec: str | None) -> bool:
@@ -414,7 +415,7 @@ class RecordingPlaybackManager:
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
         self.proxy_path(recording_id).with_suffix(".part.mp4").unlink(missing_ok=True)
         self.live_temp_path(recording_id).unlink(missing_ok=True)
-        (self.proxy_dir / f".{recording_id}.cache.part.mp4").unlink(missing_ok=True)
+        (self.proxy_dir / f".{recording_id}.{_PROXY_PROFILE_VERSION}.cache.part.mp4").unlink(missing_ok=True)
         return {"cancelled": True, "state": "cancelled"}
 
     def _cleanup_old_sync(self) -> None:
@@ -530,7 +531,7 @@ class RecordingPlaybackManager:
 
     async def _finalize_live_cache(self, recording_id: int, live_temp: Path) -> None:
         target = self.proxy_path(recording_id)
-        cache_temp = self.proxy_dir / f".{recording_id}.cache.part.mp4"
+        cache_temp = self.proxy_dir / f".{recording_id}.{_PROXY_PROFILE_VERSION}.cache.part.mp4"
         cache_temp.unlink(missing_ok=True)
         command = [
             settings.ffmpeg_bin,
