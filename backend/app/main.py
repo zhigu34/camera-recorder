@@ -17,6 +17,8 @@ from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
 from app.core.migrations import upgrade_database
 from app.models.camera import Camera
+from app.services.alert_dispatcher import alert_dispatcher
+from app.services.alert_monitor import alert_monitor
 from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
@@ -47,6 +49,9 @@ async def lifespan(_: FastAPI):
         await session.commit()
         runtime = await load_runtime_settings(session)
 
+    # Start the alert observer before background workers/recorders so new failure
+    # events are never missed. It only reads state/events and cannot block recording.
+    await alert_monitor.start()
     await segment_processor.start()
     await upload_manager.start()
 
@@ -84,12 +89,13 @@ async def lifespan(_: FastAPI):
     await segment_processor.scan_once()
     await upload_manager.stop()
     await segment_processor.stop()
+    await alert_monitor.stop()
     await close_db()
 
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.7.2",
+    version="0.7.3",
     lifespan=lifespan,
 )
 
@@ -129,6 +135,10 @@ async def system_status() -> dict:
         "upload": upload,
         "storage": await storage_snapshot(),
         "storage_cleanup": storage_cleanup_manager.status(),
+        "alerts": {
+            "monitor": alert_monitor.status(),
+            "dispatcher": alert_dispatcher.snapshot(),
+        },
     }
 
 
