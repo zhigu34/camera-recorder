@@ -45,6 +45,13 @@ interface Camera {
   ip: string
 }
 
+interface UploadStreamMessage {
+  type?: 'uploads.snapshot' | 'uploads.delta'
+  tasks?: UploadTask[]
+  removed_ids?: number[]
+  status?: UploadStatus
+}
+
 const emit = defineEmits<{
   (event: 'open-settings'): void
   (event: 'open-recordings'): void
@@ -60,11 +67,16 @@ const searchText = ref('')
 const statusFilter = ref('')
 const detailVisible = ref(false)
 const activeTask = ref<UploadTask | null>(null)
-let timer: number | null = null
+const streamConnected = ref(false)
+let referencesRefreshing = false
+let socket: WebSocket | null = null
+let reconnectTimer: number | null = null
+let mounted = false
 
 const recordingMap = computed(() => new Map(recordings.value.map((row) => [row.id, row])))
 const cameraMap = computed(() => new Map(cameras.value.map((row) => [row.id, row])))
 const counts = computed(() => status.value?.counts || {})
+const totalCount = computed(() => Object.values(counts.value).reduce((sum, value) => sum + Number(value || 0), 0))
 const pendingCount = computed(() => (counts.value.pending || 0) + (counts.value.uploading || 0) + (counts.value.retry_wait || 0))
 const successCount = computed(() => counts.value.success || 0)
 const failedCount = computed(() => counts.value.failed || 0)
@@ -113,8 +125,9 @@ function cameraName(task: UploadTask) {
 }
 
 function fileName(task: UploadTask) {
-  const path = recordingFor(task)?.mp4_path || ''
-  return path.split('/').pop() || path || '-'
+  const recordingPath = recordingFor(task)?.mp4_path || ''
+  if (recordingPath) return recordingPath.split('/').pop() || recordingPath
+  return task.remote_path.split('/').pop() || task.remote_path || '-'
 }
 
 function formatTime(value?: string | null) {
@@ -136,11 +149,116 @@ function openDetail(task: UploadTask) {
   detailVisible.value = true
 }
 
+async function refreshReferences() {
+  if (referencesRefreshing) return
+  referencesRefreshing = true
+  try {
+    const [recordingRes, cameraRes] = await Promise.all([
+      axios.get<Recording[]>('/api/recordings?limit=1000'),
+      axios.get<Camera[]>('/api/cameras'),
+    ])
+    recordings.value = recordingRes.data
+    cameras.value = cameraRes.data
+  } catch {
+    // Keep the previous maps; task rows can still fall back to remote path / IDs.
+  } finally {
+    referencesRefreshing = false
+  }
+}
+
+function refreshReferencesIfNeeded(incoming: UploadTask[]) {
+  if (incoming.some((task) => !recordingMap.value.has(task.recording_id))) {
+    void refreshReferences()
+  }
+}
+
+function applyTasks(incoming: UploadTask[], removedIds: number[] = []) {
+  const byId = new Map(tasks.value.map((task) => [task.id, task]))
+  removedIds.forEach((id) => byId.delete(id))
+  incoming.forEach((task) => byId.set(task.id, task))
+  tasks.value = Array.from(byId.values()).sort((a, b) => b.id - a.id).slice(0, 1000)
+  if (activeTask.value) {
+    const current = byId.get(activeTask.value.id)
+    if (current) activeTask.value = current
+    else detailVisible.value = false
+  }
+  refreshReferencesIfNeeded(incoming)
+}
+
+function wsUrl() {
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${scheme}//${window.location.host}/api/uploads/ws`
+}
+
+function closeSocket() {
+  if (reconnectTimer !== null) {
+    window.clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+  if (socket) {
+    const current = socket
+    socket = null
+    current.onopen = null
+    current.onmessage = null
+    current.onerror = null
+    current.onclose = null
+    try { current.close() } catch { /* already closed */ }
+  }
+  streamConnected.value = false
+}
+
+function scheduleReconnect() {
+  if (!mounted || reconnectTimer !== null) return
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null
+    connectStream()
+  }, 2000)
+}
+
+function connectStream() {
+  closeSocket()
+  if (!mounted) return
+  const ws = new WebSocket(wsUrl())
+  socket = ws
+  ws.onopen = () => {
+    if (socket !== ws) return
+    streamConnected.value = true
+  }
+  ws.onmessage = (event) => {
+    if (socket !== ws || typeof event.data !== 'string') return
+    try {
+      const message = JSON.parse(event.data) as UploadStreamMessage
+      if (message.type === 'uploads.snapshot') {
+        tasks.value = (message.tasks || []).slice(0, 1000)
+        if (message.status) status.value = message.status
+        refreshReferencesIfNeeded(tasks.value)
+      } else if (message.type === 'uploads.delta') {
+        applyTasks(message.tasks || [], message.removed_ids || [])
+        if (message.status) status.value = message.status
+      }
+    } catch {
+      // Ignore malformed frames and keep the last valid snapshot.
+    }
+  }
+  ws.onerror = () => {
+    if (socket === ws) streamConnected.value = false
+  }
+  ws.onclose = () => {
+    if (socket !== ws) return
+    socket = null
+    streamConnected.value = false
+    scheduleReconnect()
+  }
+}
+
 async function retry(task: UploadTask) {
   try {
     await axios.post(`/api/uploads/tasks/${task.id}/retry`)
+    task.status = 'pending'
+    task.retry_count = 0
+    task.next_retry_at = null
+    task.last_error = null
     ElMessage.success(`任务 #${task.id} 已重新排队`)
-    await load(false)
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '重试失败')
   }
@@ -150,8 +268,7 @@ async function scan() {
   scanning.value = true
   try {
     await axios.post('/api/uploads/scan')
-    ElMessage.success('已触发 OpenList 上传扫描')
-    await load(false)
+    ElMessage.success('OpenList 上传扫描已完成')
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '上传扫描失败')
   } finally {
@@ -180,11 +297,12 @@ async function load(showLoading = true) {
 }
 
 onMounted(() => {
-  void load()
-  timer = window.setInterval(() => void load(false), 10000)
+  mounted = true
+  void load().finally(connectStream)
 })
 onBeforeUnmount(() => {
-  if (timer !== null) window.clearInterval(timer)
+  mounted = false
+  closeSocket()
 })
 </script>
 
@@ -212,7 +330,7 @@ onBeforeUnmount(() => {
     </section>
 
     <section class="summary-grid">
-      <article class="summary-card"><span><UploadFilled /></span><div><small>上传任务</small><strong>{{ tasks.length }}</strong></div></article>
+      <article class="summary-card"><span><UploadFilled /></span><div><small>上传任务</small><strong>{{ totalCount }}</strong></div></article>
       <article class="summary-card"><span><Refresh /></span><div><small>待处理</small><strong>{{ pendingCount }}</strong></div></article>
       <article class="summary-card"><span><Cloudy /></span><div><small>已完成</small><strong>{{ successCount }}</strong></div></article>
       <article class="summary-card" :class="{ danger: failedCount > 0 }"><span><WarningFilled /></span><div><small>失败</small><strong>{{ failedCount }}</strong></div></article>
@@ -232,6 +350,7 @@ onBeforeUnmount(() => {
         </el-select>
       </div>
       <div class="toolbar-actions">
+        <span class="stream-state" :class="{ live: streamConnected }"><i></i>{{ streamConnected ? '实时推送' : '正在重连' }}</span>
         <span>显示 {{ filteredTasks.length }} / {{ tasks.length }} 条</span>
         <el-button @click="emit('open-recordings')">录像管理</el-button>
         <el-button @click="load()">刷新</el-button>
@@ -292,5 +411,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.upload-page{max-width:1760px;margin:0 auto;padding:20px 24px 30px}.provider-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:16px 18px;margin-bottom:12px;border:1px solid var(--nvr-border);border-radius:10px;background:linear-gradient(145deg,rgba(76,141,255,.08),var(--nvr-surface) 55%)}.provider-main{display:flex;align-items:center;gap:13px}.provider-icon{flex:0 0 38px;width:38px;height:38px;display:grid;place-items:center;border-radius:10px;color:var(--nvr-blue);background:rgba(76,141,255,.11)}.provider-icon :deep(svg){width:20px}.provider-main>div{display:flex;flex-direction:column;gap:5px}.provider-main strong{font-size:14px}.provider-main span{color:var(--nvr-muted);font-size:11px}.provider-state{display:flex;align-items:center;gap:9px}.provider-meta{grid-column:1/-1;display:flex;gap:22px;padding-top:12px;border-top:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:10px;flex-wrap:wrap}.provider-meta span{display:flex;gap:7px}.provider-meta b{color:#9aa7b7;font-weight:600}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}.summary-card{height:82px;display:flex;align-items:center;gap:13px;padding:0 16px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.summary-card>span{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:var(--nvr-blue);background:rgba(76,141,255,.09)}.summary-card.danger>span{color:var(--nvr-red);background:rgba(240,93,94,.09)}.summary-card>span :deep(svg){width:16px}.summary-card>div{display:flex;flex-direction:column;gap:5px}.summary-card small{color:var(--nvr-muted);font-size:10px}.summary-card strong{font-size:24px;line-height:1}.panel{border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.toolbar-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;margin-bottom:12px}.toolbar-left,.toolbar-actions{display:flex;align-items:center;gap:8px}.toolbar-actions{color:var(--nvr-muted);font-size:11px}.search-box{width:min(460px,36vw)}.status-select{width:150px}.table-panel{overflow:hidden}.recording-cell{display:flex;flex-direction:column;gap:4px;min-width:0}.recording-cell strong{font-size:12px}.recording-cell span,.muted{overflow:hidden;color:var(--nvr-muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.path-cell{color:#9aa7b7;font-size:10px;word-break:break-all}.error-text{color:var(--nvr-red);font-size:10px}.button-icon{width:13px;margin-right:3px}.drawer-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid var(--nvr-border)}.detail-list{margin:0;border-top:1px solid var(--nvr-border)}.detail-list>div{display:grid;grid-template-columns:105px minmax(0,1fr);gap:12px;padding:11px 0;border-bottom:1px solid var(--nvr-border)}.detail-list dt{color:var(--nvr-muted);font-size:11px}.detail-list dd{margin:0;font-size:11px;word-break:break-all}.error-row dd{color:var(--nvr-red)}.drawer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}@media(max-width:1000px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar-panel{align-items:stretch;flex-direction:column}.toolbar-left,.toolbar-actions{flex-wrap:wrap}.search-box{flex:1;width:auto;min-width:240px}}@media(max-width:650px){.upload-page{padding:14px}.provider-panel{grid-template-columns:1fr}.provider-state{justify-content:flex-start}.summary-grid{grid-template-columns:1fr}.toolbar-left{flex-direction:column;align-items:stretch}.search-box,.status-select{width:100%}}
+.upload-page{max-width:1760px;margin:0 auto;padding:20px 24px 30px}.provider-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;padding:16px 18px;margin-bottom:12px;border:1px solid var(--nvr-border);border-radius:10px;background:linear-gradient(145deg,rgba(76,141,255,.08),var(--nvr-surface) 55%)}.provider-main{display:flex;align-items:center;gap:13px}.provider-icon{flex:0 0 38px;width:38px;height:38px;display:grid;place-items:center;border-radius:10px;color:var(--nvr-blue);background:rgba(76,141,255,.11)}.provider-icon :deep(svg){width:20px}.provider-main>div{display:flex;flex-direction:column;gap:5px}.provider-main strong{font-size:14px}.provider-main span{color:var(--nvr-muted);font-size:11px}.provider-state{display:flex;align-items:center;gap:9px}.provider-meta{grid-column:1/-1;display:flex;gap:22px;padding-top:12px;border-top:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:10px;flex-wrap:wrap}.provider-meta span{display:flex;gap:7px}.provider-meta b{color:#9aa7b7;font-weight:600}.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}.summary-card{height:82px;display:flex;align-items:center;gap:13px;padding:0 16px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.summary-card>span{width:32px;height:32px;display:grid;place-items:center;border-radius:8px;color:var(--nvr-blue);background:rgba(76,141,255,.09)}.summary-card.danger>span{color:var(--nvr-red);background:rgba(240,93,94,.09)}.summary-card>span :deep(svg){width:16px}.summary-card>div{display:flex;flex-direction:column;gap:5px}.summary-card small{color:var(--nvr-muted);font-size:10px}.summary-card strong{font-size:24px;line-height:1}.panel{border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.toolbar-panel{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;margin-bottom:12px}.toolbar-left,.toolbar-actions{display:flex;align-items:center;gap:8px}.toolbar-actions{color:var(--nvr-muted);font-size:11px}.stream-state{display:inline-flex;align-items:center;gap:5px;color:var(--nvr-yellow)}.stream-state i{width:6px;height:6px;border-radius:50%;background:currentColor}.stream-state.live{color:var(--nvr-green)}.search-box{width:min(460px,36vw)}.status-select{width:150px}.table-panel{overflow:hidden}.recording-cell{display:flex;flex-direction:column;gap:4px;min-width:0}.recording-cell strong{font-size:12px}.recording-cell span,.muted{overflow:hidden;color:var(--nvr-muted);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.path-cell{color:#9aa7b7;font-size:10px;word-break:break-all}.error-text{color:var(--nvr-red);font-size:10px}.button-icon{width:13px;margin-right:3px}.drawer-head{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:1px solid var(--nvr-border)}.detail-list{margin:0;border-top:1px solid var(--nvr-border)}.detail-list>div{display:grid;grid-template-columns:105px minmax(0,1fr);gap:12px;padding:11px 0;border-bottom:1px solid var(--nvr-border)}.detail-list dt{color:var(--nvr-muted);font-size:11px}.detail-list dd{margin:0;font-size:11px;word-break:break-all}.error-row dd{color:var(--nvr-red)}.drawer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}@media(max-width:1000px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar-panel{align-items:stretch;flex-direction:column}.toolbar-left,.toolbar-actions{flex-wrap:wrap}.search-box{flex:1;width:auto;min-width:240px}}@media(max-width:650px){.upload-page{padding:14px}.provider-panel{grid-template-columns:1fr}.provider-state{justify-content:flex-start}.summary-grid{grid-template-columns:1fr}.toolbar-left{flex-direction:column;align-items:stretch}.search-box,.status-select{width:100%}}
 </style>
