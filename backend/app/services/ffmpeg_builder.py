@@ -21,6 +21,9 @@ class CameraRuntimeConfig:
     audio_codec: str | None
     sample_rate: int | None
     audio_frame_samples: int | None
+    # None follows the global setting. Scheduled recordings can explicitly disable
+    # wall-clock alignment so a 21:01-21:11 window is not split at 21:10.
+    align_segments_to_clock: bool | None = None
 
 
 class FFmpegCommandError(ValueError):
@@ -109,7 +112,12 @@ def build_record_command(
         "1",
     ]
 
-    if runtime.align_segments_to_clock:
+    align_to_clock = (
+        runtime.align_segments_to_clock
+        if camera.align_segments_to_clock is None
+        else camera.align_segments_to_clock
+    )
+    if align_to_clock:
         command += ["-segment_atclocktime", "1"]
 
     command += [str(output_dir / "%Y-%m-%d_%H-%M-%S.mkv")]
