@@ -140,11 +140,22 @@ class CameraRead(CameraBase):
     channels: int | None = None
     audio_frame_samples: int | None = None
 
+    # status remains as a compatibility alias for connectivity_status. New
+    # clients should use the explicit fields below and never infer one state
+    # dimension from another.
     status: str
+    connectivity_status: str = "unknown"
+    recorder_state: str = "STOPPED"
+    schedule_state: str = "disabled"
     last_probe_at: datetime | None = None
     last_online_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @model_validator(mode="after")
+    def normalize_legacy_status(self):
+        self.status = self.connectivity_status
+        return self
 
 
 class CameraProbeResult(BaseModel):
