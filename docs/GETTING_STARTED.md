@@ -2,7 +2,19 @@
 
 ## 推荐：Docker Compose
 
-只需要 Docker Desktop / Docker Engine + Compose：
+只需要 Docker Desktop / Docker Engine + Compose。
+
+首次构建先准备 FFmpeg 本地包：
+
+```bash
+# 自动识别当前宿主机架构
+bash scripts/download-ffmpeg.sh
+
+# Linux x86_64 也可以明确指定
+bash scripts/download-ffmpeg.sh amd64
+```
+
+然后：
 
 ```bash
 cp .env.example .env
@@ -22,10 +34,11 @@ docker compose logs -f backend
 docker compose logs -f frontend
 ```
 
-升级代码后：
+升级代码后，已经存在且校验正常的 FFmpeg 包不会重复下载：
 
 ```bash
 git pull
+bash scripts/download-ffmpeg.sh
 docker compose up -d --build
 ```
 
@@ -37,6 +50,50 @@ docker compose down
 
 `down` 不会删除 `data/`、`recordings/`、`staging/`、`failed/`、`logs/` 中的宿主机数据。
 
+### FFmpeg 预下载
+
+Dockerfile **不会访问 GitHub 下载 FFmpeg**。FFmpeg 压缩包由宿主机提前准备，构建时只从 Docker build context 复制并解压。
+
+脚本支持：
+
+```bash
+bash scripts/download-ffmpeg.sh          # auto，自动识别当前架构
+bash scripts/download-ffmpeg.sh amd64    # Linux x86_64
+bash scripts/download-ffmpeg.sh arm64    # ARM64 / Apple Silicon Docker target
+bash scripts/download-ffmpeg.sh all      # 两种架构都下载
+```
+
+下载位置：
+
+```text
+vendor/ffmpeg/ffmpeg-linux64.tar.xz       # amd64
+vendor/ffmpeg/ffmpeg-linuxarm64.tar.xz    # arm64
+```
+
+脚本会先用 `tar -tJf` 校验已有文件：文件存在且有效时直接跳过下载；损坏文件会删除后重新下载。
+
+如果服务器访问 GitHub 不方便，可以在其他能访问 GitHub 的机器下载后把文件复制到服务器。例如 amd64 服务器只需要准备：
+
+```text
+vendor/ffmpeg/ffmpeg-linux64.tar.xz
+```
+
+对应上游文件为：
+
+```text
+https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz
+```
+
+ARM64 对应：
+
+```text
+https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz
+```
+
+复制完成后直接构建即可；Dockerfile 不会再访问 GitHub。
+
+这些大文件被 `.gitignore` 忽略，不会提交到仓库，但不会被 `.dockerignore` 排除，因此本地构建可以正常 `COPY`。
+
 ### 中国大陆构建源
 
 Dockerfile 默认针对中国大陆网络优化构建依赖：
@@ -44,8 +101,9 @@ Dockerfile 默认针对中国大陆网络优化构建依赖：
 - Debian APT：清华 TUNA Debian / Debian Security
 - Python pip / uv：清华 TUNA PyPI
 - npm：npmmirror
+- FFmpeg：宿主机预下载，本次 Docker build 不联网获取
 
-这些是 Docker build `ARG`，不会增加 `.env` 复杂度。默认直接构建即可：
+这些镜像地址是 Docker build `ARG`，不会增加 `.env` 复杂度。默认直接构建即可：
 
 ```bash
 docker compose build --builder default
@@ -63,11 +121,9 @@ docker compose build --builder default frontend \
   --build-arg NPM_REGISTRY=https://registry.npmjs.org
 ```
 
-> FFmpeg 静态包当前仍从 GitHub BtbN Releases 下载，因此构建机仍需能访问 GitHub，或为 Docker BuildKit 配置代理。
-
 ### Apple Silicon
 
-Compose 使用 Docker 的 `TARGETARCH` 自动选择 BtbN `linuxarm64` FFmpeg；Intel/AMD 则使用 `linux64`。镜像构建阶段会执行 `ffmpeg -h bsf=setts` 并确认存在 `prescale`，否则直接构建失败，避免运行后才发现时间戳修复能力缺失。
+Compose 使用 Docker 的 `TARGETARCH` 自动选择本地 `linuxarm64` FFmpeg；Intel/AMD 则使用 `linux64`。镜像构建阶段会执行 `ffmpeg -h bsf=setts` 并确认存在 `prescale`，否则直接构建失败。
 
 ### 摄像头网络
 
