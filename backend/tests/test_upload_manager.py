@@ -2,13 +2,13 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.models.recording import Recording
+from app.services.system_settings import RuntimeSettings
 from app.services.upload_manager import OpenListWebDAVProvider, UploadManager
 
 
 def test_remote_path_preserves_camera_date_hierarchy(monkeypatch, tmp_path: Path):
     recordings_dir = tmp_path / "recordings"
     monkeypatch.setattr(settings, "recordings_dir", recordings_dir)
-    monkeypatch.setattr(settings, "webdav_root", "监控录像")
 
     recording = Recording(
         camera_id=1,
@@ -19,16 +19,21 @@ def test_remote_path_preserves_camera_date_hierarchy(monkeypatch, tmp_path: Path
             / "监控-大厅_2026-09-11_12-00-00.mp4"
         ),
     )
+    runtime = RuntimeSettings(webdav_root="监控录像")
 
     manager = UploadManager()
-    assert manager.remote_path_for(recording) == (
+    assert manager.remote_path_for(recording, runtime) == (
         "监控录像/监控-大厅/2026-09-11/监控-大厅_2026-09-11_12-00-00.mp4"
     )
 
 
-def test_webdav_url_percent_encodes_remote_path(monkeypatch):
-    monkeypatch.setattr(settings, "webdav_url", "http://openlist:5244/dav/115")
-    provider = OpenListWebDAVProvider()
+def test_webdav_url_percent_encodes_remote_path():
+    runtime = RuntimeSettings(
+        webdav_url="http://openlist:5244/dav/115",
+        webdav_username="admin",
+        webdav_password="secret",
+    )
+    provider = OpenListWebDAVProvider(runtime)
     url = provider._url("监控录像/监控-大厅/test file.mp4")
 
     assert url.startswith("http://openlist:5244/dav/115/")
