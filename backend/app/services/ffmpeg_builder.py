@@ -1,0 +1,118 @@
+from dataclasses import dataclass
+from pathlib import Path
+
+from app.core.config import settings
+from app.services.camera_probe import build_rtsp_url
+
+
+@dataclass(slots=True)
+class CameraRuntimeConfig:
+    id: int
+    name: str
+    ip: str
+    rtsp_port: int
+    username: str
+    password: str
+    rtsp_path: str
+    timestamp_mode: str
+    fps_num: int | None
+    fps_den: int | None
+    audio_codec: str | None
+    sample_rate: int | None
+    audio_frame_samples: int | None
+
+
+class FFmpegCommandError(ValueError):
+    pass
+
+
+def _video_setts(camera: CameraRuntimeConfig) -> str:
+    if not camera.fps_num or not camera.fps_den:
+        raise FFmpegCommandError("reconstruct mode requires a detected FPS; run Probe first")
+    time_base = f"{camera.fps_den}/{camera.fps_num}"
+    return f"setts=ts=N:duration=1:time_base={time_base}:prescale=1"
+
+
+def _audio_setts(camera: CameraRuntimeConfig) -> str | None:
+    if not camera.sample_rate or not camera.audio_frame_samples:
+        return None
+    samples = camera.audio_frame_samples
+    return (
+        f"setts=ts=N*{samples}:duration={samples}:"
+        f"time_base=1/{camera.sample_rate}:prescale=1"
+    )
+
+
+def build_record_command(camera: CameraRuntimeConfig, output_dir: Path) -> list[str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rtsp_url = build_rtsp_url(
+        camera.ip,
+        camera.rtsp_port,
+        camera.username,
+        camera.password,
+        camera.rtsp_path,
+    )
+
+    command = [
+        settings.ffmpeg_bin,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-rtsp_transport",
+        "tcp",
+        "-timeout",
+        str(settings.rtsp_timeout_us),
+    ]
+
+    if camera.timestamp_mode == "wallclock":
+        command += ["-use_wallclock_as_timestamps", "1", "-fflags", "+genpts"]
+
+    command += [
+        "-i",
+        rtsp_url,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "copy",
+    ]
+
+    if camera.timestamp_mode == "reconstruct":
+        command += ["-bsf:v", _video_setts(camera)]
+        audio_filter = _audio_setts(camera)
+        if audio_filter:
+            command += ["-bsf:a", audio_filter]
+
+    command += [
+        "-f",
+        "segment",
+        "-segment_format",
+        "matroska",
+        "-segment_time",
+        str(settings.segment_duration_seconds),
+        "-reset_timestamps",
+        "1",
+        "-strftime",
+        "1",
+    ]
+
+    if settings.align_segments_to_clock:
+        command += ["-segment_atclocktime", "1"]
+
+    command += [str(output_dir / "%Y-%m-%d_%H-%M-%S.mkv")]
+    return command
+
+
+def redact_command(command: list[str]) -> list[str]:
+    redacted = command.copy()
+    try:
+        input_index = redacted.index("-i") + 1
+        if input_index < len(redacted):
+            redacted[input_index] = "rtsp://***:***@camera/stream"
+    except ValueError:
+        pass
+    return redacted
