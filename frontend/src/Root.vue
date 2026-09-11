@@ -88,8 +88,9 @@ function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'none' = '
   activeKey.value = entry.key
   renderKey.value = entry.key
   const url = urlFor(entry)
-  if (historyMode === 'push' && `${window.location.pathname}${window.location.search}` !== url) window.history.pushState({}, '', url)
-  else if (historyMode === 'replace') window.history.replaceState({}, '', url)
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (historyMode === 'push' && current !== url) window.history.pushState({}, '', url)
+  else if (historyMode === 'replace' && window.location.pathname !== url) window.history.replaceState({}, '', url)
 }
 function navigate(key: string) {
   const entry = entryMap.get(key)
