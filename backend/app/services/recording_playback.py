@@ -1,7 +1,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from app.core.config import settings
 
@@ -18,17 +18,50 @@ def _source_exists(source: MediaSource) -> bool:
     return not isinstance(source, Path) or source.exists()
 
 
-async def _capture_stderr(reader: asyncio.StreamReader | None) -> str:
+async def _capture_ffmpeg_progress(
+    reader: asyncio.StreamReader | None,
+    on_progress: Callable[[float], None] | None = None,
+) -> str:
+    """Consume FFmpeg stderr/progress output and keep only a short error tail."""
+
     if reader is None:
         return ""
     tail = bytearray()
     while True:
-        chunk = await reader.read(4096)
-        if not chunk:
+        line = await reader.readline()
+        if not line:
             break
-        tail.extend(chunk)
-        if len(tail) > 8192:
-            del tail[:-8192]
+        text = line.decode(errors="replace").strip()
+        handled = False
+        if "=" in text:
+            key, value = text.split("=", 1)
+            if key in {"out_time_us", "out_time_ms"}:
+                try:
+                    # Despite its historical name, FFmpeg out_time_ms is also
+                    # expressed in microseconds.
+                    seconds = max(0.0, int(value) / 1_000_000)
+                    if on_progress is not None:
+                        on_progress(seconds)
+                    handled = True
+                except ValueError:
+                    pass
+            elif key in {
+                "frame",
+                "fps",
+                "stream_0_0_q",
+                "bitrate",
+                "total_size",
+                "out_time",
+                "dup_frames",
+                "drop_frames",
+                "speed",
+                "progress",
+            }:
+                handled = True
+        if not handled:
+            tail.extend(line)
+            if len(tail) > 8192:
+                del tail[:-8192]
     return tail.decode(errors="replace").strip()
 
 
@@ -80,6 +113,9 @@ class LiveProxySession:
             if not completed:
                 self.temp_path.unlink(missing_ok=True)
             self.manager._live_ids.discard(self.recording_id)
+            self.manager._processes.pop(self.recording_id, None)
+            self.manager._progress.pop(self.recording_id, None)
+            self.manager._cancelled_ids.discard(self.recording_id)
             self.manager._semaphore.release()
 
     async def stream(self):
@@ -97,20 +133,23 @@ class LiveProxySession:
             returncode = await self.process.wait()
             detail = await self.stderr_task
             if returncode != 0:
-                self.manager._errors[self.recording_id] = (
-                    detail or f"ffmpeg exited with code {returncode}"
-                )[-2000:]
+                if self.recording_id not in self.manager._cancelled_ids:
+                    self.manager._errors[self.recording_id] = (
+                        detail or f"ffmpeg exited with code {returncode}"
+                    )[-2000:]
                 return
 
             self.temp_file.flush()
             self.temp_file.close()
             await self.manager._finalize_live_cache(self.recording_id, self.temp_path)
             self.manager._errors.pop(self.recording_id, None)
+            self.manager._set_progress_complete(self.recording_id)
             completed = True
         except (asyncio.CancelledError, GeneratorExit):
             raise
         except Exception as exc:
-            self.manager._errors[self.recording_id] = str(exc)[-2000:]
+            if self.recording_id not in self.manager._cancelled_ids:
+                self.manager._errors[self.recording_id] = str(exc)[-2000:]
         finally:
             await self._close(completed)
 
@@ -121,6 +160,9 @@ class RecordingPlaybackManager:
         self._tasks: dict[int, asyncio.Task] = {}
         self._errors: dict[int, str] = {}
         self._live_ids: set[int] = set()
+        self._processes: dict[int, asyncio.subprocess.Process] = {}
+        self._progress: dict[int, dict[str, Any]] = {}
+        self._cancelled_ids: set[int] = set()
         self._semaphore = asyncio.Semaphore(1)
 
     def proxy_path(self, recording_id: int) -> Path:
@@ -145,20 +187,78 @@ class RecordingPlaybackManager:
             "hev1",
         }
 
+    def _start_progress(
+        self,
+        recording_id: int,
+        duration_seconds: float | None,
+        mode: str,
+    ) -> None:
+        duration = max(0.0, float(duration_seconds or 0))
+        self._progress[recording_id] = {
+            "mode": mode,
+            "elapsed_seconds": 0.0,
+            "duration_seconds": duration,
+            "percent": 0.0 if duration > 0 else None,
+            "started_at_monotonic": time.monotonic(),
+            "cancellable": True,
+        }
+
+    def _update_progress(self, recording_id: int, elapsed_seconds: float) -> None:
+        progress = self._progress.get(recording_id)
+        if progress is None:
+            return
+        elapsed = max(float(progress.get("elapsed_seconds") or 0), elapsed_seconds)
+        duration = float(progress.get("duration_seconds") or 0)
+        progress["elapsed_seconds"] = round(elapsed, 3)
+        progress["percent"] = (
+            round(min(100.0, elapsed / duration * 100), 1) if duration > 0 else None
+        )
+
+    def _set_progress_complete(self, recording_id: int) -> None:
+        progress = self._progress.get(recording_id)
+        if progress is None:
+            return
+        duration = float(progress.get("duration_seconds") or 0)
+        if duration > 0:
+            progress["elapsed_seconds"] = duration
+            progress["percent"] = 100.0
+
+    def _public_progress(self, recording_id: int) -> dict[str, Any] | None:
+        progress = self._progress.get(recording_id)
+        if progress is None:
+            return None
+        return {
+            "mode": progress.get("mode"),
+            "elapsed_seconds": progress.get("elapsed_seconds", 0.0),
+            "duration_seconds": progress.get("duration_seconds", 0.0),
+            "percent": progress.get("percent"),
+            "running_seconds": round(
+                max(0.0, time.monotonic() - float(progress.get("started_at_monotonic") or 0)),
+                1,
+            ),
+            "cancellable": bool(progress.get("cancellable", True)),
+        }
+
     def status(self, recording_id: int, video_codec: str | None) -> dict[str, Any]:
+        progress = self._public_progress(recording_id)
         if self.can_direct_play(video_codec):
-            return {"state": "direct", "direct": True, "error": None}
+            return {"state": "direct", "direct": True, "error": None, "progress": None}
         proxy = self.proxy_path(recording_id)
         if proxy.exists() and proxy.stat().st_size > 0:
-            return {"state": "ready", "direct": False, "error": None}
+            return {"state": "ready", "direct": False, "error": None, "progress": None}
         if recording_id in self._live_ids:
-            return {"state": "streaming", "direct": False, "error": None}
+            return {"state": "streaming", "direct": False, "error": None, "progress": progress}
         task = self._tasks.get(recording_id)
         if task and not task.done():
-            return {"state": "generating", "direct": False, "error": None}
+            return {"state": "generating", "direct": False, "error": None, "progress": progress}
         if recording_id in self._errors:
-            return {"state": "error", "direct": False, "error": self._errors[recording_id]}
-        return {"state": "needed", "direct": False, "error": None}
+            return {
+                "state": "error",
+                "direct": False,
+                "error": self._errors[recording_id],
+                "progress": None,
+            }
+        return {"state": "needed", "direct": False, "error": None, "progress": None}
 
     async def cleanup_cache(self) -> None:
         await asyncio.to_thread(self._cleanup_old_sync)
@@ -178,6 +278,7 @@ class RecordingPlaybackManager:
         source: MediaSource,
         video_codec: str | None,
         audio_codec: str | None = None,
+        duration_seconds: float | None = None,
     ) -> dict[str, Any]:
         state = self.status(recording_id, video_codec)
         if state["state"] == "direct":
@@ -191,18 +292,21 @@ class RecordingPlaybackManager:
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
         await self.cleanup_cache()
         self._errors.pop(recording_id, None)
+        self._cancelled_ids.discard(recording_id)
+        self._start_progress(recording_id, duration_seconds, "generate")
         task = asyncio.create_task(
             self._generate(recording_id, source, audio_codec),
             name=f"playback-proxy-{recording_id}",
         )
         self._tasks[recording_id] = task
-        return {"state": "generating", "direct": False, "error": None}
+        return self.status(recording_id, video_codec)
 
     async def open_live_proxy(
         self,
         recording_id: int,
         source: MediaSource,
         audio_codec: str | None,
+        duration_seconds: float | None = None,
     ) -> LiveProxySession | None:
         """Start an H.264 fragmented-MP4 proxy from a local path or remote URL."""
 
@@ -221,6 +325,8 @@ class RecordingPlaybackManager:
                 return None
 
             self._errors.pop(recording_id, None)
+            self._cancelled_ids.discard(recording_id)
+            self._start_progress(recording_id, duration_seconds, "live")
             temp = self.live_temp_path(recording_id)
             temp.unlink(missing_ok=True)
             command = self.build_live_proxy_command(source, audio_codec)
@@ -229,7 +335,13 @@ class RecordingPlaybackManager:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stderr_task = asyncio.create_task(_capture_stderr(process.stderr))
+            self._processes[recording_id] = process
+            stderr_task = asyncio.create_task(
+                _capture_ffmpeg_progress(
+                    process.stderr,
+                    lambda seconds: self._update_progress(recording_id, seconds),
+                )
+            )
             assert process.stdout is not None
             try:
                 first_chunk = await asyncio.wait_for(
@@ -262,8 +374,44 @@ class RecordingPlaybackManager:
                 stderr_task=stderr_task,
             )
         except Exception:
+            self._processes.pop(recording_id, None)
+            self._progress.pop(recording_id, None)
             self._semaphore.release()
             raise
+
+    async def cancel(self, recording_id: int) -> dict[str, Any]:
+        """Stop an active playback transcode without touching a completed cache."""
+
+        task = self._tasks.get(recording_id)
+        process = self._processes.get(recording_id)
+        active = bool((task and not task.done()) or process is not None or recording_id in self._live_ids)
+        if not active:
+            return {"cancelled": False, "state": "idle"}
+
+        self._cancelled_ids.add(recording_id)
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        process = self._processes.get(recording_id)
+        if process is not None and process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=2.0)
+            except TimeoutError:
+                process.kill()
+                await process.wait()
+
+        self._errors.pop(recording_id, None)
+        self._progress.pop(recording_id, None)
+        self.proxy_dir.mkdir(parents=True, exist_ok=True)
+        self.proxy_path(recording_id).with_suffix(".part.mp4").unlink(missing_ok=True)
+        self.live_temp_path(recording_id).unlink(missing_ok=True)
+        (self.proxy_dir / f".{recording_id}.cache.part.mp4").unlink(missing_ok=True)
+        return {"cancelled": True, "state": "cancelled"}
 
     def _cleanup_old_sync(self) -> None:
         if not self.proxy_dir.exists():
@@ -283,6 +431,10 @@ class RecordingPlaybackManager:
             command += ["-c:a", "copy"]
         else:
             command += ["-c:a", "aac", "-b:a", "96k"]
+
+    @staticmethod
+    def _append_progress_options(command: list[str]) -> None:
+        command += ["-progress", "pipe:2", "-nostats"]
 
     @classmethod
     def build_proxy_command(
@@ -315,6 +467,7 @@ class RecordingPlaybackManager:
             "2",
         ]
         cls._append_audio_options(command, audio_codec)
+        cls._append_progress_options(command)
         command += ["-movflags", "+faststart", str(target)]
         return command
 
@@ -350,6 +503,7 @@ class RecordingPlaybackManager:
             "expr:gte(t,n_forced*2)",
         ]
         cls._append_audio_options(command, audio_codec)
+        cls._append_progress_options(command)
         command += [
             "-movflags",
             "+frag_keyframe+empty_moov+default_base_moof",
@@ -414,6 +568,7 @@ class RecordingPlaybackManager:
         source: MediaSource,
         audio_codec: str | None,
     ) -> None:
+        process: asyncio.subprocess.Process | None = None
         async with self._semaphore:
             target = self.proxy_path(recording_id)
             temp = target.with_suffix(".part.mp4")
@@ -425,19 +580,43 @@ class RecordingPlaybackManager:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                _, stderr = await process.communicate()
-                if process.returncode != 0:
-                    detail = stderr.decode(errors="replace")[-2000:].strip()
-                    raise RuntimeError(detail or f"ffmpeg exited with code {process.returncode}")
+                self._processes[recording_id] = process
+                stderr_task = asyncio.create_task(
+                    _capture_ffmpeg_progress(
+                        process.stderr,
+                        lambda seconds: self._update_progress(recording_id, seconds),
+                    )
+                )
+                returncode = await process.wait()
+                detail = await stderr_task
+                if returncode != 0:
+                    if recording_id in self._cancelled_ids:
+                        return
+                    raise RuntimeError(detail or f"ffmpeg exited with code {returncode}")
                 if not temp.exists() or temp.stat().st_size <= 0:
                     raise RuntimeError("playback proxy was not created")
                 temp.replace(target)
+                self._set_progress_complete(recording_id)
                 self._errors.pop(recording_id, None)
+            except asyncio.CancelledError:
+                if process is not None and process.returncode is None:
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=2.0)
+                    except TimeoutError:
+                        process.kill()
+                        await process.wait()
+                temp.unlink(missing_ok=True)
+                raise
             except Exception as exc:
                 temp.unlink(missing_ok=True)
-                self._errors[recording_id] = str(exc)[-2000:]
+                if recording_id not in self._cancelled_ids:
+                    self._errors[recording_id] = str(exc)[-2000:]
             finally:
                 self._tasks.pop(recording_id, None)
+                self._processes.pop(recording_id, None)
+                self._progress.pop(recording_id, None)
+                self._cancelled_ids.discard(recording_id)
 
 
 recording_playback_manager = RecordingPlaybackManager()
