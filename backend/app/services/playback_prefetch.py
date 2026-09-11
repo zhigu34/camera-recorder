@@ -51,6 +51,7 @@ class PlaybackPrefetchManager:
             "stream": deque(maxlen=_LATENCY_SAMPLES),
             "cloud": deque(maxlen=_LATENCY_SAMPLES),
             "proxy": deque(maxlen=_LATENCY_SAMPLES),
+            "prefetch": deque(maxlen=_LATENCY_SAMPLES),
         }
         self._counters: dict[str, int] = {
             "scheduled": 0,
@@ -194,7 +195,7 @@ class PlaybackPrefetchManager:
                 else:
                     self._counters["range_ready"] += 1
                 self._counters["success"] += 1
-                self.record_latency("cloud", (time.monotonic() - started) * 1000)
+                self.record_latency("prefetch", (time.monotonic() - started) * 1000)
             finally:
                 await handle.close()
         except asyncio.CancelledError:
@@ -248,10 +249,11 @@ class PlaybackPrefetchManager:
                 "cached_direct_links": len(self._direct_links),
                 "lead_seconds": _PREFETCH_LEAD_SECONDS,
                 "direct_link_ttl_seconds": _DIRECT_LINK_TTL_SECONDS,
+                "probe_latency": self._latency_summary(self._latencies["prefetch"]),
             },
-            "first_byte": {
-                kind: self._latency_summary(values)
-                for kind, values in self._latencies.items()
+            "backend_response": {
+                kind: self._latency_summary(self._latencies[kind])
+                for kind in ("stream", "cloud", "proxy")
             },
         }
 
@@ -269,7 +271,7 @@ playback_prefetch_manager = PlaybackPrefetchManager()
 
 
 class PlaybackPrefetchMiddleware:
-    """ASGI middleware that arms prefetch and records playback first-byte latency."""
+    """ASGI middleware that arms prefetch and measures backend playback response latency."""
 
     def __init__(self, app) -> None:
         self.app = app
