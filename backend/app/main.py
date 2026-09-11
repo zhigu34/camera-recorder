@@ -95,7 +95,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.8.1",
+    version="0.8.2",
     lifespan=lifespan,
 )
 
