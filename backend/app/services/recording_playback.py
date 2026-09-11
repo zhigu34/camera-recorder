@@ -7,7 +7,7 @@ from app.core.config import settings
 
 _PROXY_CACHE_MAX_AGE_SECONDS = 24 * 3600
 _LIVE_START_TIMEOUT_SECONDS = 20.0
-_PROXY_PROFILE_VERSION = "web-v2"
+_PROXY_PROFILE_VERSION = "web-v3"
 MediaSource = Path | str
 
 
