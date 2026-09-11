@@ -8,6 +8,7 @@ import './styles/recording-browser.css'
 import './styles/health-workspace.css'
 import './styles/playback-metrics.css'
 import './styles/system-settings.css'
+import './styles/unifi-console.css'
 
 import Root from './Root.vue'
 
