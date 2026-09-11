@@ -11,7 +11,17 @@ import './styles/system-settings.css'
 
 import Root from './Root.vue'
 
-document.documentElement.classList.add('dark')
+type ThemeMode = 'light' | 'dark'
+
+function initialTheme(): ThemeMode {
+  const stored = localStorage.getItem('nvr-theme')
+  if (stored === 'light' || stored === 'dark') return stored
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark'
+}
+
+const theme = initialTheme()
+document.documentElement.dataset.theme = theme
+document.documentElement.classList.toggle('dark', theme === 'dark')
 
 const app = createApp(Root)
 
