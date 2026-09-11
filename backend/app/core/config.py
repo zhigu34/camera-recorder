@@ -47,6 +47,20 @@ class Settings(BaseSettings):
     webdav_password: str = ""
     local_retention_hours: int = 48
 
+    email_notifications_enabled: bool = False
+    camera_offline_alert_seconds: float = 60.0
+    camera_recovery_stable_seconds: float = 10.0
+    email_notify_recovery: bool = True
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_to: str = ""
+    smtp_use_ssl: bool = False
+    smtp_starttls: bool = True
+    smtp_timeout_seconds: float = 15.0
+
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
