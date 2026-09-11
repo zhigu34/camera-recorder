@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.api.cameras import router as cameras_router
 from app.api.events import router as events_router
+from app.api.health import router as health_router
 from app.api.notifications import router as notifications_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
@@ -78,7 +79,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.6.0",
+    version="0.7.0",
     lifespan=lifespan,
 )
 
@@ -97,6 +98,7 @@ app.include_router(uploads_router)
 app.include_router(events_router)
 app.include_router(notifications_router)
 app.include_router(settings_router)
+app.include_router(health_router)
 
 
 @app.get("/health")
