@@ -13,7 +13,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Prefer mainland China mirrors during image builds. Debian 12+ container images
 # normally use DEB822 sources, while older variants may still use sources.list.
-# Keep both paths supported so the Dockerfile survives base-image upgrades.
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       sed -i \
@@ -31,26 +30,30 @@ RUN set -eux; \
     fi; \
     apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 update; \
     apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 install -y --no-install-recommends \
-      ca-certificates curl xz-utils tzdata; \
+      ca-certificates xz-utils tzdata; \
     rm -rf /var/lib/apt/lists/*
 
-# Use a current static FFmpeg build because Camera Recorder depends on the
-# setts bitstream filter's `prescale` option. BtbN publishes both amd64 and
-# arm64 builds, so this also works natively on Apple Silicon Docker Desktop.
+# FFmpeg is intentionally supplied from the host build context instead of being
+# downloaded during docker build. This avoids GitHub connectivity becoming a
+# dependency of every image build. Prepare the archive with:
+#   bash scripts/download-ffmpeg.sh auto
+COPY vendor/ffmpeg/ /tmp/ffmpeg-dist/
 RUN set -eux; \
     case "${TARGETARCH}" in \
-      amd64) FFMPEG_ARCH="linux64" ;; \
-      arm64) FFMPEG_ARCH="linuxarm64" ;; \
+      amd64) FFMPEG_ARCHIVE="/tmp/ffmpeg-dist/ffmpeg-linux64.tar.xz" ;; \
+      arm64) FFMPEG_ARCHIVE="/tmp/ffmpeg-dist/ffmpeg-linuxarm64.tar.xz" ;; \
       *) echo "Unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
+    if [ ! -s "${FFMPEG_ARCHIVE}" ]; then \
+      echo "ERROR: local FFmpeg archive is missing: ${FFMPEG_ARCHIVE}" >&2; \
+      echo "Run on the host before building: bash scripts/download-ffmpeg.sh ${TARGETARCH}" >&2; \
+      exit 1; \
+    fi; \
     mkdir -p /tmp/ffmpeg; \
-    curl -fsSL --retry 3 --retry-delay 2 \
-      "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${FFMPEG_ARCH}-gpl.tar.xz" \
-      -o /tmp/ffmpeg.tar.xz; \
-    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    tar -xJf "${FFMPEG_ARCHIVE}" -C /tmp/ffmpeg --strip-components=1; \
     install -m 0755 /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg; \
     install -m 0755 /tmp/ffmpeg/bin/ffprobe /usr/local/bin/ffprobe; \
-    rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
+    rm -rf /tmp/ffmpeg /tmp/ffmpeg-dist; \
     ffmpeg -hide_banner -h bsf=setts 2>&1 | grep -q prescale
 
 RUN pip install --no-cache-dir uv
