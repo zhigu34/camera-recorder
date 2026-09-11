@@ -13,6 +13,7 @@ interface Camera {
   enabled: boolean
   auto_record: boolean
   timestamp_mode: string
+  password_set?: boolean
   video_codec?: string | null
   width?: number | null
   height?: number | null
@@ -126,6 +127,7 @@ const events = ref<EventItem[]>([])
 const uploadStatus = ref<UploadStatus | null>(null)
 const status = ref<SystemStatus | null>(null)
 const dialogVisible = ref(false)
+const editingCameraId = ref<number | null>(null)
 const saving = ref(false)
 const savingEmail = ref(false)
 const testingEmail = ref(false)
@@ -179,6 +181,10 @@ const pageTitle = computed(() => {
   if (page.value === 'alerts') return '告警设置'
   return '仪表盘'
 })
+
+const cameraDialogTitle = computed(() =>
+  editingCameraId.value === null ? '添加 RTSP 摄像头' : '编辑 RTSP 摄像头',
+)
 
 function runtimeState(cameraId: number) {
   return status.value?.recorders.find((item) => item.camera_id === cameraId)?.state || 'STOPPED'
@@ -237,6 +243,42 @@ function enableStarttls(value: boolean) {
   if (value) emailSettings.smtp_use_ssl = false
 }
 
+function resetCameraForm() {
+  editingCameraId.value = null
+  Object.assign(form, {
+    name: '',
+    ip: '',
+    rtsp_port: 554,
+    username: 'admin',
+    password: '',
+    rtsp_path: '/ch1/main',
+    timestamp_mode: 'reconstruct',
+    enabled: true,
+    auto_record: false,
+  })
+}
+
+function openCreateCamera() {
+  resetCameraForm()
+  dialogVisible.value = true
+}
+
+function openEditCamera(camera: Camera) {
+  editingCameraId.value = camera.id
+  Object.assign(form, {
+    name: camera.name,
+    ip: camera.ip,
+    rtsp_port: camera.rtsp_port,
+    username: camera.username,
+    password: '',
+    rtsp_path: camera.rtsp_path,
+    timestamp_mode: camera.timestamp_mode,
+    enabled: camera.enabled,
+    auto_record: camera.auto_record,
+  })
+  dialogVisible.value = true
+}
+
 async function loadAll() {
   loading.value = true
   try {
@@ -263,19 +305,41 @@ async function loadAll() {
   }
 }
 
-async function createCamera() {
+async function saveCamera() {
+  if (!form.name.trim() || !form.ip.trim() || !form.rtsp_path.trim()) {
+    ElMessage.warning('请填写名称、IP 和 RTSP 路径')
+    return
+  }
+  if (editingCameraId.value === null && !form.password) {
+    ElMessage.warning('新增摄像头时必须填写密码')
+    return
+  }
+
   saving.value = true
   try {
-    await axios.post('/api/cameras', form)
-    ElMessage.success('摄像头已添加')
+    const payload: Record<string, unknown> = { ...form }
+    if (editingCameraId.value !== null && !form.password) {
+      delete payload.password
+    }
+
+    if (editingCameraId.value === null) {
+      await axios.post('/api/cameras', payload)
+      ElMessage.success('摄像头已添加')
+    } else {
+      const cameraId = editingCameraId.value
+      await axios.put(`/api/cameras/${cameraId}`, payload)
+      if (runtimeState(cameraId) === 'RECORDING') {
+        ElMessage.success('摄像头配置已保存；连接参数将在下次重启/重连后生效')
+      } else {
+        ElMessage.success('摄像头配置已保存')
+      }
+    }
+
     dialogVisible.value = false
-    Object.assign(form, {
-      name: '', ip: '', rtsp_port: 554, username: 'admin', password: '',
-      rtsp_path: '/ch1/main', timestamp_mode: 'reconstruct', enabled: true, auto_record: false,
-    })
+    resetCameraForm()
     await loadAll()
   } catch (error) {
-    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '添加失败')
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '保存失败')
   } finally {
     saving.value = false
   }
@@ -313,10 +377,15 @@ async function stop(camera: Camera) {
 }
 
 async function remove(camera: Camera) {
-  await ElMessageBox.confirm(`确认删除 ${camera.name}？`, '删除摄像头', { type: 'warning' })
-  await axios.delete(`/api/cameras/${camera.id}`)
-  ElMessage.success('已删除')
-  await loadAll()
+  try {
+    await ElMessageBox.confirm(`确认删除 ${camera.name}？`, '删除摄像头', { type: 'warning' })
+    await axios.delete(`/api/cameras/${camera.id}`)
+    ElMessage.success('已删除')
+    await loadAll()
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '删除失败')
+  }
 }
 
 async function startAll() {
@@ -467,7 +536,7 @@ onMounted(loadAll)
         </template>
 
         <template v-else-if="page === 'cameras'">
-          <div class="toolbar"><el-button type="primary" @click="dialogVisible = true">添加摄像头</el-button></div>
+          <div class="toolbar"><el-button type="primary" @click="openCreateCamera">添加摄像头</el-button></div>
           <el-card>
             <el-table :data="cameras" empty-text="点击“添加摄像头”开始">
               <el-table-column prop="name" label="名称" min-width="140" />
@@ -480,8 +549,9 @@ onMounted(loadAll)
                 <template #default="{ row }">{{ row.audio_codec || '-' }} {{ row.sample_rate ? `${row.sample_rate}Hz` : '' }}</template>
               </el-table-column>
               <el-table-column label="模式" width="120"><template #default="{ row }"><el-tag>{{ row.timestamp_mode }}</el-tag></template></el-table-column>
-              <el-table-column label="操作" width="300" fixed="right">
+              <el-table-column label="操作" width="370" fixed="right">
                 <template #default="{ row }">
+                  <el-button size="small" @click="openEditCamera(row)">编辑</el-button>
                   <el-button size="small" @click="probe(row)">Probe</el-button>
                   <el-button v-if="runtimeState(row.id) !== 'RECORDING'" size="small" type="success" @click="start(row)">开始</el-button>
                   <el-button v-else size="small" type="warning" @click="stop(row)">停止</el-button>
@@ -631,7 +701,7 @@ onMounted(loadAll)
 
               <el-form-item>
                 <el-button type="primary" :loading="savingEmail" @click="saveEmailSettings">保存配置</el-button>
-                <el-button :loading="testingEmail" :disabled="!emailSettings.email_enabled" @click="testEmail">发送测试邮件</el-button>
+                <el-button :loading="testingEmail" @click="testEmail">发送测试邮件</el-button>
               </el-form-item>
             </el-form>
           </el-card>
@@ -640,13 +710,22 @@ onMounted(loadAll)
     </el-container>
   </el-container>
 
-  <el-dialog v-model="dialogVisible" title="添加 RTSP 摄像头" width="520px">
+  <el-dialog v-model="dialogVisible" :title="cameraDialogTitle" width="520px" @closed="resetCameraForm">
     <el-form label-width="110px">
       <el-form-item label="名称"><el-input v-model="form.name" placeholder="监控-大厅" /></el-form-item>
       <el-form-item label="IP"><el-input v-model="form.ip" placeholder="192.168.1.100" /></el-form-item>
       <el-form-item label="RTSP端口"><el-input-number v-model="form.rtsp_port" :min="1" :max="65535" /></el-form-item>
       <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
-      <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password /></el-form-item>
+      <el-form-item label="密码">
+        <el-input
+          v-model="form.password"
+          type="password"
+          show-password
+          autocomplete="new-password"
+          :placeholder="editingCameraId === null ? '请输入摄像头密码' : '已保存；留空保持不变'"
+        />
+        <span v-if="editingCameraId !== null" class="form-hint password-hint">密码不会回显；只有填写新密码时才会替换已保存密码</span>
+      </el-form-item>
       <el-form-item label="RTSP路径"><el-input v-model="form.rtsp_path" placeholder="/ch1/main" /></el-form-item>
       <el-form-item label="时间戳模式">
         <el-select v-model="form.timestamp_mode" style="width: 100%">
@@ -655,11 +734,12 @@ onMounted(loadAll)
           <el-option label="Wallclock" value="wallclock" />
         </el-select>
       </el-form-item>
+      <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item label="自动录像"><el-switch v-model="form.auto_record" /></el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="createCamera">保存</el-button>
+      <el-button type="primary" :loading="saving" @click="saveCamera">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -683,5 +763,6 @@ onMounted(loadAll)
 .alert-card { max-width: 900px; }
 .settings-form { max-width: 760px; }
 .form-hint { margin-left: 12px; color: #909399; font-size: 12px; }
+.password-hint { display: block; margin: 6px 0 0; width: 100%; }
 .password-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; width: 100%; }
 </style>
