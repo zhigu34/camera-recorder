@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { Refresh } from '@element-plus/icons-vue'
 
 interface RecordingWindow {
   days: number[]
@@ -23,6 +24,7 @@ interface ScheduleRuntime {
   camera_id: number
   schedule_enabled: boolean
   schedule: string
+  schedule_state: string
   in_window: boolean
   auto_eligible: boolean
   running: boolean
@@ -34,6 +36,7 @@ interface SystemStatus {
     running: boolean
     poll_interval_seconds: number
     last_check_at?: string | null
+    last_error?: string | null
     cameras: ScheduleRuntime[]
   }
 }
@@ -75,12 +78,15 @@ const dialogTitle = computed(() =>
     ? `批量应用周计划 · ${selectedIds.value.length} 路摄像头`
     : `${form.name} · 周录制计划`,
 )
+const managerHealthy = computed(() => Boolean(
+  systemStatus.value?.recording_schedule?.running && !systemStatus.value?.recording_schedule?.last_error,
+))
 
-function goBack() { window.location.href = '/' }
 function normalizedDays(days?: number[]) {
   if (!days?.length) return [...ALL_DAYS]
   return [...new Set(days)].sort((a, b) => a - b)
 }
+
 function cloneWindows(windows?: RecordingWindow[]) {
   return (windows || []).map((item) => ({
     days: normalizedDays(item.days),
@@ -88,6 +94,7 @@ function cloneWindows(windows?: RecordingWindow[]) {
     end: item.end,
   }))
 }
+
 function dayLabel(days?: number[]) {
   const value = normalizedDays(days)
   if (value.join(',') === ALL_DAYS.join(',')) return '每天'
@@ -95,6 +102,7 @@ function dayLabel(days?: number[]) {
   if (value.join(',') === WEEKEND.join(',')) return '周末'
   return value.map((day) => weekdayOptions.find((item) => item.value === day)?.label || `${day}`).join('/')
 }
+
 function scheduleText(camera: Camera) {
   if (!camera.auto_record) return '仅手动'
   if (!camera.recording_schedule_enabled) return '全天自动录像'
@@ -103,23 +111,35 @@ function scheduleText(camera: Camera) {
     .map((item) => `${dayLabel(item.days)} ${item.start}-${item.end}`)
     .join('；')
 }
+
 function stateText(camera: Camera) {
   const runtime = scheduleByCamera.value.get(camera.id)
   if (!camera.enabled) return '已禁用'
   if (!camera.auto_record) return runtime?.running ? '手动录像中' : '仅手动'
-  if (!camera.recording_schedule_enabled) return runtime?.running ? '全天录像中' : '等待自动启动'
-  if (runtime?.mode === 'manual') return '手动覆盖录像中'
-  if (runtime?.mode === 'manual_paused') return '当前时段已手动暂停'
-  if (runtime?.in_window) return runtime.running ? '时段内录像中' : '时段内等待启动'
-  return '等待录制时段'
+
+  const state = runtime?.schedule_state
+  if (state === 'global_disabled') return '全局自动录像已关闭'
+  if (state === 'automatic') return runtime?.running ? '全天录像中' : '等待自动启动'
+  if (state === 'scheduled') return '等待录制时段'
+  if (state === 'in_window') return runtime?.running ? '时段内录像中' : '时段内等待启动'
+  if (state === 'manual_override') return '手动覆盖录像中'
+  if (state === 'manual_paused') return '当前时段已手动暂停'
+  if (state === 'probe_required') return '需要先检测媒体参数'
+  if (state === 'error') return '计划启动失败'
+  if (runtime?.running) return '录像中'
+  return '待命'
 }
+
 function stateType(camera: Camera) {
   const runtime = scheduleByCamera.value.get(camera.id)
   if (!camera.enabled || !camera.auto_record) return 'info'
+  if (runtime?.schedule_state === 'error') return 'danger'
+  if (runtime?.schedule_state === 'probe_required' || runtime?.schedule_state === 'manual_paused') return 'warning'
   if (runtime?.running) return 'success'
-  if (runtime?.in_window) return 'warning'
+  if (runtime?.schedule_state === 'in_window') return 'warning'
   return 'info'
 }
+
 function applyCameraToForm(camera: Camera) {
   form.name = camera.name
   form.auto_record = camera.auto_record
@@ -127,12 +147,14 @@ function applyCameraToForm(camera: Camera) {
   form.recording_schedule = cloneWindows(camera.recording_schedule)
   if (form.recording_schedule_enabled && !form.recording_schedule.length) addWindow()
 }
+
 function openSchedule(camera: Camera) {
   dialogMode.value = 'single'
   editingId.value = camera.id
   applyCameraToForm(camera)
   dialogVisible.value = true
 }
+
 function openBatchSchedule() {
   if (!selectedIds.value.length) {
     ElMessage.warning('请先选择要批量应用的摄像头')
@@ -150,24 +172,31 @@ function openBatchSchedule() {
   }
   dialogVisible.value = true
 }
+
 function onSelectionChange(rows: Camera[]) {
   selectedIds.value = rows.map((item) => item.id)
 }
+
 function addWindow() {
   form.recording_schedule.push({ days: [...ALL_DAYS], start: '08:00', end: '18:00' })
 }
+
 function removeWindow(index: number) {
   form.recording_schedule.splice(index, 1)
 }
+
 function setWindowDays(index: number, days: number[]) {
   form.recording_schedule[index].days = [...days]
 }
+
 function useAllDay() {
   form.recording_schedule_enabled = false
 }
+
 function enableSchedule(value: boolean) {
   if (value && !form.recording_schedule.length) addWindow()
 }
+
 function validateWindows() {
   if (!form.recording_schedule_enabled) return true
   if (!form.recording_schedule.length) {
@@ -239,35 +268,43 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page-shell" v-loading="loading">
-    <div class="page-head">
-      <div>
-        <h2>录制周计划</h2>
-        <p>每路摄像头独立计划 · 支持星期、多时段、跨午夜和批量应用 · 使用部署服务器本地时区</p>
-      </div>
-      <div class="actions"><el-button @click="load">刷新</el-button><el-button @click="goBack">返回主界面</el-button></div>
-    </div>
-
+  <section class="schedule-page" v-loading="loading">
     <el-alert type="info" :closable="false" show-icon class="hint">
-      <template #title>显式周计划从实际开始时间按 10 分钟切片，不再强制对齐 00/10/20 分钟边界；全天自动录像仍保持原来的整点切片。跨午夜时段归属于开始日，例如“周五 22:00-06:00”会持续到周六 06:00。</template>
+      <template #title>显式周计划从实际开始时间按切片时长分段；全天自动录像保持全局时钟对齐。跨午夜时段归属于开始日，例如“周五 22:00-06:00”会持续到周六 06:00。</template>
     </el-alert>
 
     <div class="toolbar">
-      <span class="selected-note">已选择 {{ selectedIds.length }} 路</span>
-      <el-button type="primary" :disabled="!selectedIds.length" @click="openBatchSchedule">批量应用周计划</el-button>
+      <div class="manager-state">
+        <span class="state-dot" :class="{ ok: managerHealthy }"></span>
+        <span>{{ managerHealthy ? '调度器运行中' : '调度器需要关注' }}</span>
+        <small v-if="systemStatus?.recording_schedule?.last_check_at">最近校准 {{ new Date(systemStatus.recording_schedule.last_check_at).toLocaleString() }}</small>
+      </div>
+      <div class="toolbar-actions">
+        <span class="selected-note">已选择 {{ selectedIds.length }} 路</span>
+        <el-button :icon="Refresh" @click="load">刷新</el-button>
+        <el-button type="primary" :disabled="!selectedIds.length" @click="openBatchSchedule">批量应用周计划</el-button>
+      </div>
     </div>
 
-    <el-card shadow="never">
+    <div class="table-shell">
       <el-table :data="cameras" empty-text="还没有摄像头" @selection-change="onSelectionChange">
         <el-table-column type="selection" width="50" />
         <el-table-column prop="name" label="摄像头" min-width="150" />
         <el-table-column prop="ip" label="IP" width="145" />
-        <el-table-column label="自动录像" width="105"><template #default="{ row }"><el-tag :type="row.auto_record ? 'success' : 'info'">{{ row.auto_record ? '开启' : '关闭' }}</el-tag></template></el-table-column>
-        <el-table-column label="周计划" min-width="430"><template #default="{ row }"><span class="schedule-cell">{{ scheduleText(row) }}</span></template></el-table-column>
-        <el-table-column label="当前状态" min-width="180"><template #default="{ row }"><el-tag :type="stateType(row)">{{ stateText(row) }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="120" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" @click="openSchedule(row)">设置周计划</el-button></template></el-table-column>
+        <el-table-column label="自动录像" width="105">
+          <template #default="{ row }"><el-tag :type="row.auto_record ? 'success' : 'info'">{{ row.auto_record ? '开启' : '关闭' }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="周计划" min-width="430">
+          <template #default="{ row }"><span class="schedule-cell">{{ scheduleText(row) }}</span></template>
+        </el-table-column>
+        <el-table-column label="调度状态" min-width="190">
+          <template #default="{ row }"><el-tag :type="stateType(row)">{{ stateText(row) }}</el-tag></template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }"><el-button size="small" type="primary" @click="openSchedule(row)">设置周计划</el-button></template>
+        </el-table-column>
       </el-table>
-    </el-card>
+    </div>
 
     <el-dialog v-model="dialogVisible" :title="dialogTitle" width="820px">
       <el-alert v-if="dialogMode === 'batch'" type="warning" :closable="false" show-icon class="dialog-alert" title="批量应用会覆盖所有选中摄像头的自动录像开关和整套周计划。" />
@@ -303,9 +340,11 @@ onMounted(load)
       </el-form>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ dialogMode === 'batch' ? '批量应用' : '保存' }}</el-button></template>
     </el-dialog>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-:global(body){margin:0;background:#f5f7fa;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.page-shell{max-width:1500px;margin:0 auto;padding:24px}.page-head{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:16px}.page-head h2{margin:0 0 6px}.page-head p{margin:0;color:#909399}.actions,.toolbar{display:flex;align-items:center;gap:8px}.hint{margin-bottom:16px}.toolbar{justify-content:flex-end;margin-bottom:12px}.selected-note{font-size:13px;color:#909399}.schedule-cell{line-height:1.65}.dialog-alert{margin-bottom:16px}.window-list{width:100%;display:flex;flex-direction:column;gap:12px}.window-card{padding:12px;border:1px solid #ebeef5;border-radius:8px;background:#fafafa}.window-days,.window-time{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.window-time{margin-top:10px}.window-time :deep(.el-date-editor){width:150px}.window-summary{margin-top:8px;color:#909399;font-size:12px}.form-hint{margin-left:10px;color:#909399;font-size:12px}.no-margin{margin-left:0}@media(max-width:720px){.page-shell{padding:14px}.page-head{align-items:flex-start;flex-direction:column}.window-time :deep(.el-date-editor){width:125px}.window-days :deep(.el-select){width:100%!important}}
+.schedule-page{max-width:1500px;margin:0 auto;padding:22px;color:var(--nvr-text)}
+.hint{margin-bottom:14px}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:10px;padding:10px 12px;border:1px solid var(--nvr-border);border-radius:9px;background:rgba(20,26,34,.72)}.manager-state,.toolbar-actions{display:flex;align-items:center;gap:8px}.manager-state{color:var(--nvr-muted);font-size:11px}.manager-state small{color:#657488}.state-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-red)}.state-dot.ok{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.selected-note{color:var(--nvr-muted);font-size:11px}.table-shell{overflow:hidden;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.schedule-cell{line-height:1.65}.dialog-alert{margin-bottom:16px}.window-list{width:100%;display:flex;flex-direction:column;gap:12px}.window-card{padding:12px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface-2)}.window-days,.window-time{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.window-time{margin-top:10px}.window-time :deep(.el-date-editor){width:150px}.window-summary{margin-top:8px;color:var(--nvr-muted);font-size:12px}.form-hint{margin-left:10px;color:var(--nvr-muted);font-size:12px}.no-margin{margin-left:0}
+@media(max-width:760px){.schedule-page{padding:14px}.toolbar{align-items:stretch;flex-direction:column}.manager-state,.toolbar-actions{flex-wrap:wrap}.window-time :deep(.el-date-editor){width:125px}.window-days :deep(.el-select){width:100%!important}}
 </style>
