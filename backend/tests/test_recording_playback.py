@@ -19,6 +19,37 @@ def test_h264_is_direct_playback(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_hevc_can_try_original_without_being_guaranteed_direct():
+    manager = RecordingPlaybackManager()
+
+    assert manager.can_try_original("hevc") is True
+    assert manager.can_try_original("hvc1") is True
+    assert manager.can_direct_play("hevc") is False
+
+
+def test_proxy_command_copies_aac_audio(tmp_path):
+    source = tmp_path / "source.mp4"
+    target = tmp_path / "target.mp4"
+
+    command = RecordingPlaybackManager.build_proxy_command(source, target, "aac")
+
+    audio_index = command.index("-c:a")
+    assert command[audio_index + 1] == "copy"
+    assert "-pix_fmt" in command
+    assert command[command.index("-pix_fmt") + 1] == "yuv420p"
+
+
+def test_proxy_command_transcodes_non_aac_audio(tmp_path):
+    source = tmp_path / "source.mp4"
+    target = tmp_path / "target.mp4"
+
+    command = RecordingPlaybackManager.build_proxy_command(source, target, "pcm_alaw")
+
+    audio_index = command.index("-c:a")
+    assert command[audio_index + 1] == "aac"
+    assert "96k" in command
+
+
 @pytest.mark.asyncio
 async def test_hevc_proxy_generation_is_atomic(monkeypatch, tmp_path):
     manager = RecordingPlaybackManager()
@@ -38,7 +69,7 @@ async def test_hevc_proxy_generation_is_atomic(monkeypatch, tmp_path):
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    state = await manager.start(42, source, "hevc")
+    state = await manager.start(42, source, "hevc", "aac")
     assert state["state"] == "generating"
 
     for _ in range(100):
