@@ -2,6 +2,7 @@
 import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import HealthView from './HealthView.vue'
+import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
 import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
 import RecordingBrowserViewV3 from './RecordingBrowserViewV3.vue'
@@ -41,7 +42,10 @@ function openRecordingBrowser() {
   <SystemSettingsView v-if="isSettings" />
   <BatchCamerasView v-else-if="isBatchCameras" />
   <PreviewView v-else-if="isPreview" />
-  <HealthView v-else-if="isHealth" />
+  <template v-else-if="isHealth">
+    <HealthView />
+    <PlaybackMetricsPanel />
+  </template>
   <template v-else-if="isRecordingBrowser">
     <RecordingBrowserViewV3 />
     <PlaybackTelemetryBridge />
