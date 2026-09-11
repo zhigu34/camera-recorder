@@ -34,12 +34,15 @@ def test_playback_metrics_summarize_latency():
     manager.record_latency("cloud", 100)
     manager.record_latency("cloud", 200)
     manager.record_latency("cloud", 300)
+    manager.record_latency("prefetch", 80)
 
     snapshot = manager.snapshot()
 
-    assert snapshot["first_byte"]["cloud"]["samples"] == 3
-    assert snapshot["first_byte"]["cloud"]["avg_ms"] == 200.0
-    assert snapshot["first_byte"]["cloud"]["max_ms"] == 300
+    assert snapshot["backend_response"]["cloud"]["samples"] == 3
+    assert snapshot["backend_response"]["cloud"]["avg_ms"] == 200.0
+    assert snapshot["backend_response"]["cloud"]["max_ms"] == 300
+    assert snapshot["prefetch"]["probe_latency"]["samples"] == 1
+    assert snapshot["prefetch"]["probe_latency"]["avg_ms"] == 80.0
 
 
 @pytest.mark.asyncio
@@ -118,4 +121,4 @@ async def test_middleware_records_first_body_latency(monkeypatch):
     )
 
     assert armed == [12]
-    assert manager.snapshot()["first_byte"]["stream"]["samples"] == 1
+    assert manager.snapshot()["backend_response"]["stream"]["samples"] == 1
