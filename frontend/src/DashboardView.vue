@@ -70,11 +70,18 @@ interface EventItem {
   created_at: string
 }
 
+type SocketState = 'connecting' | 'connected' | 'disconnected'
+
 const loading = ref(false)
 const summary = ref<HealthSummary | null>(null)
 const system = ref<SystemStatus | null>(null)
 const events = ref<EventItem[]>([])
-let timer: number | null = null
+const socketState = ref<SocketState>('disconnected')
+let supplementalTimer: number | null = null
+let fallbackTimer: number | null = null
+let reconnectTimer: number | null = null
+let socket: WebSocket | null = null
+let mounted = false
 
 const pendingUploads = computed(() => {
   const rows = summary.value?.uploads || {}
@@ -95,6 +102,7 @@ const storageProgressStatus = computed(() => {
   if (summary.value?.storage.state === 'warning') return 'warning'
   return 'success'
 })
+const refreshLabel = computed(() => socketState.value === 'connected' ? 'WebSocket 实时更新' : 'HTTP 断线兜底')
 
 function bytes(value?: number) {
   const bytes = value || 0
@@ -153,7 +161,12 @@ function eventClass(level: string) {
   return 'info'
 }
 
-async function load() {
+function wsUrl() {
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${scheme}//${window.location.host}/ws/status`
+}
+
+async function loadInitial() {
   loading.value = true
   try {
     const [healthRes, systemRes, eventRes] = await Promise.all([
@@ -169,12 +182,91 @@ async function load() {
   }
 }
 
+async function refreshSupplemental() {
+  try {
+    const [systemRes, eventRes] = await Promise.all([
+      axios.get<SystemStatus>('/api/system/status'),
+      axios.get<EventItem[]>('/api/events?limit=8'),
+    ])
+    system.value = systemRes.data
+    events.value = eventRes.data
+  } catch {
+    // Keep last known supplemental status; health continues over WebSocket.
+  }
+}
+
+async function refreshHealthFallback() {
+  if (socketState.value === 'connected') return
+  try {
+    summary.value = (await axios.get<HealthSummary>('/api/health/summary')).data
+  } catch {
+    // Keep the last valid snapshot while the socket reconnects.
+  }
+}
+
+function closeSocket() {
+  if (!socket) return
+  const current = socket
+  socket = null
+  current.onopen = null
+  current.onmessage = null
+  current.onerror = null
+  current.onclose = null
+  try { current.close() } catch { /* already closed */ }
+}
+
+function scheduleReconnect() {
+  if (!mounted || reconnectTimer !== null) return
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null
+    connectStatusSocket()
+  }, 2000)
+}
+
+function connectStatusSocket() {
+  closeSocket()
+  if (!mounted) return
+  socketState.value = 'connecting'
+  const ws = new WebSocket(wsUrl())
+  socket = ws
+
+  ws.onopen = () => {
+    if (socket !== ws) return
+    socketState.value = 'connected'
+  }
+  ws.onmessage = (event: MessageEvent) => {
+    if (socket !== ws || typeof event.data !== 'string') return
+    try {
+      const message = JSON.parse(event.data) as { type?: string; data?: HealthSummary }
+      if (message.type === 'health.snapshot' && message.data) summary.value = message.data
+    } catch {
+      // Ignore unknown status frames.
+    }
+  }
+  ws.onerror = () => {
+    if (socket === ws) socketState.value = 'disconnected'
+  }
+  ws.onclose = () => {
+    if (socket !== ws) return
+    socket = null
+    socketState.value = 'disconnected'
+    scheduleReconnect()
+  }
+}
+
 onMounted(() => {
-  void load()
-  timer = window.setInterval(load, 10000)
+  mounted = true
+  void loadInitial()
+  connectStatusSocket()
+  supplementalTimer = window.setInterval(refreshSupplemental, 30000)
+  fallbackTimer = window.setInterval(refreshHealthFallback, 10000)
 })
 onBeforeUnmount(() => {
-  if (timer !== null) window.clearInterval(timer)
+  mounted = false
+  closeSocket()
+  if (supplementalTimer !== null) window.clearInterval(supplementalTimer)
+  if (fallbackTimer !== null) window.clearInterval(fallbackTimer)
+  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
 })
 </script>
 
@@ -223,7 +315,7 @@ onBeforeUnmount(() => {
       <article class="panel camera-panel">
         <div class="panel-head">
           <div><span class="panel-kicker">CAMERAS</span><h2>摄像头运行状态</h2></div>
-          <span class="panel-meta">10 秒自动刷新</span>
+          <span class="panel-meta">{{ refreshLabel }}</span>
         </div>
         <div class="camera-grid">
           <div v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-tile">
