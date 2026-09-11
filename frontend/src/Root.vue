@@ -7,6 +7,7 @@ import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
 import RecordingBrowserViewV3 from './RecordingBrowserViewV3.vue'
 import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
+import RecordingScheduleView from './RecordingScheduleView.vue'
 import RecordingTimelineLegend from './RecordingTimelineLegend.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
 
@@ -16,6 +17,7 @@ const isBatchCameras = path === '/cameras/batch'
 const isPreview = path === '/preview'
 const isHealth = path === '/health-center'
 const isRecordingBrowser = path === '/recordings/browser'
+const isRecordingSchedule = path === '/recording-schedules'
 
 function openSettings() {
   window.location.href = '/settings'
@@ -36,12 +38,17 @@ function openHealth() {
 function openRecordingBrowser() {
   window.location.href = '/recordings/browser'
 }
+
+function openRecordingSchedule() {
+  window.location.href = '/recording-schedules'
+}
 </script>
 
 <template>
   <SystemSettingsView v-if="isSettings" />
   <BatchCamerasView v-else-if="isBatchCameras" />
   <PreviewView v-else-if="isPreview" />
+  <RecordingScheduleView v-else-if="isRecordingSchedule" />
   <template v-else-if="isHealth">
     <HealthView />
     <PlaybackMetricsPanel />
@@ -56,6 +63,7 @@ function openRecordingBrowser() {
     <App />
     <div class="quick-actions">
       <el-button type="primary" plain @click="openRecordingBrowser">录像浏览</el-button>
+      <el-button type="primary" plain @click="openRecordingSchedule">录制时段</el-button>
       <el-button type="warning" plain @click="openHealth">系统健康</el-button>
       <el-button type="success" @click="openPreview">实时预览</el-button>
       <el-button type="success" plain @click="openBatchCameras">批量添加摄像头</el-button>
