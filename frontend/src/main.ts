@@ -5,6 +5,7 @@ import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import './styles/nvr-theme.css'
 import './styles/recording-browser.css'
+import './styles/health-workspace.css'
 
 import Root from './Root.vue'
 
