@@ -7,6 +7,8 @@ from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.models.health_sample import CameraHealthSample
 from app.services.recorder_manager import recorder_manager
+from app.services.recording_schedule import recording_schedule_allows
+from app.services.system_settings import load_runtime_settings
 
 _SAMPLE_INTERVAL_SECONDS = 60.0
 _RETENTION_DAYS = 7
@@ -57,6 +59,7 @@ class HealthSampler:
 
     async def sample_once(self) -> int:
         now = datetime.now(timezone.utc)
+        local_now = now.astimezone()
         runtime_rows = recorder_manager.status()
         runtime_by_camera = {
             int(item["camera_id"]): item
@@ -65,6 +68,7 @@ class HealthSampler:
         }
 
         async with SessionLocal() as session:
+            runtime_settings = await load_runtime_settings(session)
             cameras = list(
                 await session.scalars(
                     select(Camera).where(Camera.enabled.is_(True)).order_by(Camera.id)
@@ -74,7 +78,11 @@ class HealthSampler:
             for camera in cameras:
                 runtime = runtime_by_camera.get(camera.id, {})
                 state = str(runtime.get("state") or "STOPPED")
-                expected = bool(camera.auto_record)
+                expected = bool(
+                    runtime_settings.auto_start_enabled
+                    and camera.auto_record
+                    and recording_schedule_allows(camera, local_now)
+                )
                 monitored_value = state == "RECORDING" if expected else None
                 session.add(
                     CameraHealthSample(
