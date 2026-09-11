@@ -122,7 +122,8 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/system/status")
 async def system_status() -> dict:
-    runtime = await load_runtime_settings()
+    async with SessionLocal() as session:
+        runtime = await load_runtime_settings(session)
     return {
         "ffmpeg": capabilities_dict(),
         "recorders": recorder_manager.status(),
