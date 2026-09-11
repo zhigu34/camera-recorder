@@ -83,16 +83,12 @@ class RecordingScheduleManager:
         self._manual_paused.discard(camera_id)
 
     def reset_for_schedule_change(self, camera_id: int) -> None:
-        """Return manual overrides to schedule control without losing managed ownership.
-
-        If this scheduler originally started the recorder, keeping `_managed` lets
-        the immediate reconciliation stop it when the new weekly plan excludes the
-        current time. Manual overrides are intentionally cleared because saving a
-        new schedule is an explicit request to resume schedule control.
-        """
+        """Return a camera to schedule ownership after an explicit plan edit."""
 
         self._manual_running.discard(camera_id)
         self._manual_paused.discard(camera_id)
+        if recorder_manager.is_running(camera_id):
+            self._managed.add(camera_id)
 
     def forget(self, camera_id: int) -> None:
         self.clear_override(camera_id)
@@ -147,9 +143,6 @@ class RecordingScheduleManager:
                 camera.status = "stopped"
                 running = False
 
-        # If a recorder that this scheduler started was manually stopped, do not
-        # immediately start it again on the next reconciliation. Treat that as a
-        # pause for the remainder of the current window.
         if camera.id in self._managed and not running and auto_eligible:
             self._managed.discard(camera.id)
             self._manual_paused.add(camera.id)
@@ -170,15 +163,11 @@ class RecordingScheduleManager:
                     camera.status = "probe_required"
                 else:
                     try:
-                        # Explicit weekly schedules should segment relative to their
-                        # actual start time instead of 00/10/20 wall-clock boundaries.
-                        # 24/7 auto-record keeps the global alignment setting.
+                        # Explicit schedules segment relative to actual start time;
+                        # 24/7 auto-record preserves the global clock alignment.
                         align_override = False if camera.recording_schedule_enabled else None
                         await recorder_manager.start(
-                            runtime_config(
-                                camera,
-                                align_segments_to_clock=align_override,
-                            )
+                            runtime_config(camera, align_segments_to_clock=align_override)
                         )
                         self._managed.add(camera.id)
                         camera.status = "recording"
