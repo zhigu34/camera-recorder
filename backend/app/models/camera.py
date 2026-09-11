@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, func
@@ -46,6 +46,9 @@ class Camera(Base):
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_frame_samples: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Kept for API/database compatibility. From now on this field is owned only
+    # by connectivity probing and represents unknown/online/offline. Recorder and
+    # schedule state are exposed independently through the properties below.
     status: Mapped[str] = mapped_column(String(32), default="unknown")
     last_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -60,3 +63,43 @@ class Camera(Base):
     recordings: Mapped[list["Recording"]] = relationship(
         back_populates="camera", cascade="all, delete-orphan"
     )
+
+    @staticmethod
+    def _utc(value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @property
+    def connectivity_status(self) -> str:
+        """Connectivity result owned by Probe, independent of recording/schedule state."""
+
+        if self.status == "online":
+            return "online"
+        if self.status in {"offline", "probe_failed"}:
+            return "offline"
+
+        # Recover a correct value for rows whose legacy status was overwritten by
+        # recorder/scheduler values such as recording, stopped or scheduled.
+        probed_at = self._utc(self.last_probe_at)
+        if probed_at is None:
+            return "unknown"
+        online_at = self._utc(self.last_online_at)
+        if online_at is not None and online_at >= probed_at:
+            return "online"
+        return "offline"
+
+    @property
+    def recorder_state(self) -> str:
+        from app.services.recorder_manager import recorder_manager
+
+        snapshot = recorder_manager.status(self.id)
+        return str(snapshot.get("state", "STOPPED")) if isinstance(snapshot, dict) else "STOPPED"
+
+    @property
+    def schedule_state(self) -> str:
+        from app.services.recording_schedule_manager import recording_schedule_manager
+
+        return recording_schedule_manager.state_for(self)
