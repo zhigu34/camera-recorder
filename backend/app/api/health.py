@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, Query, WebSocket
 
 from app.services.health_monitor import health_snapshot, health_trends
+from app.services.stability_report import stability_report
 
 router = APIRouter(tags=["health"])
 
@@ -18,6 +19,13 @@ async def get_health_trends(
     bucket_minutes: int = Query(default=60, ge=5, le=1440),
 ) -> dict:
     return await health_trends(hours=hours, bucket_minutes=bucket_minutes)
+
+
+@router.get("/api/health/stability")
+async def get_stability_report(
+    hours: int = Query(default=24, ge=1, le=168),
+) -> dict:
+    return await stability_report(hours=hours)
 
 
 @router.websocket("/ws/status")
