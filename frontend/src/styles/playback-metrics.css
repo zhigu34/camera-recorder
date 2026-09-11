@@ -1,0 +1,108 @@
+.playback-health {
+  max-width: none !important;
+  margin: 12px 22px 26px !important;
+  padding: 0 !important;
+}
+
+.playback-health .el-card {
+  overflow: hidden;
+  border-color: var(--nvr-border-strong) !important;
+  background: linear-gradient(180deg, rgba(76,141,255,.035), transparent 150px), var(--nvr-surface) !important;
+}
+
+.playback-health .el-card__header {
+  padding: 14px 16px !important;
+  background: #111820;
+}
+
+.playback-health .panel-head strong {
+  color: var(--nvr-text) !important;
+  font-size: 12px;
+  letter-spacing: .01em;
+}
+
+.playback-health .subtitle {
+  color: var(--nvr-muted) !important;
+  font-size: 10px !important;
+}
+
+.playback-health .metric-row {
+  margin-bottom: 12px !important;
+}
+
+.playback-health .metric-box {
+  min-height: 82px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 9px !important;
+  background: var(--nvr-surface-2) !important;
+  align-items: flex-start !important;
+  padding: 12px 14px !important;
+}
+
+.playback-health .metric-box strong {
+  color: var(--nvr-text) !important;
+  font-size: 22px !important;
+  line-height: 1;
+}
+
+.playback-health .metric-box span {
+  color: var(--nvr-muted) !important;
+  font-size: 10px !important;
+}
+
+.playback-health .backend-strip {
+  display: grid !important;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 1px !important;
+  padding: 1px !important;
+  margin-bottom: 12px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 8px !important;
+  background: var(--nvr-border) !important;
+  overflow: hidden;
+}
+
+.playback-health .backend-strip span {
+  min-width: 0;
+  padding: 10px 12px;
+  background: #111820;
+  color: var(--nvr-muted) !important;
+  font-size: 9px !important;
+}
+
+.playback-health .backend-strip b {
+  display: block;
+  margin-top: 4px;
+  color: var(--nvr-text) !important;
+  font-size: 12px;
+}
+
+.playback-health .el-table {
+  --el-table-bg-color: var(--nvr-surface);
+  --el-table-tr-bg-color: var(--nvr-surface);
+  --el-table-header-bg-color: #111820;
+  --el-table-row-hover-bg-color: var(--nvr-surface-2);
+  --el-table-border-color: var(--nvr-border);
+  --el-table-text-color: #aeb9c6;
+  --el-table-header-text-color: #718095;
+}
+
+.playback-health .el-table th.el-table__cell,
+.playback-health .el-table td.el-table__cell {
+  font-size: 10px;
+}
+
+@media (max-width: 1180px) {
+  .playback-health .backend-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .playback-health {
+    margin: 10px 14px 20px !important;
+  }
+  .playback-health .backend-strip {
+    grid-template-columns: 1fr;
+  }
+}
