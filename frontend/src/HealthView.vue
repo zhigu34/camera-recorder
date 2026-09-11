@@ -55,12 +55,56 @@ interface HealthSnapshot {
   camera_health: CameraHealth[]
 }
 
+interface CameraTrend {
+  camera_id: number
+  name: string
+  ip: string
+  monitored: boolean
+  samples: number
+  observed_minutes: number
+  online_samples: number
+  online_rate: number | null
+  recording_segments: number
+  complete_segments: number
+  recording_completeness: number | null
+}
+
+interface TrendPoint {
+  started_at: string
+  expected_samples: number
+  online_samples: number
+  abnormal_samples: number
+  online_rate: number | null
+}
+
+interface HealthTrends {
+  generated_at: string
+  hours: number
+  bucket_minutes: number
+  retention_days: number
+  sample_interval_seconds: number
+  overall: {
+    monitored_cameras: number
+    samples: number
+    online_samples: number
+    online_rate: number | null
+    recording_segments: number
+    complete_segments: number
+    recording_completeness: number | null
+  }
+  cameras: CameraTrend[]
+  timeline: TrendPoint[]
+}
+
 const snapshot = ref<HealthSnapshot | null>(null)
+const trends = ref<HealthTrends | null>(null)
 const loading = ref(false)
+const trendLoading = ref(false)
 const wsConnected = ref(false)
 const reconnectCount = ref(0)
 let socket: WebSocket | null = null
 let reconnectTimer: number | null = null
+let trendTimer: number | null = null
 let destroyed = false
 
 const pendingUploads = computed(() => {
@@ -68,6 +112,10 @@ const pendingUploads = computed(() => {
   if (!value) return 0
   return (value.pending || 0) + (value.uploading || 0) + (value.retry_wait || 0)
 })
+
+const monitoredCameraTrends = computed(() =>
+  (trends.value?.cameras || []).filter((item) => item.monitored),
+)
 
 function formatDuration(totalSeconds: number) {
   const seconds = Math.max(0, Math.floor(totalSeconds || 0))
@@ -93,6 +141,23 @@ function formatStartedAt(value?: string | null) {
   return date.toLocaleString()
 }
 
+function formatHour(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return `${String(date.getHours()).padStart(2, '0')}:00`
+}
+
+function formatRate(value: number | null | undefined) {
+  return value === null || value === undefined ? '-' : `${value.toFixed(2)}%`
+}
+
+function rateType(value: number | null | undefined) {
+  if (value === null || value === undefined) return 'info'
+  if (value >= 99.9) return 'success'
+  if (value >= 99) return 'warning'
+  return 'danger'
+}
+
 function stateTagType(state: string, abnormal: boolean) {
   if (abnormal) return 'danger'
   if (state === 'RECORDING') return 'success'
@@ -114,6 +179,14 @@ function sortUnhealthy24h(a: CameraHealth, b: CameraHealth) {
   return a.recordings_24h.unhealthy_segments - b.recordings_24h.unhealthy_segments
 }
 
+function sortOnlineRate(a: CameraTrend, b: CameraTrend) {
+  return (a.online_rate ?? -1) - (b.online_rate ?? -1)
+}
+
+function sortCompleteness(a: CameraTrend, b: CameraTrend) {
+  return (a.recording_completeness ?? -1) - (b.recording_completeness ?? -1)
+}
+
 async function loadSnapshot() {
   loading.value = true
   try {
@@ -123,6 +196,22 @@ async function loadSnapshot() {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '健康状态加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadTrends(showError = true) {
+  trendLoading.value = true
+  try {
+    const { data } = await axios.get<HealthTrends>('/api/health/trends', {
+      params: { hours: 24, bucket_minutes: 60 },
+    })
+    trends.value = data
+  } catch (error) {
+    if (showError) {
+      ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '健康趋势加载失败')
+    }
+  } finally {
+    trendLoading.value = false
   }
 }
 
@@ -177,13 +266,15 @@ function goBack() {
 }
 
 onMounted(async () => {
-  await loadSnapshot()
+  await Promise.all([loadSnapshot(), loadTrends()])
   connectWebSocket()
+  trendTimer = window.setInterval(() => void loadTrends(false), 60_000)
 })
 
 onBeforeUnmount(() => {
   destroyed = true
   if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+  if (trendTimer !== null) window.clearInterval(trendTimer)
   if (socket) {
     socket.onclose = null
     socket.close()
@@ -202,9 +293,10 @@ onBeforeUnmount(() => {
             {{ wsConnected ? '实时连接' : '正在重连' }}
           </el-tag>
         </div>
-        <p>V0.7 · Recorder / 录像片段 / 上传 / 磁盘实时运行状态</p>
+        <p>V0.7 · 实时状态 + 24 小时在线率 / 录像完整率趋势</p>
       </div>
       <div class="head-actions">
+        <el-button @click="loadTrends()" :loading="trendLoading">刷新趋势</el-button>
         <el-button @click="loadSnapshot">立即刷新</el-button>
         <el-button @click="goBack">返回主界面</el-button>
       </div>
@@ -229,6 +321,27 @@ onBeforeUnmount(() => {
         </el-col>
         <el-col :xs="12" :sm="8" :md="4">
           <el-card shadow="never"><div class="metric">{{ pendingUploads }}</div><div class="metric-label">待处理上传</div></el-card>
+        </el-col>
+      </el-row>
+
+      <el-row v-if="trends" :gutter="14" class="section-gap">
+        <el-col :xs="12" :sm="8" :md="6">
+          <el-card shadow="never">
+            <div class="metric"><el-tag size="large" :type="rateType(trends.overall.online_rate)">{{ formatRate(trends.overall.online_rate) }}</el-tag></div>
+            <div class="metric-label">24h 在线率</div>
+          </el-card>
+        </el-col>
+        <el-col :xs="12" :sm="8" :md="6">
+          <el-card shadow="never">
+            <div class="metric"><el-tag size="large" :type="rateType(trends.overall.recording_completeness)">{{ formatRate(trends.overall.recording_completeness) }}</el-tag></div>
+            <div class="metric-label">24h 录像完整率</div>
+          </el-card>
+        </el-col>
+        <el-col :xs="12" :sm="8" :md="6">
+          <el-card shadow="never"><div class="metric">{{ trends.overall.monitored_cameras }}</div><div class="metric-label">自动录像监控摄像头</div></el-card>
+        </el-col>
+        <el-col :xs="12" :sm="8" :md="6">
+          <el-card shadow="never"><div class="metric">{{ trends.overall.samples }}</div><div class="metric-label">24h 健康采样点</div></el-card>
         </el-col>
       </el-row>
 
@@ -263,6 +376,51 @@ onBeforeUnmount(() => {
           </el-card>
         </el-col>
       </el-row>
+
+      <el-card v-if="trends" class="section-gap" shadow="never">
+        <template #header>
+          <div class="card-head">
+            <strong>24 小时在线趋势</strong>
+            <span class="muted">每分钟采样，按小时聚合；升级后需要逐步积累样本</span>
+          </div>
+        </template>
+        <div v-if="trends.timeline.length" class="trend-strip">
+          <div
+            v-for="point in trends.timeline"
+            :key="point.started_at"
+            class="trend-column"
+            :title="`${formatStartedAt(point.started_at)} · 在线率 ${formatRate(point.online_rate)} · 异常采样 ${point.abnormal_samples}`"
+          >
+            <div class="trend-well">
+              <div class="trend-fill" :style="{ height: `${point.online_rate ?? 0}%` }" />
+            </div>
+            <span>{{ formatHour(point.started_at) }}</span>
+          </div>
+        </div>
+        <el-empty v-else description="健康采样刚开始，约 1 分钟后会出现趋势数据" :image-size="70" />
+      </el-card>
+
+      <el-card v-if="trends" class="section-gap" shadow="never">
+        <template #header>
+          <div class="card-head">
+            <strong>摄像头 24h 稳定性</strong>
+            <span class="muted">录像完整率 = 健康且 ffprobe 通过的完整片段 / 已完成片段</span>
+          </div>
+        </template>
+        <el-table :data="monitoredCameraTrends" stripe empty-text="暂无自动录像摄像头">
+          <el-table-column prop="name" label="摄像头" min-width="160" fixed="left" />
+          <el-table-column prop="ip" label="IP" width="145" />
+          <el-table-column label="在线率" width="120" sortable :sort-method="sortOnlineRate">
+            <template #default="{ row }"><el-tag :type="rateType(row.online_rate)">{{ formatRate(row.online_rate) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="录像完整率" width="130" sortable :sort-method="sortCompleteness">
+            <template #default="{ row }"><el-tag :type="rateType(row.recording_completeness)">{{ formatRate(row.recording_completeness) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="observed_minutes" label="已采样分钟" width="110" sortable />
+          <el-table-column prop="recording_segments" label="录像片段" width="95" sortable />
+          <el-table-column prop="complete_segments" label="完整片段" width="95" sortable />
+        </el-table>
+      </el-card>
 
       <el-card class="section-gap" shadow="never">
         <template #header>
@@ -300,7 +458,10 @@ onBeforeUnmount(() => {
         </el-table>
       </el-card>
 
-      <div class="snapshot-time">最后快照：{{ formatStartedAt(snapshot.generated_at) }}</div>
+      <div class="snapshot-time">
+        实时快照：{{ formatStartedAt(snapshot.generated_at) }}
+        <template v-if="trends"> · 趋势统计：{{ formatStartedAt(trends.generated_at) }}</template>
+      </div>
     </template>
   </div>
 </template>
@@ -316,7 +477,7 @@ onBeforeUnmount(() => {
 .title-row { display: flex; align-items: center; gap: 12px; }
 h2 { margin: 0; }
 p { margin: 8px 0 0; color: #909399; }
-.head-actions { display: flex; gap: 8px; }
+.head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .metric { font-size: 24px; line-height: 1.25; font-weight: 700; color: #303133; min-height: 30px; }
 .metric-label { margin-top: 8px; color: #909399; font-size: 13px; }
 .danger { color: #f56c6c; font-weight: 700; }
@@ -328,6 +489,11 @@ p { margin: 8px 0 0; color: #909399; }
 .stats-grid span { color: #909399; font-size: 12px; }
 .stats-grid strong { font-size: 24px; }
 .disk-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 18px; margin-top: 18px; color: #606266; font-size: 13px; }
+.trend-strip { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; min-height: 155px; }
+.trend-column { flex: 1 0 42px; min-width: 42px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.trend-column span { color: #909399; font-size: 10px; white-space: nowrap; }
+.trend-well { width: 22px; height: 112px; background: #f0f2f5; border-radius: 4px; overflow: hidden; display: flex; align-items: flex-end; }
+.trend-fill { width: 100%; min-height: 2px; background: #67c23a; transition: height 0.2s ease; }
 .snapshot-time { text-align: right; color: #909399; font-size: 12px; margin-top: 12px; }
 @media (max-width: 760px) {
   .page-head { flex-direction: column; }
