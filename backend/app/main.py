@@ -30,7 +30,7 @@ from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_cleanup import storage_cleanup_manager
 from app.services.storage_manager import storage_snapshot
-from app.services.system_settings import get_or_create_system_settings, load_runtime_settings
+from app.services.system_settings import get_or_create_system_settings
 from app.services.upload_manager import upload_manager
 
 
@@ -122,19 +122,17 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/system/status")
 async def system_status() -> dict:
-    async with SessionLocal() as session:
-        runtime = await load_runtime_settings(session)
     return {
-        "ffmpeg": capabilities_dict(),
+        "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
         "segment_processor": segment_processor.status(),
         "upload": await upload_manager.status(),
         "alerts": {
             "monitor": alert_monitor.status(),
-            "dispatcher": alert_dispatcher.status(),
+            "dispatcher": alert_dispatcher.snapshot(),
         },
-        "playback_prefetch": playback_prefetch_manager.status(),
+        "playback_prefetch": playback_prefetch_manager.snapshot(),
         "storage_cleanup": storage_cleanup_manager.status(),
-        "storage": storage_snapshot(runtime.storage_warning_percent, runtime.storage_critical_percent),
+        "storage": await storage_snapshot(),
     }
