@@ -1,0 +1,323 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, ref } from 'vue'
+import axios from 'axios'
+import { ElMessage } from 'element-plus'
+
+interface Camera {
+  id: number
+  name: string
+  enabled: boolean
+}
+
+interface PlaybackState {
+  state: 'direct' | 'ready' | 'needed' | 'generating' | 'error'
+  direct: boolean
+  error?: string | null
+}
+
+interface RecordingItem {
+  id: number
+  camera_id: number
+  started_at?: string | null
+  ended_at?: string | null
+  duration?: number | null
+  file_size?: number | null
+  video_codec?: string | null
+  audio_codec?: string | null
+  width?: number | null
+  height?: number | null
+  fps?: number | null
+  status: string
+  health_status: string
+  upload_status: string
+  warning_count: number
+  filename: string
+  playback: PlaybackState
+}
+
+interface BrowserResult {
+  camera_id: number
+  date: string
+  timezone: string
+  count: number
+  total_duration: number
+  total_size: number
+  items: RecordingItem[]
+}
+
+const cameras = ref<Camera[]>([])
+const selectedCamera = ref<number | null>(null)
+const selectedDate = ref(todayString())
+const data = ref<BrowserResult | null>(null)
+const loading = ref(false)
+const playerVisible = ref(false)
+const activeRecording = ref<RecordingItem | null>(null)
+const videoSrc = ref('')
+const preparing = ref(false)
+const proxyError = ref('')
+
+const recordings = computed(() => data.value?.items || [])
+const readyRecordings = computed(() => recordings.value.filter((item) => item.status === 'ready'))
+
+function todayString() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function goBack() {
+  window.location.href = '/'
+}
+
+function localClock(value?: string | null) {
+  if (!value) return '-'
+  const match = value.match(/T(\d{2}:\d{2}:\d{2})/)
+  return match?.[1] || value
+}
+
+function formatDuration(seconds?: number | null) {
+  const value = Math.max(0, Math.round(seconds || 0))
+  const h = Math.floor(value / 3600)
+  const m = Math.floor((value % 3600) / 60)
+  const s = value % 60
+  if (h) return `${h}h ${m}m ${s}s`
+  if (m) return `${m}m ${s}s`
+  return `${s}s`
+}
+
+function formatSize(bytes?: number | null) {
+  const value = Number(bytes || 0)
+  if (!value) return '-'
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`
+  return `${(value / 1024 ** 2).toFixed(1)} MB`
+}
+
+function timelineStyle(item: RecordingItem) {
+  if (!item.started_at) return { display: 'none' }
+  const time = item.started_at.match(/T(\d{2}):(\d{2}):(\d{2})/)
+  if (!time) return { display: 'none' }
+  const start = Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3])
+  const duration = Math.max(60, Number(item.duration || 0))
+  const left = (start / 86400) * 100
+  const width = Math.max(0.28, (duration / 86400) * 100)
+  return {
+    left: `${left}%`,
+    width: `${Math.min(width, 100 - left)}%`,
+  }
+}
+
+function healthType(value: string) {
+  if (value === 'healthy') return 'success'
+  if (value === 'unhealthy' || value === 'failed') return 'danger'
+  return 'warning'
+}
+
+async function loadCameras() {
+  const response = await axios.get<Camera[]>('/api/cameras')
+  cameras.value = response.data
+  if (selectedCamera.value === null && cameras.value.length) {
+    selectedCamera.value = cameras.value[0].id
+  }
+}
+
+async function loadRecordings() {
+  if (!selectedCamera.value || !selectedDate.value) return
+  loading.value = true
+  try {
+    const response = await axios.get<BrowserResult>('/api/recordings/browser', {
+      params: { camera_id: selectedCamera.value, date: selectedDate.value },
+    })
+    data.value = response.data
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '录像加载失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+async function changeDay(offset: number) {
+  const current = new Date(`${selectedDate.value}T12:00:00`)
+  current.setDate(current.getDate() + offset)
+  const year = current.getFullYear()
+  const month = String(current.getMonth() + 1).padStart(2, '0')
+  const day = String(current.getDate()).padStart(2, '0')
+  selectedDate.value = `${year}-${month}-${day}`
+  await loadRecordings()
+}
+
+function streamUrl(id: number) {
+  return `/api/recordings/${id}/stream?v=${Date.now()}`
+}
+
+async function waitForProxy(id: number) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    const response = await axios.get<PlaybackState>(`/api/recordings/${id}/playback`)
+    if (response.data.state === 'ready' || response.data.state === 'direct') return response.data
+    if (response.data.state === 'error') throw new Error(response.data.error || 'Web 播放文件生成失败')
+  }
+  throw new Error('Web 播放文件生成超时')
+}
+
+async function play(item: RecordingItem) {
+  if (item.status !== 'ready') {
+    ElMessage.warning('本地原录像已清理，当前不可生成新的 Web 播放文件')
+    return
+  }
+  activeRecording.value = item
+  playerVisible.value = true
+  videoSrc.value = ''
+  proxyError.value = ''
+  preparing.value = true
+  try {
+    const response = await axios.post<PlaybackState>(`/api/recordings/${item.id}/playback`)
+    let state = response.data
+    if (state.state === 'generating' || state.state === 'needed') {
+      state = await waitForProxy(item.id)
+    }
+    if (state.state !== 'ready' && state.state !== 'direct') {
+      throw new Error(state.error || '录像尚未准备好')
+    }
+    videoSrc.value = streamUrl(item.id)
+    await nextTick()
+  } catch (error: any) {
+    proxyError.value = error?.response?.data?.detail || error?.message || '播放准备失败'
+    ElMessage.error(proxyError.value)
+  } finally {
+    preparing.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
+    await loadCameras()
+    await loadRecordings()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '初始化失败')
+  }
+})
+</script>
+
+<template>
+  <div class="page-shell">
+    <div class="page-head">
+      <div>
+        <h2>录像浏览</h2>
+        <p>按摄像头和日期浏览录像 · H.264 直接播放 · H.265 按需生成 Web Proxy</p>
+      </div>
+      <el-button @click="goBack">返回主界面</el-button>
+    </div>
+
+    <el-card shadow="never">
+      <div class="filters">
+        <el-select v-model="selectedCamera" placeholder="选择摄像头" filterable @change="loadRecordings" style="width: 240px">
+          <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
+        </el-select>
+        <el-button @click="changeDay(-1)">前一天</el-button>
+        <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" @change="loadRecordings" />
+        <el-button @click="changeDay(1)">后一天</el-button>
+        <el-button type="primary" :loading="loading" @click="loadRecordings">刷新</el-button>
+      </div>
+
+      <div v-if="data" class="summary">
+        <span>{{ data.date }}</span>
+        <span>{{ data.timezone }}</span>
+        <span>{{ data.count }} 段录像</span>
+        <span>总时长 {{ formatDuration(data.total_duration) }}</span>
+        <span>总大小 {{ formatSize(data.total_size) }}</span>
+      </div>
+    </el-card>
+
+    <el-card shadow="never" class="section-gap" v-loading="loading">
+      <template #header><strong>24 小时时间轴</strong></template>
+      <div class="axis-labels">
+        <span v-for="hour in [0, 3, 6, 9, 12, 15, 18, 21, 24]" :key="hour">{{ String(hour).padStart(2, '0') }}:00</span>
+      </div>
+      <div class="timeline">
+        <div class="grid-line" v-for="hour in [3, 6, 9, 12, 15, 18, 21]" :key="hour" :style="{ left: `${hour / 24 * 100}%` }" />
+        <button
+          v-for="item in recordings"
+          :key="item.id"
+          class="segment"
+          :class="{ unhealthy: item.health_status !== 'healthy', deleted: item.status === 'deleted' }"
+          :style="timelineStyle(item)"
+          :title="`${localClock(item.started_at)} · ${formatDuration(item.duration)} · ${item.health_status}`"
+          @click="play(item)"
+        />
+      </div>
+      <div class="legend">
+        <span><i class="dot normal" />健康录像</span>
+        <span><i class="dot bad" />异常录像</span>
+        <span><i class="dot deleted-dot" />本地已清理</span>
+      </div>
+    </el-card>
+
+    <el-card shadow="never" class="section-gap">
+      <template #header><strong>录像片段</strong></template>
+      <el-table :data="recordings" stripe empty-text="当天暂无录像">
+        <el-table-column label="开始" width="110"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
+        <el-table-column label="时长" width="110"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
+        <el-table-column label="大小" width="110"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
+        <el-table-column label="视频" width="120"><template #default="{ row }">{{ row.video_codec || '-' }}</template></el-table-column>
+        <el-table-column label="分辨率" width="120"><template #default="{ row }">{{ row.width && row.height ? `${row.width}×${row.height}` : '-' }}</template></el-table-column>
+        <el-table-column label="健康" width="100"><template #default="{ row }"><el-tag :type="healthType(row.health_status)">{{ row.health_status }}</el-tag></template></el-table-column>
+        <el-table-column prop="upload_status" label="上传" width="110" />
+        <el-table-column prop="filename" label="文件" min-width="260" show-overflow-tooltip />
+        <el-table-column label="播放" width="110" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" :disabled="row.status !== 'ready'" @click="play(row)">播放</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-dialog v-model="playerVisible" width="min(1000px, 92vw)" destroy-on-close title="录像回放" @closed="videoSrc = ''">
+      <div v-if="activeRecording" class="player-meta">
+        <strong>{{ localClock(activeRecording.started_at) }}</strong>
+        <span>{{ formatDuration(activeRecording.duration) }}</span>
+        <span>{{ activeRecording.video_codec || '-' }}</span>
+        <span>{{ activeRecording.width }}×{{ activeRecording.height }}</span>
+      </div>
+      <div class="player-box" v-loading="preparing" element-loading-text="正在准备 Web 播放文件…">
+        <video v-if="videoSrc" :src="videoSrc" controls autoplay playsinline preload="metadata" />
+        <el-empty v-else-if="!preparing && proxyError" :description="proxyError" />
+        <div v-else-if="preparing" class="prepare-note">H.265 首次播放需要生成 H.264 Proxy；生成后再次播放会直接复用。</div>
+      </div>
+    </el-dialog>
+  </div>
+</template>
+
+<style scoped>
+:global(body) { margin: 0; background: #f5f7fa; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.page-shell { max-width: 1500px; margin: 0 auto; padding: 24px; }
+.page-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+.page-head h2 { margin: 0 0 6px; }
+.page-head p { margin: 0; color: #909399; }
+.filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.summary { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 14px; color: #606266; font-size: 14px; }
+.section-gap { margin-top: 16px; }
+.axis-labels { display: flex; justify-content: space-between; color: #909399; font-size: 12px; margin-bottom: 8px; }
+.timeline { position: relative; height: 74px; border: 1px solid #dcdfe6; border-radius: 6px; overflow: hidden; background: #fafafa; }
+.grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #ebeef5; }
+.segment { position: absolute; top: 15px; height: 44px; border: 0; border-radius: 4px; background: #67c23a; cursor: pointer; min-width: 3px; opacity: .92; }
+.segment:hover { filter: brightness(.92); transform: translateY(-1px); }
+.segment.unhealthy { background: #f56c6c; }
+.segment.deleted { background: #c0c4cc; cursor: not-allowed; }
+.legend { display: flex; gap: 20px; margin-top: 10px; color: #606266; font-size: 13px; }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.normal { background: #67c23a; }
+.bad { background: #f56c6c; }
+.deleted-dot { background: #c0c4cc; }
+.player-meta { display: flex; gap: 18px; align-items: center; margin-bottom: 12px; color: #606266; }
+.player-box { min-height: 360px; background: #111; display: flex; align-items: center; justify-content: center; border-radius: 6px; overflow: hidden; }
+.player-box video { width: 100%; max-height: 70vh; background: #000; }
+.prepare-note { color: #dcdfe6; padding: 30px; text-align: center; }
+@media (max-width: 720px) {
+  .page-shell { padding: 14px; }
+  .page-head { align-items: flex-start; gap: 12px; }
+  .axis-labels span:nth-child(even) { display: none; }
+}
+</style>
