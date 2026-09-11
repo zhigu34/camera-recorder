@@ -98,11 +98,13 @@ def test_camera_schedule_create_update_and_read() -> None:
         assert created.status_code == 201
         camera_id = created.json()["id"]
         assert created.json()["recording_schedule_enabled"] is True
+        assert created.json()["auto_record"] is True
         assert created.json()["recording_schedule"] == payload["recording_schedule"]
 
         updated = client.put(
             f"/api/cameras/{camera_id}",
             json={
+                "auto_record": False,
                 "recording_schedule_enabled": True,
                 "recording_schedule": [
                     {"days": [5, 6], "start": "18:30", "end": "23:45"}
@@ -110,9 +112,16 @@ def test_camera_schedule_create_update_and_read() -> None:
             },
         )
         assert updated.status_code == 200
+        assert updated.json()["auto_record"] is True
+        assert updated.json()["recording_schedule_enabled"] is True
         assert updated.json()["recording_schedule"] == [
             {"days": [5, 6], "start": "18:30", "end": "23:45"}
         ]
+
+        disabled = client.put(f"/api/cameras/{camera_id}", json={"auto_record": False})
+        assert disabled.status_code == 200
+        assert disabled.json()["auto_record"] is False
+        assert disabled.json()["recording_schedule_enabled"] is False
 
         invalid = client.put(
             f"/api/cameras/{camera_id}",
@@ -159,6 +168,7 @@ def test_schedule_update_survives_runtime_reconcile_failure(monkeypatch) -> None
         )
         assert updated.status_code == 200
         assert updated.json()["recording_schedule_enabled"] is True
+        assert updated.json()["auto_record"] is True
         assert updated.json()["recording_schedule"][0]["start"] == "08:00"
         assert recording_schedule_manager.status()["last_error"] is not None
 
@@ -200,5 +210,7 @@ def test_batch_apply_weekly_schedule() -> None:
         for camera_id in camera_ids:
             result = client.get(f"/api/cameras/{camera_id}")
             assert result.status_code == 200
+            assert result.json()["auto_record"] is True
+            assert result.json()["recording_schedule_enabled"] is True
             assert result.json()["recording_schedule"] == payload["recording_schedule"]
             client.delete(f"/api/cameras/{camera_id}")
