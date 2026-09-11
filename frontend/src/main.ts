@@ -10,6 +10,7 @@ import './styles/playback-metrics.css'
 import './styles/system-settings.css'
 import './styles/unifi-console.css'
 import './styles/camera-device-center.css'
+import './styles/appliance-console.css'
 
 import Root from './Root.vue'
 
