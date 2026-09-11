@@ -19,6 +19,7 @@ from app.core.migrations import upgrade_database
 from app.models.camera import Camera
 from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
+from app.services.health_sampler import health_sampler
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_manager import storage_snapshot
@@ -67,8 +68,13 @@ async def lifespan(_: FastAPI):
                 camera.status = "recording"
             await session.commit()
 
+    # Start sampling after auto-start so planned startup/shutdown transitions do not
+    # pollute availability metrics.
+    await health_sampler.start()
+
     yield
 
+    await health_sampler.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
     await segment_processor.scan_once()
@@ -79,7 +85,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.7.0",
+    version="0.7.1",
     lifespan=lifespan,
 )
 
