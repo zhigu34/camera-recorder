@@ -27,8 +27,12 @@ class EmailNotificationConfig:
         return [item.strip() for item in self.smtp_to.split(",") if item.strip()]
 
     @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host.strip() and self.smtp_from.strip() and self.recipients)
+
+    @property
     def configured(self) -> bool:
-        return bool(self.email_enabled and self.smtp_host.strip() and self.smtp_from.strip() and self.recipients)
+        return self.smtp_configured
 
 
 async def get_or_create_notification_settings(session: AsyncSession) -> NotificationSettings:
