@@ -5,9 +5,13 @@ import { ElMessage } from 'element-plus'
 import { CircleCheckFilled, DocumentCopy, WarningFilled } from '@element-plus/icons-vue'
 
 type TimestampMode = 'native' | 'reconstruct' | 'wallclock'
+type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor'
 
 interface CameraCreatePayload {
   name: string
+  manufacturer?: string | null
+  model?: string | null
+  form_factor?: CameraFormFactor
   ip: string
   rtsp_port: number
   username: string
@@ -41,6 +45,7 @@ const skipExisting = ref(true)
 const saving = ref(false)
 const lastResult = ref<BatchResult | null>(null)
 const allowedModes = new Set<TimestampMode>(['native', 'reconstruct', 'wallclock'])
+const allowedFormFactors = new Set<CameraFormFactor>(['unknown', 'bullet', 'dome', 'turret', 'ptz', 'doorbell', 'indoor'])
 
 function parseBatch(text: string): ParsedBatch {
   const cameras: CameraCreatePayload[] = []
@@ -53,8 +58,8 @@ function parseBatch(text: string): ParsedBatch {
     if (!line || line.startsWith('#')) return
 
     const parts = rawLine.split('|')
-    if (parts.length < 4 || parts.length > 8) {
-      errors.push(`第 ${lineNumber} 行：字段数量应为 4～8 个，使用 | 分隔`)
+    if (parts.length < 4 || parts.length > 11) {
+      errors.push(`第 ${lineNumber} 行：字段数量应为 4～11 个，使用 | 分隔`)
       return
     }
 
@@ -67,18 +72,28 @@ function parseBatch(text: string): ParsedBatch {
     const rawPort = (parts[6] || '').trim()
     const rtspPort = rawPort ? Number(rawPort) : 554
     const subRtspPath = (parts[7] || '').trim() || null
+    const manufacturer = (parts[8] || '').trim() || null
+    const model = (parts[9] || '').trim() || null
+    const formFactor = ((parts[10] || '').trim() || 'unknown') as CameraFormFactor
 
     if (!name) errors.push(`第 ${lineNumber} 行：名称不能为空`)
     if (!ip) errors.push(`第 ${lineNumber} 行：IP/主机不能为空`)
     if (!password) errors.push(`第 ${lineNumber} 行：密码不能为空`)
     if (!allowedModes.has(rawMode)) errors.push(`第 ${lineNumber} 行：时间戳模式必须是 native / reconstruct / wallclock`)
+    if (!allowedFormFactors.has(formFactor)) errors.push(`第 ${lineNumber} 行：外形必须是 unknown / bullet / dome / turret / ptz / doorbell / indoor`)
     if (!Number.isInteger(rtspPort) || rtspPort < 1 || rtspPort > 65535) errors.push(`第 ${lineNumber} 行：RTSP 端口无效`)
     if (name && seenNames.has(name)) errors.push(`第 ${lineNumber} 行：名称“${name}”在本次批量数据中重复`)
     if (name) seenNames.add(name)
 
-    if (name && ip && password && allowedModes.has(rawMode) && Number.isInteger(rtspPort) && rtspPort >= 1 && rtspPort <= 65535) {
+    if (
+      name && ip && password && allowedModes.has(rawMode) && allowedFormFactors.has(formFactor)
+      && Number.isInteger(rtspPort) && rtspPort >= 1 && rtspPort <= 65535
+    ) {
       cameras.push({
         name,
+        manufacturer,
+        model,
+        form_factor: formFactor,
         ip,
         rtsp_port: rtspPort,
         username,
@@ -102,9 +117,9 @@ const canSubmit = computed(() => validCount.value > 0 && errorCount.value === 0 
 
 function fillExample() {
   rawText.value = [
-    '# 名称|IP|用户名|密码|主码流路径|时间戳模式|RTSP端口|子码流路径',
-    '监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub',
-    '监控-门口|192.168.1.101|admin|你的密码|/ch1/main|native|554|/ch1/sub',
+    '# 名称|IP|用户名|密码|主码流路径|时间戳模式|RTSP端口|子码流路径|厂商|型号|外形',
+    '监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub|Reolink|RLC-810A|bullet',
+    '监控-门口|192.168.1.101|admin|你的密码|/ch1/main|native|554|/ch1/sub|Hikvision|DS-2CD...|turret',
   ].join('\n')
   lastResult.value = null
 }
@@ -163,14 +178,14 @@ async function submitBatch() {
         <div class="guide-title">字段说明</div>
         <ol>
           <li><b>必填</b><span>名称 · IP/主机 · 用户名 · 密码</span></li>
-          <li><b>可选</b><span>主码流 · 时间戳模式 · 端口 · 子码流</span></li>
-          <li><b>默认</b><span>/ch1/main · reconstruct · 554</span></li>
+          <li><b>码流</b><span>主码流 · 时间戳 · 端口 · 子码流</span></li>
+          <li><b>设备</b><span>厂商 · 型号 · 外形（均可选）</span></li>
         </ol>
         <div class="format-box">
-          <code>名称 | IP | 用户名 | 密码 | 主码流 | 模式 | 端口 | 子码流</code>
+          <code>名称 | IP | 用户名 | 密码 | 主码流 | 模式 | 端口 | 子码流 | 厂商 | 型号 | 外形</code>
         </div>
         <button class="example-button" type="button" @click="fillExample">填入示例数据</button>
-        <p>空行与以 <code>#</code> 开头的注释行会忽略。密码仅提交给后端并加密保存，不会在导入结果中回显。</p>
+        <p>旧的 4～8 列格式仍然兼容。外形可选：<code>bullet / dome / turret / ptz / doorbell / indoor</code>。</p>
       </aside>
 
       <div class="import-editor">
@@ -189,7 +204,7 @@ async function submitBatch() {
           :rows="13"
           resize="vertical"
           spellcheck="false"
-          placeholder="监控-大厅|192.168.1.100|admin|密码|/ch1/main|reconstruct|554|/ch1/sub"
+          placeholder="监控-大厅|192.168.1.100|admin|密码|/ch1/main|reconstruct|554|/ch1/sub|Reolink|RLC-810A|bullet"
           @input="lastResult = null"
         />
 
@@ -227,10 +242,10 @@ async function submitBatch() {
 
 <style scoped>
 .batch-importer{color:var(--nvr-text);background:var(--nvr-bg)}
-.import-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--nvr-border);background:linear-gradient(90deg,rgba(76,141,255,.07),transparent 58%),#0f151c}.hero-icon{width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(76,141,255,.2);border-radius:9px;color:var(--nvr-blue);background:rgba(76,141,255,.08)}.hero-icon :deep(svg){width:17px}.import-hero>div:nth-child(2){display:flex;min-width:0;flex-direction:column;gap:4px}.import-hero strong{font-size:12px}.import-hero span{color:var(--nvr-muted);font-size:10px;line-height:1.5}
-.import-layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:430px}.import-guide{padding:18px;border-right:1px solid var(--nvr-border);background:#10161e}.guide-title{margin-bottom:12px;color:#aeb9c6;font-size:10px;font-weight:700;letter-spacing:.08em}.import-guide ol{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none}.import-guide li{display:flex;flex-direction:column;gap:3px}.import-guide li b{color:var(--nvr-text);font-size:10px}.import-guide li span,.import-guide p{color:#69778a;font-size:9px;line-height:1.65}.format-box{margin:16px 0 10px;padding:10px;border:1px solid var(--nvr-border);border-radius:8px;background:#0b1118}.format-box code,.import-guide p code{color:#9fb8df;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px}.example-button{width:100%;height:32px;border:1px solid var(--nvr-border-strong);border-radius:7px;color:#b8c4d1;background:var(--nvr-surface-2);cursor:pointer;font-size:10px}.example-button:hover{border-color:rgba(76,141,255,.4);color:#dce7f5}.import-guide p{margin:14px 0 0}
-.import-editor{min-width:0;padding:16px 18px}.editor-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px}.editor-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:3px}.editor-head strong{font-size:11px}.editor-head span{color:var(--nvr-muted);font-size:9px}.parse-state{display:flex;align-items:center;gap:10px;white-space:nowrap}.parse-state span{display:inline-flex;align-items:center;gap:5px}.parse-state :deep(svg){width:12px}.parse-state .valid{color:var(--nvr-green)}.parse-state .invalid{color:var(--nvr-red)}.batch-textarea :deep(textarea){min-height:290px!important;padding:12px 13px!important;color:#bdc9d6!important;background:#0b1118!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace!important;font-size:10px!important;line-height:1.7!important}
-.validation-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface-2)}.validation-panel.danger{border-color:rgba(240,93,94,.22);background:rgba(240,93,94,.04)}.validation-panel.success{border-color:rgba(46,204,138,.2);background:rgba(46,204,138,.04)}.validation-title{display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:10px}.validation-title :deep(svg){width:13px}.danger .validation-title{color:var(--nvr-red)}.success .validation-title{color:var(--nvr-green)}.validation-list{max-height:105px;display:flex;flex-direction:column;gap:4px;overflow:auto;color:#b88788;font-size:9px}.result-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap;color:#9db4a9;font-size:9px}.result-line b{color:var(--nvr-green);font-size:11px}.result-line .skipped{width:100%;color:var(--nvr-muted)}
-.import-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 18px;border-top:1px solid var(--nvr-border);background:#10161e}.footer-note{color:#66758a;font-size:9px}.footer-actions{display:flex;align-items:center;gap:8px}
+.import-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--nvr-border);background:linear-gradient(90deg,rgba(76,141,255,.07),transparent 58%),var(--nvr-surface)}.hero-icon{width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(76,141,255,.2);border-radius:9px;color:var(--nvr-blue);background:rgba(76,141,255,.08)}.hero-icon :deep(svg){width:17px}.import-hero>div:nth-child(2){display:flex;min-width:0;flex-direction:column;gap:4px}.import-hero strong{font-size:12px}.import-hero span{color:var(--nvr-muted);font-size:10px;line-height:1.5}
+.import-layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:430px}.import-guide{padding:18px;border-right:1px solid var(--nvr-border);background:var(--nvr-surface)}.guide-title{margin-bottom:12px;color:var(--nvr-text-soft);font-size:10px;font-weight:700;letter-spacing:.08em}.import-guide ol{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none}.import-guide li{display:flex;flex-direction:column;gap:3px}.import-guide li b{color:var(--nvr-text);font-size:10px}.import-guide li span,.import-guide p{color:var(--nvr-muted);font-size:9px;line-height:1.65}.format-box{margin:16px 0 10px;padding:10px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-input)}.format-box code,.import-guide p code{color:var(--nvr-blue);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px}.example-button{width:100%;height:32px;border:1px solid var(--nvr-border-strong);border-radius:7px;color:var(--nvr-text-soft);background:var(--nvr-surface-2);cursor:pointer;font-size:10px}.example-button:hover{border-color:rgba(76,141,255,.4);color:var(--nvr-text)}.import-guide p{margin:14px 0 0}
+.import-editor{min-width:0;padding:16px 18px}.editor-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px}.editor-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:3px}.editor-head strong{font-size:11px}.editor-head span{color:var(--nvr-muted);font-size:9px}.parse-state{display:flex;align-items:center;gap:10px;white-space:nowrap}.parse-state span{display:inline-flex;align-items:center;gap:5px}.parse-state :deep(svg){width:12px}.parse-state .valid{color:var(--nvr-green)}.parse-state .invalid{color:var(--nvr-red)}.batch-textarea :deep(textarea){min-height:290px!important;padding:12px 13px!important;background:var(--nvr-input)!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace!important;font-size:10px!important;line-height:1.7!important}
+.validation-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface-2)}.validation-panel.danger{border-color:rgba(240,93,94,.22);background:rgba(240,93,94,.04)}.validation-panel.success{border-color:rgba(46,204,138,.2);background:rgba(46,204,138,.04)}.validation-title{display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:10px}.validation-title :deep(svg){width:13px}.danger .validation-title{color:var(--nvr-red)}.success .validation-title{color:var(--nvr-green)}.validation-list{max-height:105px;display:flex;flex-direction:column;gap:4px;overflow:auto;color:var(--nvr-red);font-size:9px}.result-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap;color:var(--nvr-muted);font-size:9px}.result-line b{color:var(--nvr-green);font-size:11px}.result-line .skipped{width:100%;color:var(--nvr-muted)}
+.import-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 18px;border-top:1px solid var(--nvr-border);background:var(--nvr-surface)}.footer-note{color:var(--nvr-muted);font-size:9px}.footer-actions{display:flex;align-items:center;gap:8px}
 @media(max-width:760px){.import-hero{grid-template-columns:auto 1fr}.import-hero>.el-switch{grid-column:1/-1;justify-self:start}.import-layout{grid-template-columns:1fr}.import-guide{border-right:0;border-bottom:1px solid var(--nvr-border)}.import-guide ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.import-footer{align-items:stretch;flex-direction:column}.footer-actions{justify-content:flex-end}}
 </style>
