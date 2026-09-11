@@ -16,7 +16,7 @@ interface RecentRecording {
 }
 
 interface PlaybackState {
-  state: 'direct' | 'ready' | 'needed' | 'generating' | 'error'
+  state: 'direct' | 'ready' | 'needed' | 'generating' | 'streaming' | 'error'
   direct: boolean
   error?: string | null
   video_codec?: string | null
@@ -55,7 +55,7 @@ interface BrowserResult {
   items: RecordingItem[]
 }
 
-type PlaybackMode = '' | 'original' | 'proxy'
+type PlaybackMode = '' | 'original' | 'proxy' | 'proxy-live'
 
 const cameras = ref<Camera[]>([])
 const selectedCamera = ref<number | null>(null)
@@ -74,6 +74,7 @@ const fallbackInProgress = ref(false)
 
 const recordings = computed(() => data.value?.items || [])
 const playbackModeLabel = computed(() => {
+  if (playbackMode.value === 'proxy-live') return 'H.264 边转边播'
   if (playbackMode.value === 'proxy') return 'H.264 Proxy'
   if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) return 'HEVC 原片'
   if (playbackMode.value === 'original') return '原片直放'
@@ -221,14 +222,8 @@ function streamUrl(id: number, source: 'original' | 'proxy') {
   return `/api/recordings/${id}/stream?source=${source}&v=${Date.now()}`
 }
 
-async function waitForProxy(id: number) {
-  for (let attempt = 0; attempt < 180; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 1000))
-    const response = await axios.get<PlaybackState>(`/api/recordings/${id}/playback`)
-    if (response.data.state === 'ready' || response.data.state === 'direct') return response.data
-    if (response.data.state === 'error') throw new Error(response.data.error || 'Web 播放文件生成失败')
-  }
-  throw new Error('Web 播放文件生成超时')
+function liveProxyUrl(id: number) {
+  return `/api/recordings/${id}/proxy-live.mp4?v=${Date.now()}`
 }
 
 async function prepareProxy(item: RecordingItem, automaticFallback = false) {
@@ -236,30 +231,35 @@ async function prepareProxy(item: RecordingItem, automaticFallback = false) {
   fallbackInProgress.value = true
   preparing.value = true
   proxyError.value = ''
-  playbackMode.value = 'proxy'
-  playbackNotice.value = automaticFallback
-    ? '当前浏览器无法直接解码此 HEVC 原片，正在自动生成 H.264 Proxy…'
-    : '正在生成 H.264 Web Proxy…'
   videoSrc.value = ''
 
   try {
-    const response = await axios.post<PlaybackState>(`/api/recordings/${item.id}/playback`)
-    let state = response.data
-    if (state.state === 'generating' || state.state === 'needed') {
-      state = await waitForProxy(item.id)
-    }
+    const response = await axios.get<PlaybackState>(`/api/recordings/${item.id}/playback`)
+    const state = response.data
+
     if (state.state === 'direct') {
       playbackMode.value = 'original'
+      playbackNotice.value = '原片可直接播放，无需转码'
       videoSrc.value = streamUrl(item.id, 'original')
+      await nextTick()
       return
     }
-    if (state.state !== 'ready') {
-      throw new Error(state.error || '录像尚未准备好')
+
+    if (state.state === 'ready') {
+      playbackMode.value = 'proxy'
+      playbackNotice.value = automaticFallback
+        ? 'HEVC 原片解码失败，已切换已缓存的 H.264 Proxy'
+        : '正在播放已缓存的 H.264 Proxy'
+      videoSrc.value = streamUrl(item.id, 'proxy')
+      await nextTick()
+      return
     }
-    videoSrc.value = streamUrl(item.id, 'proxy')
+
+    playbackMode.value = 'proxy-live'
     playbackNotice.value = automaticFallback
-      ? 'HEVC 原片解码失败，已自动切换 H.264 Proxy'
-      : '正在播放 H.264 Proxy'
+      ? 'HEVC 原片解码失败，正在边转 H.264 边播放；完成后自动缓存'
+      : '正在边转 H.264 边播放；无需等待整段转码完成'
+    videoSrc.value = liveProxyUrl(item.id)
     await nextTick()
   } catch (error: any) {
     proxyError.value = error?.response?.data?.detail || error?.message || '播放准备失败'
@@ -292,8 +292,8 @@ async function play(item: RecordingItem) {
     if (isHevc(item.video_codec)) {
       const hint = browserHevcHint()
       playbackNotice.value = hint === 'unsupported'
-        ? '浏览器未声明 HEVC 支持，先尝试原片；失败会自动转 H.264'
-        : '优先尝试 HEVC 原片，失败会自动转 H.264'
+        ? '浏览器未声明 HEVC 支持，先尝试原片；失败会自动边转边播 H.264'
+        : '优先尝试 HEVC 原片，失败会自动边转边播 H.264'
     } else {
       playbackNotice.value = 'H.264 原片直放，不转码'
     }
@@ -311,8 +311,10 @@ function handleVideoCanPlay() {
     playbackNotice.value = '浏览器已直接解码 HEVC 原片，无需转码'
   } else if (playbackMode.value === 'original') {
     playbackNotice.value = '原片直放，无需转码'
+  } else if (playbackMode.value === 'proxy-live') {
+    playbackNotice.value = '正在边转边播 H.264；完整转码结束后会自动缓存，后续播放可直接拖动'
   } else if (playbackMode.value === 'proxy') {
-    playbackNotice.value = '正在播放 H.264 Proxy'
+    playbackNotice.value = '正在播放已缓存的 H.264 Proxy'
   }
 }
 
@@ -327,9 +329,13 @@ async function handleVideoError() {
 
   preparing.value = false
   if (!proxyError.value) {
-    proxyError.value = playbackMode.value === 'proxy'
-      ? 'H.264 Proxy 加载失败'
-      : '原始录像无法在当前浏览器中播放'
+    if (playbackMode.value === 'proxy-live') {
+      proxyError.value = 'H.264 边转边播启动或传输失败'
+    } else if (playbackMode.value === 'proxy') {
+      proxyError.value = 'H.264 Proxy 加载失败'
+    } else {
+      proxyError.value = '原始录像无法在当前浏览器中播放'
+    }
   }
 }
 
@@ -357,7 +363,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h2>录像浏览</h2>
-        <p>H.264 原片直放 · HEVC 优先原片解码 · 不支持时自动回退 H.264 Proxy</p>
+        <p>H.264 原片直放 · HEVC 优先原片解码 · 不支持时自动边转 H.264 边播放</p>
       </div>
       <el-button @click="goBack">返回主界面</el-button>
     </div>
@@ -432,24 +438,28 @@ onMounted(async () => {
         <span>{{ formatDuration(activeRecording.duration) }}</span>
         <span>{{ activeRecording.video_codec || '-' }}</span>
         <span>{{ activeRecording.width }}×{{ activeRecording.height }}</span>
-        <el-tag v-if="playbackModeLabel" :type="playbackMode === 'proxy' ? 'warning' : 'success'">{{ playbackModeLabel }}</el-tag>
+        <el-tag v-if="playbackModeLabel" :type="playbackMode === 'proxy' || playbackMode === 'proxy-live' ? 'warning' : 'success'">{{ playbackModeLabel }}</el-tag>
       </div>
       <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
-      <div class="player-box" v-loading="preparing" :element-loading-text="playbackMode === 'proxy' ? '正在生成 H.264 Proxy…' : '正在加载原始录像…'">
+      <div
+        class="player-box"
+        v-loading="preparing"
+        :element-loading-text="playbackMode === 'proxy-live' ? '正在启动 H.264 边转边播…' : playbackMode === 'proxy' ? '正在加载 H.264 Proxy…' : '正在加载原始录像…'"
+      >
         <video
           v-if="videoSrc"
           :src="videoSrc"
           controls
           autoplay
           playsinline
-          preload="metadata"
+          preload="auto"
           @canplay="handleVideoCanPlay"
           @loadeddata="handleVideoCanPlay"
           @error="handleVideoError"
         />
         <el-empty v-else-if="!preparing && proxyError" :description="proxyError" />
         <div v-else-if="preparing" class="prepare-note">
-          {{ playbackMode === 'proxy' ? '浏览器无法直放时才会生成 Proxy；生成后会复用缓存。' : '正在尝试原片直放。' }}
+          {{ playbackMode === 'proxy-live' ? '首批 H.264 数据产生后即可播放，不需要等整段转码完成。' : playbackMode === 'proxy' ? '正在加载已经生成的 Proxy 缓存。' : '正在尝试原片直放。' }}
         </div>
       </div>
     </el-dialog>
