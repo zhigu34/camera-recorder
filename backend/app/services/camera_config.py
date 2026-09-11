@@ -3,7 +3,11 @@ from app.models.camera import Camera
 from app.services.ffmpeg_builder import CameraRuntimeConfig
 
 
-def runtime_config(camera: Camera) -> CameraRuntimeConfig:
+def runtime_config(
+    camera: Camera,
+    *,
+    align_segments_to_clock: bool | None = None,
+) -> CameraRuntimeConfig:
     return CameraRuntimeConfig(
         id=camera.id,
         name=camera.name,
@@ -18,4 +22,5 @@ def runtime_config(camera: Camera) -> CameraRuntimeConfig:
         audio_codec=camera.audio_codec,
         sample_rate=camera.sample_rate,
         audio_frame_samples=camera.audio_frame_samples,
+        align_segments_to_clock=align_segments_to_clock,
     )
