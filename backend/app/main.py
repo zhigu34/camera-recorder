@@ -15,7 +15,7 @@ from app.api.recording_navigation import router as recording_navigation_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
 from app.api.settings import router as settings_router
-from app.api.uploads import router as uploads_router
+from app.api.uploads import router as uploads_router, ws_router as uploads_ws_router
 from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
 from app.core.migrations import upgrade_database
@@ -105,6 +105,7 @@ app.include_router(playback_metrics_router)
 app.include_router(recording_navigation_router)
 app.include_router(recorder_router)
 app.include_router(uploads_router)
+app.include_router(uploads_ws_router)
 app.include_router(events_router)
 app.include_router(notifications_router)
 app.include_router(settings_router)
