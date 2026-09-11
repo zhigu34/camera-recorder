@@ -9,6 +9,7 @@ from app.api.cameras import router as cameras_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.notifications import router as notifications_router
+from app.api.recording_navigation import router as recording_navigation_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
 from app.api.settings import router as settings_router
@@ -95,7 +96,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.8.6",
+    version="0.8.7",
     lifespan=lifespan,
 )
 
@@ -109,6 +110,7 @@ app.add_middleware(
 
 app.include_router(cameras_router)
 app.include_router(recordings_router)
+app.include_router(recording_navigation_router)
 app.include_router(recorder_router)
 app.include_router(uploads_router)
 app.include_router(events_router)
