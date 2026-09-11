@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket
 
 from app.services.health_monitor import health_snapshot
 
@@ -23,10 +23,12 @@ async def status_websocket(websocket: WebSocket) -> None:
                     "data": await health_snapshot(),
                 }
             )
-            await asyncio.sleep(2.0)
-    except WebSocketDisconnect:
-        return
+            try:
+                message = await asyncio.wait_for(websocket.receive(), timeout=2.0)
+            except TimeoutError:
+                continue
+            if message.get("type") == "websocket.disconnect":
+                return
     except RuntimeError:
-        # Starlette may raise RuntimeError if a client disconnects between
-        # snapshot generation and send_json(). Treat that as a normal close.
+        # A disconnect can race with snapshot generation/send_json().
         return
