@@ -10,6 +10,7 @@ from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.notifications import router as notifications_router
 from app.api.playback_control import router as playback_control_router
+from app.api.playback_metrics import router as playback_metrics_router
 from app.api.recording_navigation import router as recording_navigation_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
@@ -24,6 +25,7 @@ from app.services.alert_monitor import alert_monitor
 from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
+from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_cleanup import storage_cleanup_manager
@@ -84,6 +86,7 @@ async def lifespan(_: FastAPI):
 
     yield
 
+    await playback_prefetch_manager.stop()
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
     await recorder_manager.stop_all()
@@ -97,7 +100,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.8.8",
+    version="0.8.9",
     lifespan=lifespan,
 )
 
@@ -108,10 +111,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(PlaybackPrefetchMiddleware)
 
 app.include_router(cameras_router)
 app.include_router(recordings_router)
 app.include_router(playback_control_router)
+app.include_router(playback_metrics_router)
 app.include_router(recording_navigation_router)
 app.include_router(recorder_router)
 app.include_router(uploads_router)
