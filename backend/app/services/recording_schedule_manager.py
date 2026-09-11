@@ -136,7 +136,16 @@ class RecordingScheduleManager:
         }
 
     async def reconcile(self) -> None:
+        """Reconcile every camera without letting one bad camera break the whole pass.
+
+        Schedule edits call this method synchronously after their database commit.
+        A runtime failure on an unrelated camera must therefore be represented as
+        schedule_state=error, not propagated as an HTTP 500 for an already-saved
+        configuration change. The periodic manager will retry on the next pass.
+        """
+
         now_local = datetime.now().astimezone()
+        errors: list[str] = []
         async with SessionLocal() as session:
             runtime = await load_runtime_settings(session)
             cameras = list(await session.scalars(select(Camera).order_by(Camera.id)))
@@ -146,11 +155,39 @@ class RecordingScheduleManager:
             self._manual_paused.intersection_update(known_ids)
 
             for camera in cameras:
-                await self._reconcile_camera(camera, runtime.auto_start_enabled, now_local, session)
+                try:
+                    await self._reconcile_camera(camera, runtime.auto_start_enabled, now_local, session)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    detail = str(exc)[-500:] or exc.__class__.__name__
+                    errors.append(f"camera {camera.id}: {detail}")
+                    self._managed.discard(camera.id)
+                    self._camera_status[camera.id] = {
+                        "camera_id": camera.id,
+                        "enabled": camera.enabled,
+                        "auto_record": camera.auto_record,
+                        "schedule_enabled": camera.recording_schedule_enabled,
+                        "schedule": schedule_label(camera),
+                        "schedule_state": "error",
+                        "in_window": recording_schedule_allows(camera, now_local),
+                        "auto_eligible": False,
+                        "running": recorder_manager.is_running(camera.id),
+                        "mode": "automatic",
+                        "error": detail,
+                    }
+                    add_event(
+                        session,
+                        level="error",
+                        category="recorder",
+                        code="recorder.schedule_reconcile_failed",
+                        message=f"摄像头 {camera.name} 录制计划校准失败: {detail}",
+                        camera_id=camera.id,
+                    )
             await session.commit()
 
         self._last_check_at = datetime.now(timezone.utc).isoformat()
-        self._last_error = None
+        self._last_error = "; ".join(errors)[-1000:] if errors else None
 
     async def _reconcile_camera(
         self,
