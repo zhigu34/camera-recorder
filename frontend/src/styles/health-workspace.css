@@ -1,0 +1,251 @@
+/* System health workspace: operations-first visual hierarchy inside the NVR shell. */
+.nvr-workspace-content .health-v2 {
+  max-width: none;
+  margin: 0;
+  padding: 18px 20px 26px;
+}
+
+.nvr-workspace-content .health-v2 > .page-head {
+  min-height: 42px;
+  margin: 0 0 12px;
+  padding: 0 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.008)), var(--nvr-surface);
+}
+
+.nvr-workspace-content .health-v2 .realtime-pill {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(245,185,66,.18);
+  border-radius: 999px;
+  background: rgba(245,185,66,.055);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.nvr-workspace-content .health-v2 .realtime-pill.online {
+  border-color: rgba(46,204,138,.2);
+  background: rgba(46,204,138,.06);
+}
+
+.nvr-workspace-content .health-v2 .realtime-pill i {
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.nvr-workspace-content .health-v2 .metrics {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.nvr-workspace-content .health-v2 .metrics article {
+  position: relative;
+  min-height: 112px;
+  padding: 15px 15px 13px;
+  overflow: hidden;
+  border-color: var(--nvr-border);
+  border-radius: 10px;
+  background: linear-gradient(155deg, rgba(255,255,255,.028), transparent 58%), var(--nvr-surface);
+}
+
+.nvr-workspace-content .health-v2 .metrics article::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #526174;
+  opacity: .9;
+}
+
+.nvr-workspace-content .health-v2 .metrics article:nth-child(1)::before { background: var(--nvr-green); }
+.nvr-workspace-content .health-v2 .metrics article:nth-child(2)::before { background: var(--nvr-blue); }
+.nvr-workspace-content .health-v2 .metrics article:nth-child(3)::before { background: var(--nvr-yellow); }
+.nvr-workspace-content .health-v2 .metrics article:nth-child(4)::before { background: var(--nvr-purple); }
+.nvr-workspace-content .health-v2 .metrics article:nth-child(5)::before { background: #42b8d8; }
+.nvr-workspace-content .health-v2 .metrics article:nth-child(6)::before { background: #718198; }
+.nvr-workspace-content .health-v2 .metrics article.alert::before { background: var(--nvr-red); }
+
+.nvr-workspace-content .health-v2 .metrics article.alert {
+  border-color: rgba(240,93,94,.32);
+  background: linear-gradient(145deg, rgba(240,93,94,.09), transparent 58%), var(--nvr-surface);
+}
+
+.nvr-workspace-content .health-v2 .metrics span {
+  font-size: 10px;
+  font-weight: 620;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.nvr-workspace-content .health-v2 .metrics strong {
+  margin: 12px 0 8px;
+  font-size: 29px;
+  font-weight: 700;
+  letter-spacing: -.03em;
+}
+
+.nvr-workspace-content .health-v2 .metrics em {
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.nvr-workspace-content .health-v2 .panel {
+  margin-top: 12px;
+  border-color: var(--nvr-border);
+  border-radius: 10px;
+  background: var(--nvr-surface);
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+}
+
+.nvr-workspace-content .health-v2 .camera-panel {
+  border-color: rgba(76,141,255,.14);
+}
+
+.nvr-workspace-content .health-v2 .panel-head {
+  min-height: 56px;
+  padding: 0 16px;
+  background: linear-gradient(180deg, rgba(255,255,255,.02), transparent);
+}
+
+.nvr-workspace-content .health-v2 .panel-head strong {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: .015em;
+}
+
+.nvr-workspace-content .health-v2 .panel-head span {
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.nvr-workspace-content .health-v2 .camera-panel .panel-head > span {
+  padding: 4px 8px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.02);
+  color: #8796a8;
+}
+
+.nvr-workspace-content .health-v2 .state-table .el-table__row:hover > td.el-table__cell {
+  background: #18222d !important;
+}
+
+.nvr-workspace-content .health-v2 .state-table td.el-table__cell,
+.nvr-workspace-content .health-v2 .state-table th.el-table__cell {
+  height: 42px;
+}
+
+.nvr-workspace-content .health-v2 .two-column {
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, .45fr);
+  gap: 12px;
+}
+
+.nvr-workspace-content .health-v2 .reliability-grid {
+  gap: 0;
+  background: transparent;
+}
+
+.nvr-workspace-content .health-v2 .reliability-grid > div {
+  min-height: 78px;
+  padding: 13px 15px;
+  border-right: 1px solid var(--nvr-border);
+  border-bottom: 1px solid var(--nvr-border);
+  background: #111820;
+}
+
+.nvr-workspace-content .health-v2 .reliability-grid > div:last-child { border-right: 0; }
+.nvr-workspace-content .health-v2 .reliability-grid span { font-size: 9px; letter-spacing: .02em; }
+.nvr-workspace-content .health-v2 .reliability-grid strong { font-size: 21px; }
+
+.nvr-workspace-content .health-v2 .storage-panel {
+  position: relative;
+  min-height: 100%;
+  padding-bottom: 18px;
+  background: linear-gradient(150deg, rgba(76,141,255,.045), transparent 58%), var(--nvr-surface);
+}
+
+.nvr-workspace-content .health-v2 .storage-number {
+  padding: 20px 17px 9px;
+  font-size: 38px;
+  font-weight: 720;
+  letter-spacing: -.04em;
+}
+
+.nvr-workspace-content .health-v2 .storage-detail {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 7px;
+  padding: 0 17px;
+}
+
+.nvr-workspace-content .health-v2 .storage-detail span {
+  display: flex;
+  justify-content: space-between;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed rgba(255,255,255,.055);
+}
+
+.nvr-workspace-content .health-v2 .stability-panel {
+  border-color: rgba(155,123,255,.18);
+  background: linear-gradient(155deg, rgba(155,123,255,.045), transparent 45%), var(--nvr-surface);
+}
+
+.nvr-workspace-content .health-v2 .stability-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+}
+
+.nvr-workspace-content .health-v2 .stability-summary span {
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 15px;
+  border-right: 1px solid var(--nvr-border);
+  background: rgba(11,15,20,.23);
+}
+
+.nvr-workspace-content .health-v2 .stability-summary span:last-child { border-right: 0; }
+.nvr-workspace-content .health-v2 .stability-summary b { font-size: 15px; }
+
+.nvr-workspace-content .health-v2 .error-box {
+  margin-top: 16px;
+  padding: 10px 11px;
+  border-color: rgba(240,93,94,.22);
+  background: rgba(240,93,94,.075);
+}
+
+.nvr-workspace-content .health-v2 .snapshot-time {
+  padding: 10px 2px 0;
+  color: #556476;
+  font-size: 9px;
+  letter-spacing: .02em;
+}
+
+@media (max-width: 1380px) {
+  .nvr-workspace-content .health-v2 .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 1120px) {
+  .nvr-workspace-content .health-v2 .two-column { grid-template-columns: 1fr; }
+  .nvr-workspace-content .health-v2 .storage-detail { grid-template-columns: repeat(3, minmax(0,1fr)); }
+}
+
+@media (max-width: 760px) {
+  .nvr-workspace-content .health-v2 { padding: 12px; }
+  .nvr-workspace-content .health-v2 > .page-head { padding: 6px 8px; }
+  .nvr-workspace-content .health-v2 .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nvr-workspace-content .health-v2 .stability-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .nvr-workspace-content .health-v2 .stability-summary span:nth-child(2n) { border-right: 0; }
+  .nvr-workspace-content .health-v2 .storage-detail { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .nvr-workspace-content .health-v2 .metrics { grid-template-columns: 1fr; }
+  .nvr-workspace-content .health-v2 .reliability-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
