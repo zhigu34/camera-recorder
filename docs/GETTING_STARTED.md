@@ -169,6 +169,42 @@ WebDAV URL: http://openlist:5244/dav
 
 详见 `docs/OPENLIST.md`。
 
+## 24h / 72h 稳定性验收
+
+系统健康采样会持续记录 Recorder 可用率、录像完整率、FFmpeg 失败和断流信息。部署持续运行后，可直接在项目根目录执行：
+
+```bash
+bash scripts/stability-check.sh 24
+bash scripts/stability-check.sh 72
+```
+
+脚本会从正在运行的 backend 主进程读取 `/api/health/stability`，输出：
+
+- 监控摄像头数量与 PASS / FAIL / COLLECTING
+- 录像可用率
+- 录像完整率
+- FFmpeg 失败与连续失败
+- 断流次数、累计时长和最长单次断流
+- 每台失败/采集中摄像头的具体原因
+
+退出码：
+
+```text
+0  PASS
+1  FAIL
+2  COLLECTING（采样时间或覆盖率尚不足）
+3  无法读取报告
+```
+
+如果刚部署不久就执行 24h / 72h 验收，出现 `COLLECTING` 是正常的；应让服务持续运行到对应观察窗口后再次执行。验收期间不要清空 SQLite 数据库或健康采样记录。
+
+也可以直接查看原始 JSON：
+
+```bash
+docker compose exec -T backend \
+  python -m app.cli.stability_check --hours 24 --json
+```
+
 ## 本地开发
 
 前置条件：
