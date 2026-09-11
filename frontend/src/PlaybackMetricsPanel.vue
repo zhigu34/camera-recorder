@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 
 const props = withDefaults(defineProps<{ compact?: boolean }>(), { compact: false })
@@ -57,6 +57,8 @@ interface PlaybackMetrics {
 
 const metrics = ref<PlaybackMetrics | null>(null)
 const loading = ref(false)
+const panelRoot = ref<HTMLElement | null>(null)
+const embedded = ref(false)
 let timer: number | null = null
 
 const startupAttempts = computed(() => {
@@ -126,8 +128,20 @@ async function loadMetrics() {
   }
 }
 
+async function placeInPlaybackWorkspace() {
+  if (props.compact) return
+  await nextTick()
+  const root = panelRoot.value
+  const timeline = document.querySelector('.page-shell .timeline')
+  const timelineCard = timeline?.closest('.el-card')
+  if (!root || !timelineCard || !timelineCard.parentElement) return
+  timelineCard.insertAdjacentElement('afterend', root)
+  embedded.value = true
+}
+
 onMounted(() => {
   void loadMetrics()
+  void placeInPlaybackWorkspace()
   timer = window.setInterval(() => void loadMetrics(), props.compact ? 60_000 : 30_000)
 })
 
@@ -137,7 +151,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div id="playback-compatibility" class="playback-health" :class="{ compact }" v-loading="loading && !metrics">
+  <div ref="panelRoot" id="playback-compatibility" class="playback-health" :class="{ compact, embedded }" v-loading="loading && !metrics">
     <el-card shadow="never">
       <template #header>
         <div class="panel-head">
@@ -201,5 +215,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.playback-health{max-width:1500px;margin:16px auto 24px;padding:0 24px;box-sizing:border-box}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-actions{display:flex;align-items:center;gap:8px}.subtitle{margin-top:4px;color:#909399;font-size:12px}.metric-row{margin-bottom:14px}.metric-box{min-height:72px;border:1px solid #ebeef5;border-radius:7px;background:#fafafa;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px}.metric-box strong{font-size:21px;color:#303133}.metric-box span{font-size:12px;color:#909399}.backend-strip{display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 12px;margin-bottom:14px;background:#f5f7fa;border-radius:6px;color:#606266;font-size:12px}.backend-strip b{color:#303133}.compact-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-border);overflow:hidden}.compact-metrics>div{padding:12px 14px;background:#111820;display:flex;flex-direction:column;gap:5px}.compact-metrics span{color:var(--nvr-muted);font-size:10px}.compact-metrics strong{color:var(--nvr-text);font-size:18px}.compact-metrics strong.danger,.compact-metrics strong.rate-danger{color:var(--nvr-red)}.compact-metrics strong.rate-warning{color:var(--nvr-yellow)}.compact-metrics strong.rate-success{color:var(--nvr-green)}.compact-hint{margin-top:10px;color:var(--nvr-muted);font-size:10px;line-height:1.6}@media(max-width:720px){.playback-health{padding:0 14px}.panel-head{align-items:flex-start}.compact-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.playback-health{max-width:1500px;margin:16px auto 24px;padding:0 24px;box-sizing:border-box}.playback-health.embedded{width:100%;max-width:none;margin:16px 0 0;padding:0}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-actions{display:flex;align-items:center;gap:8px}.subtitle{margin-top:4px;color:#909399;font-size:12px}.metric-row{margin-bottom:14px}.metric-box{min-height:72px;border:1px solid #ebeef5;border-radius:7px;background:#fafafa;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px}.metric-box strong{font-size:21px;color:#303133}.metric-box span{font-size:12px;color:#909399}.backend-strip{display:flex;flex-wrap:wrap;gap:8px 18px;padding:10px 12px;margin-bottom:14px;background:#f5f7fa;border-radius:6px;color:#606266;font-size:12px}.backend-strip b{color:#303133}.compact-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-border);overflow:hidden}.compact-metrics>div{padding:12px 14px;background:#111820;display:flex;flex-direction:column;gap:5px}.compact-metrics span{color:var(--nvr-muted);font-size:10px}.compact-metrics strong{color:var(--nvr-text);font-size:18px}.compact-metrics strong.danger,.compact-metrics strong.rate-danger{color:var(--nvr-red)}.compact-metrics strong.rate-warning{color:var(--nvr-yellow)}.compact-metrics strong.rate-success{color:var(--nvr-green)}.compact-hint{margin-top:10px;color:var(--nvr-muted);font-size:10px;line-height:1.6}@media(max-width:720px){.playback-health{padding:0 14px}.playback-health.embedded{padding:0}.panel-head{align-items:flex-start}.compact-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
