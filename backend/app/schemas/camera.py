@@ -21,6 +21,18 @@ class CameraCreate(CameraBase):
     password: str = Field(min_length=1, max_length=512)
 
 
+class CameraBatchCreate(BaseModel):
+    cameras: list[CameraCreate] = Field(min_length=1, max_length=200)
+    skip_existing: bool = True
+
+
+class CameraBatchResult(BaseModel):
+    created: int
+    skipped: int
+    created_ids: list[int] = Field(default_factory=list)
+    skipped_names: list[str] = Field(default_factory=list)
+
+
 class CameraUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     ip: str | None = Field(default=None, min_length=1, max_length=255)
