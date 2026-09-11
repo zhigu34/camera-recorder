@@ -24,6 +24,9 @@ class RecordingScheduleManager:
     boundary. Manual starts are treated as explicit overrides. Manual stops pause
     the current automatic window and are released after the camera leaves that
     window, so the next window can start normally.
+
+    This manager owns schedule state only. It must never write camera connectivity
+    state; Probe owns that independently and RecorderManager owns recorder state.
     """
 
     def __init__(self) -> None:
@@ -94,6 +97,23 @@ class RecordingScheduleManager:
         self.clear_override(camera_id)
         self._camera_status.pop(camera_id, None)
 
+    def state_for(self, camera: Camera) -> str:
+        """Return schedule state without mixing in connectivity or recorder state."""
+
+        snapshot = self._camera_status.get(camera.id)
+        if snapshot and snapshot.get("schedule_state"):
+            return str(snapshot["schedule_state"])
+        if not camera.enabled or not camera.auto_record:
+            return "disabled"
+        if camera.id in self._manual_running:
+            return "manual_override"
+        if camera.id in self._manual_paused:
+            return "manual_paused"
+        if camera.recording_schedule_enabled:
+            in_window = recording_schedule_allows(camera, datetime.now().astimezone())
+            return "in_window" if in_window else "scheduled"
+        return "automatic"
+
     def status(self) -> dict[str, Any]:
         return {
             "running": bool(self._task and not self._task.done()),
@@ -140,7 +160,6 @@ class RecordingScheduleManager:
             self.clear_override(camera.id)
             if running:
                 await recorder_manager.stop(camera.id)
-                camera.status = "stopped"
                 running = False
 
         if camera.id in self._managed and not running and auto_eligible:
@@ -150,17 +169,28 @@ class RecordingScheduleManager:
         if camera.id in self._manual_paused and not in_window:
             self._manual_paused.discard(camera.id)
 
+        if not camera.enabled or not camera.auto_record:
+            schedule_state = "disabled"
+        elif not global_auto_start:
+            schedule_state = "global_disabled"
+        elif camera.recording_schedule_enabled:
+            schedule_state = "in_window" if in_window else "scheduled"
+        else:
+            schedule_state = "automatic"
+
         if camera.id in self._manual_running:
             mode = "manual"
+            schedule_state = "manual_override"
         elif camera.id in self._manual_paused:
             mode = "manual_paused"
+            schedule_state = "manual_paused"
         else:
             mode = "automatic"
             if auto_eligible and not running:
                 if camera.timestamp_mode == "reconstruct" and (
                     not camera.fps_num or not camera.fps_den
                 ):
-                    camera.status = "probe_required"
+                    schedule_state = "probe_required"
                 else:
                     try:
                         # Explicit schedules segment relative to actual start time;
@@ -170,7 +200,6 @@ class RecordingScheduleManager:
                             runtime_config(camera, align_segments_to_clock=align_override)
                         )
                         self._managed.add(camera.id)
-                        camera.status = "recording"
                         running = True
                         add_event(
                             session,
@@ -182,7 +211,7 @@ class RecordingScheduleManager:
                             metadata={"schedule": schedule_label(camera)},
                         )
                     except Exception as exc:
-                        camera.status = "schedule_error"
+                        schedule_state = "error"
                         add_event(
                             session,
                             level="error",
@@ -194,7 +223,6 @@ class RecordingScheduleManager:
             elif not auto_eligible and running and camera.id in self._managed:
                 await recorder_manager.stop(camera.id)
                 self._managed.discard(camera.id)
-                camera.status = "scheduled" if camera.auto_record else "stopped"
                 running = False
                 add_event(
                     session,
@@ -205,8 +233,6 @@ class RecordingScheduleManager:
                     camera_id=camera.id,
                     metadata={"schedule": schedule_label(camera)},
                 )
-            elif not running and camera.auto_record and camera.enabled and not in_window:
-                camera.status = "scheduled"
 
         self._camera_status[camera.id] = {
             "camera_id": camera.id,
@@ -214,6 +240,7 @@ class RecordingScheduleManager:
             "auto_record": camera.auto_record,
             "schedule_enabled": camera.recording_schedule_enabled,
             "schedule": schedule_label(camera),
+            "schedule_state": schedule_state,
             "in_window": in_window,
             "auto_eligible": auto_eligible,
             "running": recorder_manager.is_running(camera.id),
