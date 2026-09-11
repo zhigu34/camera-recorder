@@ -440,8 +440,9 @@ function openPlayback() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-function openCameraConfig() {
-  window.history.pushState({}, '', '/cameras')
+function openCameraConfig(cameraId: number | null) {
+  if (cameraId === null) return
+  window.history.pushState({}, '', `/cameras?camera_id=${encodeURIComponent(String(cameraId))}`)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
@@ -586,7 +587,7 @@ onBeforeUnmount(() => {
 
           <div class="slot-actions">
             <button title="重新连接" @click="restartSlot(index)"><RefreshRight /></button>
-            <button title="摄像头配置" @click="openCameraConfig"><Setting /></button>
+            <button title="摄像头配置" @click="openCameraConfig(slot.cameraId)"><Setting /></button>
             <button title="录像回放" @click="openPlayback"><VideoPlay /></button>
             <button title="全屏" @click="enterFullscreen(index)"><FullScreen /></button>
             <button title="移除" @click="clearSlot(index)"><Close /></button>
