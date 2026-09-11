@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { CircleCheckFilled, DocumentCopy, WarningFilled } from '@element-plus/icons-vue'
 
 type TimestampMode = 'native' | 'reconstruct' | 'wallclock'
 
@@ -29,6 +30,11 @@ interface ParsedBatch {
   cameras: CameraCreatePayload[]
   errors: string[]
 }
+
+const emit = defineEmits<{
+  (event: 'completed'): void
+  (event: 'close'): void
+}>()
 
 const rawText = ref('')
 const skipExisting = ref(true)
@@ -92,13 +98,20 @@ function parseBatch(text: string): ParsedBatch {
 const parsed = computed(() => parseBatch(rawText.value))
 const validCount = computed(() => parsed.value.cameras.length)
 const errorCount = computed(() => parsed.value.errors.length)
+const canSubmit = computed(() => validCount.value > 0 && errorCount.value === 0 && !saving.value)
 
 function fillExample() {
   rawText.value = [
-    '# 名称|IP|用户名|密码|主码流RTSP路径|时间戳模式|RTSP端口(可选)|子码流RTSP路径(可选)',
+    '# 名称|IP|用户名|密码|主码流路径|时间戳模式|RTSP端口|子码流路径',
     '监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub',
     '监控-门口|192.168.1.101|admin|你的密码|/ch1/main|native|554|/ch1/sub',
   ].join('\n')
+  lastResult.value = null
+}
+
+function clearAll() {
+  rawText.value = ''
+  lastResult.value = null
 }
 
 async function submitBatch() {
@@ -125,6 +138,7 @@ async function submitBatch() {
     lastResult.value = data
     const skippedText = data.skipped ? `，跳过 ${data.skipped} 个已存在项` : ''
     ElMessage.success(`成功添加 ${data.created} 个摄像头${skippedText}`)
+    emit('completed')
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '批量添加失败')
   } finally {
@@ -134,47 +148,77 @@ async function submitBatch() {
 </script>
 
 <template>
-  <section class="batch-page">
-    <div class="batch-panel">
-      <el-alert type="info" :closable="false" show-icon>
-        <template #title>格式：名称 | IP | 用户名 | 密码 | 主码流路径 | 时间戳模式 | RTSP端口 | 子码流路径</template>
-        最少填写前 4 项。主码流默认 /ch1/main，模式默认 reconstruct，端口默认 554；子码流可以留空。空行和以 # 开头的注释行会自动忽略。
-      </el-alert>
-
-      <div class="toolbar">
-        <el-button size="small" @click="fillExample">填入示例</el-button>
-        <el-switch v-model="skipExisting" active-text="跳过已存在的同名摄像头" />
+  <section class="batch-importer">
+    <div class="import-hero">
+      <div class="hero-icon"><DocumentCopy /></div>
+      <div>
+        <strong>一次粘贴，多路导入</strong>
+        <span>每行一台摄像头。系统会先在浏览器内校验格式，确认无误后再提交。</span>
       </div>
+      <el-switch v-model="skipExisting" inline-prompt active-text="跳过重名" inactive-text="严格导入" />
+    </div>
 
-      <el-input
-        v-model="rawText"
-        type="textarea"
-        :rows="14"
-        resize="vertical"
-        spellcheck="false"
-        placeholder="监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub"
-      />
+    <div class="import-layout">
+      <aside class="import-guide">
+        <div class="guide-title">字段说明</div>
+        <ol>
+          <li><b>必填</b><span>名称 · IP/主机 · 用户名 · 密码</span></li>
+          <li><b>可选</b><span>主码流 · 时间戳模式 · 端口 · 子码流</span></li>
+          <li><b>默认</b><span>/ch1/main · reconstruct · 554</span></li>
+        </ol>
+        <div class="format-box">
+          <code>名称 | IP | 用户名 | 密码 | 主码流 | 模式 | 端口 | 子码流</code>
+        </div>
+        <button class="example-button" type="button" @click="fillExample">填入示例数据</button>
+        <p>空行与以 <code>#</code> 开头的注释行会忽略。密码仅提交给后端并加密保存，不会在导入结果中回显。</p>
+      </aside>
 
-      <div class="summary">
-        <el-tag type="success">可导入 {{ validCount }} 个</el-tag>
-        <el-tag v-if="errorCount" type="danger">格式错误 {{ errorCount }} 条</el-tag>
-        <span class="security-hint">密码不会回显，后端使用系统密钥加密保存。</span>
+      <div class="import-editor">
+        <div class="editor-head">
+          <div><strong>摄像头数据</strong><span>支持直接从表格或文本编辑器整理后粘贴</span></div>
+          <div class="parse-state">
+            <span class="valid"><CircleCheckFilled />{{ validCount }} 可导入</span>
+            <span v-if="errorCount" class="invalid"><WarningFilled />{{ errorCount }} 错误</span>
+          </div>
+        </div>
+
+        <el-input
+          v-model="rawText"
+          class="batch-textarea"
+          type="textarea"
+          :rows="13"
+          resize="vertical"
+          spellcheck="false"
+          placeholder="监控-大厅|192.168.1.100|admin|密码|/ch1/main|reconstruct|554|/ch1/sub"
+          @input="lastResult = null"
+        />
+
+        <div v-if="parsed.errors.length" class="validation-panel danger">
+          <div class="validation-title"><WarningFilled /><strong>请先修正格式问题</strong></div>
+          <div class="validation-list">
+            <span v-for="item in parsed.errors.slice(0, 12)" :key="item">{{ item }}</span>
+            <span v-if="parsed.errors.length > 12">还有 {{ parsed.errors.length - 12 }} 条未显示</span>
+          </div>
+        </div>
+
+        <div v-if="lastResult" class="validation-panel success">
+          <div class="validation-title"><CircleCheckFilled /><strong>导入完成</strong></div>
+          <div class="result-line">
+            <span>已创建 <b>{{ lastResult.created }}</b> 台</span>
+            <span>跳过 <b>{{ lastResult.skipped }}</b> 台</span>
+            <span v-if="lastResult.skipped_names.length" class="skipped">{{ lastResult.skipped_names.join('、') }}</span>
+          </div>
+        </div>
       </div>
+    </div>
 
-      <el-alert v-if="parsed.errors.length" class="error-box" title="请修正以下问题" type="error" :closable="false" show-icon>
-        <div v-for="item in parsed.errors.slice(0, 20)" :key="item" class="error-line">{{ item }}</div>
-        <div v-if="parsed.errors.length > 20" class="error-line">还有 {{ parsed.errors.length - 20 }} 条错误未显示</div>
-      </el-alert>
-
-      <el-alert v-if="lastResult" class="result-box" title="导入完成" type="success" :closable="false" show-icon>
-        已创建 {{ lastResult.created }} 个，跳过 {{ lastResult.skipped }} 个。
-        <span v-if="lastResult.skipped_names.length">跳过：{{ lastResult.skipped_names.join('、') }}</span>
-      </el-alert>
-
-      <div class="actions">
-        <el-button @click="rawText = ''; lastResult = null">清空</el-button>
-        <el-button type="primary" :loading="saving" :disabled="!validCount || errorCount > 0" @click="submitBatch">
-          批量添加 {{ validCount ? `(${validCount})` : '' }}
+    <div class="import-footer">
+      <div class="footer-note">新增摄像头默认启用，但不会自动录像；可在摄像头或录制计划中再开启。</div>
+      <div class="footer-actions">
+        <el-button @click="clearAll">清空</el-button>
+        <el-button @click="emit('close')">关闭</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!canSubmit" @click="submitBatch">
+          批量添加{{ validCount ? ` ${validCount} 台` : '' }}
         </el-button>
       </div>
     </div>
@@ -182,5 +226,11 @@ async function submitBatch() {
 </template>
 
 <style scoped>
-.batch-page{max-width:1120px;margin:0 auto;padding:22px;color:var(--nvr-text)}.batch-panel{padding:18px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:18px 0 12px}.summary{display:flex;align-items:center;gap:10px;margin-top:12px}.security-hint{margin-left:auto;color:var(--nvr-muted);font-size:11px}.error-box,.result-box{margin-top:16px}.error-line{line-height:1.7}.actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}@media(max-width:760px){.batch-page{padding:14px}.toolbar,.summary{align-items:flex-start;flex-direction:column}.security-hint{margin-left:0}}
+.batch-importer{color:var(--nvr-text);background:var(--nvr-bg)}
+.import-hero{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--nvr-border);background:linear-gradient(90deg,rgba(76,141,255,.07),transparent 58%),#0f151c}.hero-icon{width:34px;height:34px;display:grid;place-items:center;border:1px solid rgba(76,141,255,.2);border-radius:9px;color:var(--nvr-blue);background:rgba(76,141,255,.08)}.hero-icon :deep(svg){width:17px}.import-hero>div:nth-child(2){display:flex;min-width:0;flex-direction:column;gap:4px}.import-hero strong{font-size:12px}.import-hero span{color:var(--nvr-muted);font-size:10px;line-height:1.5}
+.import-layout{display:grid;grid-template-columns:250px minmax(0,1fr);min-height:430px}.import-guide{padding:18px;border-right:1px solid var(--nvr-border);background:#10161e}.guide-title{margin-bottom:12px;color:#aeb9c6;font-size:10px;font-weight:700;letter-spacing:.08em}.import-guide ol{display:flex;flex-direction:column;gap:12px;margin:0;padding:0;list-style:none}.import-guide li{display:flex;flex-direction:column;gap:3px}.import-guide li b{color:var(--nvr-text);font-size:10px}.import-guide li span,.import-guide p{color:#69778a;font-size:9px;line-height:1.65}.format-box{margin:16px 0 10px;padding:10px;border:1px solid var(--nvr-border);border-radius:8px;background:#0b1118}.format-box code,.import-guide p code{color:#9fb8df;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:9px}.example-button{width:100%;height:32px;border:1px solid var(--nvr-border-strong);border-radius:7px;color:#b8c4d1;background:var(--nvr-surface-2);cursor:pointer;font-size:10px}.example-button:hover{border-color:rgba(76,141,255,.4);color:#dce7f5}.import-guide p{margin:14px 0 0}
+.import-editor{min-width:0;padding:16px 18px}.editor-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:10px}.editor-head>div:first-child{display:flex;min-width:0;flex-direction:column;gap:3px}.editor-head strong{font-size:11px}.editor-head span{color:var(--nvr-muted);font-size:9px}.parse-state{display:flex;align-items:center;gap:10px;white-space:nowrap}.parse-state span{display:inline-flex;align-items:center;gap:5px}.parse-state :deep(svg){width:12px}.parse-state .valid{color:var(--nvr-green)}.parse-state .invalid{color:var(--nvr-red)}.batch-textarea :deep(textarea){min-height:290px!important;padding:12px 13px!important;color:#bdc9d6!important;background:#0b1118!important;font-family:ui-monospace,SFMono-Regular,Menlo,monospace!important;font-size:10px!important;line-height:1.7!important}
+.validation-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface-2)}.validation-panel.danger{border-color:rgba(240,93,94,.22);background:rgba(240,93,94,.04)}.validation-panel.success{border-color:rgba(46,204,138,.2);background:rgba(46,204,138,.04)}.validation-title{display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:10px}.validation-title :deep(svg){width:13px}.danger .validation-title{color:var(--nvr-red)}.success .validation-title{color:var(--nvr-green)}.validation-list{max-height:105px;display:flex;flex-direction:column;gap:4px;overflow:auto;color:#b88788;font-size:9px}.result-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap;color:#9db4a9;font-size:9px}.result-line b{color:var(--nvr-green);font-size:11px}.result-line .skipped{width:100%;color:var(--nvr-muted)}
+.import-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 18px;border-top:1px solid var(--nvr-border);background:#10161e}.footer-note{color:#66758a;font-size:9px}.footer-actions{display:flex;align-items:center;gap:8px}
+@media(max-width:760px){.import-hero{grid-template-columns:auto 1fr}.import-hero>.el-switch{grid-column:1/-1;justify-self:start}.import-layout{grid-template-columns:1fr}.import-guide{border-right:0;border-bottom:1px solid var(--nvr-border)}.import-guide ol{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.import-footer{align-items:stretch;flex-direction:column}.footer-actions{justify-content:flex-end}}
 </style>
