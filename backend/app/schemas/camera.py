@@ -1,10 +1,35 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
+
+
+class RecordingWindow(BaseModel):
+    start: str
+    end: str
+
+    @field_validator("start", "end")
+    @classmethod
+    def validate_time(cls, value: str) -> str:
+        parts = value.split(":")
+        if len(parts) != 2:
+            raise ValueError("time must use HH:MM format")
+        try:
+            hour, minute = int(parts[0]), int(parts[1])
+        except ValueError as exc:
+            raise ValueError("time must use HH:MM format") from exc
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise ValueError("time must use HH:MM format")
+        return f"{hour:02d}:{minute:02d}"
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.start == self.end:
+            raise ValueError("recording window start and end cannot be equal")
+        return self
 
 
 class CameraBase(BaseModel):
@@ -16,7 +41,15 @@ class CameraBase(BaseModel):
     sub_rtsp_path: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool = True
     auto_record: bool = False
+    recording_schedule_enabled: bool = False
+    recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=16)
     timestamp_mode: TimestampMode = "reconstruct"
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.recording_schedule_enabled and not self.recording_schedule:
+            raise ValueError("recording schedule requires at least one time window")
+        return self
 
 
 class CameraCreate(CameraBase):
@@ -45,6 +78,8 @@ class CameraUpdate(BaseModel):
     sub_rtsp_path: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool | None = None
     auto_record: bool | None = None
+    recording_schedule_enabled: bool | None = None
+    recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=16)
     timestamp_mode: TimestampMode | None = None
 
 
