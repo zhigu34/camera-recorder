@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+dist/
+frontend/.vite/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.key
+data/secret.key
+
+# Runtime data
+data/*.db
+data/*.db-*
+recordings/
+staging/
+failed/
+logs/
+
+# Media
+*.mkv
+*.mp4
+*.mov
+*.ts
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Logs
+*.log
