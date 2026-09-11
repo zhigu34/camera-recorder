@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from app.services.ffmpeg_builder import CameraRuntimeConfig, build_record_command
+from app.services.system_settings import RuntimeSettings
 
 
 def test_reconstruct_command_uses_detected_media_clock(tmp_path: Path):
@@ -19,8 +20,9 @@ def test_reconstruct_command_uses_detected_media_clock(tmp_path: Path):
         sample_rate=16000,
         audio_frame_samples=1024,
     )
+    runtime = RuntimeSettings(segment_duration_seconds=600, rtsp_timeout_us=5_000_000)
 
-    command = build_record_command(camera, tmp_path)
+    command = build_record_command(camera, tmp_path, runtime)
     joined = " ".join(command)
 
     assert "time_base=1/20:prescale=1" in joined
