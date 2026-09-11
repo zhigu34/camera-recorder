@@ -196,6 +196,88 @@ button, input, textarea, select { font: inherit; }
 .nvr-workspace-content .muted,
 .nvr-workspace-content .subtitle { color: var(--nvr-muted) !important; }
 
+/* First light-theme migration pass for custom NVR surfaces that still carry
+   component-local dark literals. Keep these overrides centralized until those
+   pages are fully tokenized. */
+:root[data-theme="light"] .schedule-page .toolbar,
+:root[data-theme="light"] .schedule-page .policy-card,
+:root[data-theme="light"] .schedule-page .window-card,
+:root[data-theme="light"] .schedule-page .time-band,
+:root[data-theme="light"] .schedule-page .duration-box,
+:root[data-theme="light"] .schedule-page .window-note,
+:root[data-theme="light"] .schedule-page .schedule-example {
+  background: var(--nvr-surface) !important;
+  color: var(--nvr-text-soft) !important;
+}
+:root[data-theme="light"] .schedule-page .window-card-head,
+:root[data-theme="light"] .schedule-page .weekday-grid button,
+:root[data-theme="light"] .schedule-page .preset-row button,
+:root[data-theme="light"] .schedule-page .time-field .el-input__wrapper {
+  background: var(--nvr-surface-2) !important;
+}
+:root[data-theme="light"] .schedule-page .policy-copy strong,
+:root[data-theme="light"] .schedule-page .editor-head strong,
+:root[data-theme="light"] .schedule-page .window-title strong,
+:root[data-theme="light"] .schedule-page .section-title strong,
+:root[data-theme="light"] .schedule-page .duration-box strong,
+:root[data-theme="light"] .schedule-page .all-day-state strong {
+  color: var(--nvr-text) !important;
+}
+:root[data-theme="light"] .schedule-page .policy-copy span,
+:root[data-theme="light"] .schedule-page .editor-head span,
+:root[data-theme="light"] .schedule-page .window-title small,
+:root[data-theme="light"] .schedule-page .section-title span,
+:root[data-theme="light"] .schedule-page .time-label,
+:root[data-theme="light"] .schedule-page .time-bridge,
+:root[data-theme="light"] .schedule-page .duration-box span,
+:root[data-theme="light"] .schedule-page .schedule-example,
+:root[data-theme="light"] .schedule-page .all-day-state span {
+  color: var(--nvr-muted) !important;
+}
+:root[data-theme="light"] .schedule-page .weekday-grid button { color: var(--nvr-muted) !important; }
+:root[data-theme="light"] .schedule-page .weekday-grid button:hover { color: var(--nvr-text-soft) !important; }
+:root[data-theme="light"] .schedule-page .weekday-grid button.active {
+  color: #245fcf !important;
+  background: rgba(63, 124, 255, .09) !important;
+}
+:root[data-theme="light"] .schedule-page .preset-row button { color: var(--nvr-muted) !important; }
+:root[data-theme="light"] .schedule-page .preset-row button.active {
+  color: #245fcf !important;
+  background: rgba(63, 124, 255, .08) !important;
+}
+:root[data-theme="light"] .schedule-page .window-card-head,
+:root[data-theme="light"] .schedule-page .time-band,
+:root[data-theme="light"] .schedule-page .window-note { border-color: var(--nvr-border) !important; }
+:root[data-theme="light"] .schedule-page .all-day-state {
+  background: rgba(32, 166, 106, .045) !important;
+  border-color: rgba(32, 166, 106, .16) !important;
+}
+
+:root[data-theme="light"] .nvr-workspace-content .page-shell .el-card__header {
+  background: rgba(15, 23, 42, .018) !important;
+}
+:root[data-theme="light"] .nvr-workspace-content .page-shell .summary > span {
+  color: var(--nvr-muted) !important;
+  background: rgba(15, 23, 42, .025) !important;
+}
+:root[data-theme="light"] .nvr-workspace-content .page-shell .summary > span:first-child {
+  color: #245fcf !important;
+  background: rgba(63, 124, 255, .07) !important;
+}
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-weekdays { color: var(--nvr-muted) !important; }
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-day {
+  color: var(--nvr-muted) !important;
+  background: var(--nvr-surface-2) !important;
+}
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-day > span:first-child,
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-day strong { color: var(--nvr-text-soft) !important; }
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-day > span:not(:first-child),
+:root[data-theme="light"] .nvr-workspace-content .page-shell .calendar-day small { color: var(--nvr-muted) !important; }
+:root[data-theme="light"] .playback-health .el-card__header { background: var(--nvr-table-head) !important; }
+:root[data-theme="light"] .playback-health .metric-box { background: var(--nvr-surface-2) !important; }
+:root[data-theme="light"] .playback-health .backend-strip { background: var(--nvr-border) !important; }
+:root[data-theme="light"] .playback-health .backend-strip span { background: var(--nvr-surface-2) !important; }
+
 /* MJPEG is an endless multipart response. Some browsers do not fire the img load
    event while the stream remains open, so never hide live frames behind load-state
    opacity. Errors are still handled by the component's img error event. */
