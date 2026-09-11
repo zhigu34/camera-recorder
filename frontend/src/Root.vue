@@ -8,14 +8,14 @@ import {
 
 import AlertSettingsView from './AlertSettingsView.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
-import CamerasViewV2 from './CamerasViewV2.vue'
+import CamerasView from './CamerasView.vue'
 import DashboardView from './DashboardView.vue'
 import EventCenterView from './EventCenterView.vue'
-import HealthViewV2 from './HealthViewV2.vue'
+import HealthView from './HealthView.vue'
 import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
 import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
-import RecordingBrowserViewV3 from './RecordingBrowserViewV3.vue'
+import RecordingBrowserView from './RecordingBrowserView.vue'
 import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
 import RecordingManagementView from './RecordingManagementView.vue'
 import RecordingScheduleView from './RecordingScheduleView.vue'
@@ -166,15 +166,15 @@ onBeforeUnmount(() => {
 
       <main class="nvr-workspace-content">
         <DashboardView v-if="renderKey === 'dashboard'" />
-        <CamerasViewV2 v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
+        <CamerasView v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
         <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
         <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
         <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
         <AlertSettingsView v-else-if="renderKey === 'alerts'" @open-events="navigate('events')" />
         <PreviewView v-else-if="renderKey === 'preview'" />
-        <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
+        <template v-else-if="renderKey === 'playback'"><RecordingBrowserView /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
         <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
-        <template v-else-if="renderKey === 'health'"><HealthViewV2 /><PlaybackMetricsPanel /></template>
+        <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel /></template>
         <BatchCamerasView v-else-if="renderKey === 'batch'" />
         <SystemSettingsView v-else-if="renderKey === 'settings'" />
       </main>
