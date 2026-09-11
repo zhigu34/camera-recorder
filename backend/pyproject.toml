@@ -1,6 +1,6 @@
 [project]
 name = "camera-recorder-backend"
-version = "0.1.0"
+version = "0.2.0"
 description = "FastAPI backend for Camera Recorder"
 requires-python = ">=3.12"
 dependencies = [
@@ -29,3 +29,4 @@ target-version = "py312"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
