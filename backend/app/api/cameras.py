@@ -20,6 +20,7 @@ from app.schemas.camera import (
     RecordingScheduleBatchResult,
 )
 from app.services.camera_config import runtime_config
+from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import (
     CameraPreviewError,
     PreviewStream,
@@ -42,12 +43,21 @@ async def _camera_or_404(camera_id: int, db: AsyncSession) -> Camera:
     return camera
 
 
+def _resolved_form_factor(manufacturer: str | None, model: str | None, requested: str) -> str:
+    if requested != "unknown":
+        return requested
+    guess = infer_camera_form_factor(manufacturer, model)
+    if guess is not None and guess.confidence == "high":
+        return guess.form_factor
+    return requested
+
+
 def _new_camera(payload: CameraCreate) -> Camera:
     return Camera(
         name=payload.name,
         manufacturer=payload.manufacturer,
         model=payload.model,
-        form_factor=payload.form_factor,
+        form_factor=_resolved_form_factor(payload.manufacturer, payload.model, payload.form_factor),
         ip=payload.ip,
         rtsp_port=payload.rtsp_port,
         username=payload.username,
@@ -291,6 +301,15 @@ async def update_camera(
         camera.sub_rtsp_path = sub_rtsp_path.strip() if sub_rtsp_path else None
     if password is not None:
         camera.password_encrypted = encrypt_secret(password)
+
+    # Only infer while the device is still unspecified. Once a user has chosen a
+    # physical form factor, later manufacturer/model edits must not override it.
+    if camera.form_factor == "unknown":
+        camera.form_factor = _resolved_form_factor(
+            camera.manufacturer,
+            camera.model,
+            camera.form_factor,
+        )
 
     if camera.recording_schedule_enabled and not camera.recording_schedule:
         raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
