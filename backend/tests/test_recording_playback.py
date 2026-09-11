@@ -66,6 +66,15 @@ def test_live_proxy_command_is_fragmented_and_low_latency(tmp_path):
     assert "-force_key_frames" in command
 
 
+def test_live_proxy_command_accepts_remote_url():
+    remote = "http://127.0.0.1:8000/api/recordings/77/cloud-stream"
+
+    command = RecordingPlaybackManager.build_live_proxy_command(remote, "aac")
+
+    assert command[command.index("-i") + 1] == remote
+    assert command[command.index("-c:a") + 1] == "copy"
+
+
 def test_live_proxy_status_is_visible():
     manager = RecordingPlaybackManager()
     manager._live_ids.add(77)
