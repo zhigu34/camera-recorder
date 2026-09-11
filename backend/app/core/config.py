@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     auto_start_enabled: bool = True
     align_segments_to_clock: bool = True
 
+    storage_warning_percent: float = 80.0
+    storage_critical_percent: float = 90.0
+
     upload_enabled: bool = False
     upload_scan_interval_seconds: float = 10.0
     upload_retry_max: int = 8
