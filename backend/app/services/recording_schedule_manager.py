@@ -137,6 +137,13 @@ class RecordingScheduleManager:
                 camera.status = "stopped"
                 running = False
 
+        # If a recorder that this scheduler started was manually stopped, do not
+        # immediately start it again on the next 10-second reconciliation. Treat
+        # that as a pause for the remainder of the current window.
+        if camera.id in self._managed and not running and auto_eligible:
+            self._managed.discard(camera.id)
+            self._manual_paused.add(camera.id)
+
         # A manual stop suppresses only the current active auto-record window.
         # Once the camera leaves the window, the pause is cleared so a later
         # window can start normally.
