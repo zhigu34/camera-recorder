@@ -22,6 +22,14 @@ services:
       CAMREC_RTSP_TIMEOUT_US: ${CAMREC_RTSP_TIMEOUT_US:-5000000}
       CAMREC_AUTO_START_ENABLED: ${CAMREC_AUTO_START_ENABLED:-true}
       CAMREC_ALIGN_SEGMENTS_TO_CLOCK: ${CAMREC_ALIGN_SEGMENTS_TO_CLOCK:-true}
+      CAMREC_UPLOAD_ENABLED: ${CAMREC_UPLOAD_ENABLED:-false}
+      CAMREC_UPLOAD_CONCURRENCY: ${CAMREC_UPLOAD_CONCURRENCY:-2}
+      CAMREC_UPLOAD_RETRY_MAX: ${CAMREC_UPLOAD_RETRY_MAX:-8}
+      CAMREC_WEBDAV_URL: http://openlist:5244/dav/115
+      CAMREC_WEBDAV_ROOT: ${CAMREC_WEBDAV_ROOT:-监控录像}
+      CAMREC_WEBDAV_USERNAME: admin
+      CAMREC_WEBDAV_PASSWORD: ${OPENLIST_ADMIN_PASSWORD:-camera-recorder-openlist-change-me}
+      CAMREC_LOCAL_RETENTION_HOURS: ${CAMREC_LOCAL_RETENTION_HOURS:-48}
     volumes:
       - ./data:/app/data
       - ./recordings:/app/recordings
@@ -49,3 +57,16 @@ services:
     ports:
       - "${CAMREC_WEB_PORT:-8080}:80"
 
+  openlist:
+    image: openlistteam/openlist:latest
+    container_name: camera-recorder-openlist
+    user: "${OPENLIST_UID:-0}:${OPENLIST_GID:-0}"
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      UMASK: "022"
+      OPENLIST_ADMIN_PASSWORD: ${OPENLIST_ADMIN_PASSWORD:-camera-recorder-openlist-change-me}
+    volumes:
+      - ./openlist-data:/opt/openlist/data
+    ports:
+      - "${OPENLIST_PORT:-5244}:5244"
