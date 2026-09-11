@@ -1,6 +1,6 @@
 # 版本路线
 
-> 当前阶段：V0.9.x 前端 V2 与状态模型收敛。
+> 当前阶段：V0.9.x 前端与状态模型收敛。
 >
 > 录像、回放、OpenList/WebDAV 归档、实时预览、健康中心、事件中心和邮件告警等核心能力已经落地，当前重点从“补页面”转向状态一致性、稳定性验证和维护面清理。
 
@@ -60,20 +60,23 @@
 - 左侧可折叠导航
 - 顶部统一页面标题
 - 移除旧 workspace tabs
-- Dashboard V2
-- 摄像头管理 V2
-- 录像管理 V2
-- 上传管理 V2
-- 事件中心 V2
-- 告警设置 V2
-- 系统健康 V2
+- Dashboard
+- 摄像头管理
+- 录像管理
+- 上传管理
+- 事件中心
+- 告警设置
+- 系统健康
 - 录制计划页面
 - 1 / 4 / 9 宫格实时预览
-- 删除 legacy `App.vue` / `Root.vue`
+- 删除 legacy `App.vue` 与旧 Root 代际代码
 - OpenList/WebDAV 去存储品牌绑定
 - 摄像头连接 / Recorder / Schedule 三状态分离
 - Dashboard 与 Health 统一状态口径
 - 删除旧回放页面代际与预览透传层
+- 清理 `RootV2`、`CamerasViewV2`、`HealthViewV2`、`RecordingBrowserViewV3` 等历史版本后缀
+- Shell 状态轮询复用 `/api/system/status`，不再额外拉取 `/api/cameras` 计算总数
+- Dashboard 健康状态切换为 `/ws/status` 实时推送，HTTP 仅用于首次加载与断线兜底
 
 当前状态模型：
 
@@ -123,9 +126,8 @@ schedule_state
 ### 3. 维护面继续收敛
 
 - 逐步删除旧 `status` API 兼容依赖
-- 减少重复状态请求
-- 清理组件名中的历史 V2/V3 后缀
-- 收敛前端共享类型与状态 label 映射
+- 将上传管理 / 事件中心等适合实时展示的页面逐步接入 WebSocket
+- 收敛真正可复用的前端共享类型，避免为了抽象而统一不同语义的状态文案
 - 文档与 OpenAPI 保持一致
 - 增加 lint / dead-code 检查
 
