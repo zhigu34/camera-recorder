@@ -3,9 +3,9 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 
-import App from './App.vue'
+import Root from './Root.vue'
 
-const app = createApp(App)
+const app = createApp(Root)
 
 app.use(createPinia())
 app.use(ElementPlus)
