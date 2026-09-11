@@ -13,6 +13,8 @@ class RecordingPlaybackManager:
         self.proxy_dir = settings.data_dir / "playback-proxies"
         self._tasks: dict[int, asyncio.Task] = {}
         self._errors: dict[int, str] = {}
+        # Playback transcoding is deliberately conservative so a user opening a
+        # recording cannot steal CPU from the primary multi-camera recording path.
         self._semaphore = asyncio.Semaphore(1)
 
     def proxy_path(self, recording_id: int) -> Path:
@@ -20,7 +22,27 @@ class RecordingPlaybackManager:
 
     @staticmethod
     def can_direct_play(video_codec: str | None) -> bool:
+        """Return codecs that are safe to direct-play without client probing.
+
+        HEVC is intentionally not included here. Some browsers/platforms can play
+        hvc1/hev1 natively and the frontend will try the original file first, but
+        support is client-dependent. This method remains the guaranteed fallback
+        policy used by the API's `source=auto` mode.
+        """
+
         return (video_codec or "").lower() in {"h264", "avc", "avc1"}
+
+    @staticmethod
+    def can_try_original(video_codec: str | None) -> bool:
+        return (video_codec or "").lower() in {
+            "h264",
+            "avc",
+            "avc1",
+            "hevc",
+            "h265",
+            "hvc1",
+            "hev1",
+        }
 
     def status(self, recording_id: int, video_codec: str | None) -> dict[str, Any]:
         if self.can_direct_play(video_codec):
@@ -47,7 +69,13 @@ class RecordingPlaybackManager:
         except OSError:
             pass
 
-    async def start(self, recording_id: int, source: Path, video_codec: str | None) -> dict[str, Any]:
+    async def start(
+        self,
+        recording_id: int,
+        source: Path,
+        video_codec: str | None,
+        audio_codec: str | None = None,
+    ) -> dict[str, Any]:
         state = self.status(recording_id, video_codec)
         if state["state"] == "direct":
             if not source.exists():
@@ -61,7 +89,7 @@ class RecordingPlaybackManager:
         await self.cleanup_cache()
         self._errors.pop(recording_id, None)
         task = asyncio.create_task(
-            self._generate(recording_id, source),
+            self._generate(recording_id, source, audio_codec),
             name=f"playback-proxy-{recording_id}",
         )
         self._tasks[recording_id] = task
@@ -79,43 +107,58 @@ class RecordingPlaybackManager:
                 except OSError:
                     continue
 
-    async def _generate(self, recording_id: int, source: Path) -> None:
+    @staticmethod
+    def build_proxy_command(source: Path, target: Path, audio_codec: str | None) -> list[str]:
+        command = [
+            settings.ffmpeg_bin,
+            "-nostdin",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source),
+            "-map",
+            "0:v:0",
+            "-map",
+            "0:a?",
+            "-vf",
+            "scale='min(1280,iw)':-2",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "25",
+            "-pix_fmt",
+            "yuv420p",
+            "-threads",
+            "2",
+        ]
+
+        # Camera recordings are normally AAC already. Copying compatible audio
+        # avoids wasting CPU and preserves the original audio quality. Unknown or
+        # incompatible audio is converted to AAC for broad browser compatibility.
+        if (audio_codec or "").lower() == "aac":
+            command += ["-c:a", "copy"]
+        else:
+            command += ["-c:a", "aac", "-b:a", "96k"]
+
+        command += ["-movflags", "+faststart", str(target)]
+        return command
+
+    async def _generate(
+        self,
+        recording_id: int,
+        source: Path,
+        audio_codec: str | None,
+    ) -> None:
         async with self._semaphore:
             target = self.proxy_path(recording_id)
             temp = target.with_suffix(".part.mp4")
             try:
                 temp.unlink(missing_ok=True)
-                command = [
-                    settings.ffmpeg_bin,
-                    "-nostdin",
-                    "-hide_banner",
-                    "-loglevel",
-                    "error",
-                    "-y",
-                    "-i",
-                    str(source),
-                    "-map",
-                    "0:v:0",
-                    "-map",
-                    "0:a?",
-                    "-vf",
-                    "scale='min(1280,iw)':-2",
-                    "-c:v",
-                    "libx264",
-                    "-preset",
-                    "veryfast",
-                    "-crf",
-                    "25",
-                    "-threads",
-                    "2",
-                    "-c:a",
-                    "aac",
-                    "-b:a",
-                    "96k",
-                    "-movflags",
-                    "+faststart",
-                    str(temp),
-                ]
+                command = self.build_proxy_command(source, temp, audio_codec)
                 process = await asyncio.create_subprocess_exec(
                     *command,
                     stdout=asyncio.subprocess.DEVNULL,
