@@ -3,12 +3,10 @@ import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import {
   Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
-  Monitor, Plus, Setting, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
+  Monitor, Setting, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
 } from '@element-plus/icons-vue'
 
-import AlertSettingsView from './AlertSettingsView.vue'
-import BatchCamerasView from './BatchCamerasView.vue'
-import CamerasView from './CamerasView.vue'
+import CamerasWorkspace from './CamerasWorkspace.vue'
 import DashboardView from './DashboardView.vue'
 import EventCenterView from './EventCenterView.vue'
 import HealthView from './HealthView.vue'
@@ -20,7 +18,7 @@ import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
 import RecordingManagementView from './RecordingManagementView.vue'
 import RecordingScheduleView from './RecordingScheduleView.vue'
 import RecordingTimelineLegend from './RecordingTimelineLegend.vue'
-import SystemSettingsView from './SystemSettingsView.vue'
+import SystemSettingsWorkspace from './SystemSettingsWorkspace.vue'
 import UploadManagementView from './UploadManagementView.vue'
 
 interface NavEntry {
@@ -49,8 +47,6 @@ const navEntries: NavEntry[] = [
   { key: 'recordings', label: '录像管理', kind: 'route', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
   { key: 'uploads', label: '上传管理', kind: 'route', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
   { key: 'events', label: '事件中心', kind: 'route', target: '/events', group: 'ops', icon: markRaw(Bell) },
-  { key: 'alerts', label: '告警设置', kind: 'route', target: '/alerts', group: 'ops', icon: markRaw(WarningFilled) },
-  { key: 'batch', label: '批量添加', kind: 'route', target: '/cameras/batch', group: 'ops', icon: markRaw(Plus) },
   { key: 'settings', label: '系统设置', kind: 'route', target: '/settings', group: 'settings', icon: markRaw(Setting) },
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
@@ -75,6 +71,8 @@ const systemHealthy = computed(() => Boolean(
 
 function locationKey() {
   const path = window.location.pathname
+  if (path === '/alerts') return 'settings'
+  if (path === '/cameras/batch') return 'cameras'
   if (path === '/') {
     const view = new URLSearchParams(window.location.search).get('view')
     return view && entryMap.has(view) ? view : 'dashboard'
@@ -118,7 +116,10 @@ function handlePopState() {
 }
 
 onMounted(() => {
-  showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'replace')
+  const initialKey = locationKey()
+  const legacyAlerts = window.location.pathname === '/alerts'
+  showEntry(entryMap.get(initialKey) || entryMap.get('dashboard')!, 'replace')
+  if (legacyAlerts) window.history.replaceState({}, '', '/settings?section=alerts')
   void loadShellStatus()
   statusTimer = window.setInterval(loadShellStatus, 10000)
   window.addEventListener('popstate', handlePopState)
@@ -169,17 +170,15 @@ onBeforeUnmount(() => {
 
       <main class="nvr-workspace-content">
         <DashboardView v-if="renderKey === 'dashboard'" />
-        <CamerasView v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
+        <CamerasWorkspace v-else-if="renderKey === 'cameras'" @open-preview="navigate('preview')" />
         <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
         <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
         <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
-        <AlertSettingsView v-else-if="renderKey === 'alerts'" @open-events="navigate('events')" />
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserView /><PlaybackTelemetryBridge /><PlaybackMetricsPanel /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
         <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
         <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel compact @open-playback="openPlaybackCompatibility" /></template>
-        <BatchCamerasView v-else-if="renderKey === 'batch'" />
-        <SystemSettingsView v-else-if="renderKey === 'settings'" />
+        <SystemSettingsWorkspace v-else-if="renderKey === 'settings'" @open-events="navigate('events')" />
       </main>
 
       <footer class="nvr-statusbar">
