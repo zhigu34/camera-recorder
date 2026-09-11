@@ -34,8 +34,12 @@ def _video_setts(camera: CameraRuntimeConfig) -> str:
 
 
 def _audio_setts(camera: CameraRuntimeConfig) -> str | None:
-    if not camera.sample_rate or not camera.audio_frame_samples:
+    if not camera.audio_codec:
         return None
+    if not camera.sample_rate or not camera.audio_frame_samples:
+        raise FFmpegCommandError(
+            "reconstruct mode requires detected audio sample_rate/frame_samples; run Probe first"
+        )
     samples = camera.audio_frame_samples
     return (
         f"setts=ts=N*{samples}:duration={samples}:"
