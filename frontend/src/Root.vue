@@ -3,7 +3,7 @@ import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import {
   Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
-  Monitor, Setting, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
+  Monitor, Moon, Setting, Sunny, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
 } from '@element-plus/icons-vue'
 
 import CamerasWorkspace from './CamerasWorkspace.vue'
@@ -36,6 +36,7 @@ interface ShellStatus {
   upload?: { enabled: boolean; configured: boolean; active: boolean }
   storage?: { used_percent: number; state: 'healthy' | 'warning' | 'critical' }
 }
+type ThemeMode = 'light' | 'dark'
 
 const navEntries: NavEntry[] = [
   { key: 'dashboard', label: '总览', kind: 'dashboard', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
@@ -52,6 +53,7 @@ const navEntries: NavEntry[] = [
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
 
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
+const themeMode = ref<ThemeMode>(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
 const activeKey = ref('dashboard')
 const renderKey = ref('dashboard')
 const shellStatus = ref<ShellStatus | null>(null)
@@ -102,6 +104,15 @@ function openPlaybackCompatibility() {
 function toggleSidebar() {
   collapsed.value = !collapsed.value
   localStorage.setItem('nvr-sidebar-collapsed', collapsed.value ? '1' : '0')
+}
+function setTheme(mode: ThemeMode) {
+  themeMode.value = mode
+  document.documentElement.dataset.theme = mode
+  document.documentElement.classList.toggle('dark', mode === 'dark')
+  localStorage.setItem('nvr-theme', mode)
+}
+function toggleTheme() {
+  setTheme(themeMode.value === 'dark' ? 'light' : 'dark')
 }
 async function loadShellStatus() {
   try {
@@ -165,7 +176,12 @@ onBeforeUnmount(() => {
           <button class="top-collapse" :title="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar"><Expand v-if="collapsed" /><Fold v-else /></button>
           <div><strong>{{ activeEntry.label }}</strong><span>Camera Recorder · v0.9.1</span></div>
         </div>
-        <div class="system-pill" :class="{ healthy: systemHealthy, danger: !systemHealthy }"><CircleCheckFilled v-if="systemHealthy" /><WarningFilled v-else /><span>{{ statusError ? '状态不可用' : systemHealthy ? '系统正常' : '需要关注' }}</span></div>
+        <div class="topbar-actions">
+          <button class="theme-toggle" :title="themeMode === 'dark' ? '切换浅色模式' : '切换深色模式'" @click="toggleTheme">
+            <Sunny v-if="themeMode === 'dark'" /><Moon v-else />
+          </button>
+          <div class="system-pill" :class="{ healthy: systemHealthy, danger: !systemHealthy }"><CircleCheckFilled v-if="systemHealthy" /><WarningFilled v-else /><span>{{ statusError ? '状态不可用' : systemHealthy ? '系统正常' : '需要关注' }}</span></div>
+        </div>
       </header>
 
       <main class="nvr-workspace-content">
@@ -195,15 +211,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.nvr-shell{min-height:100vh;display:grid;grid-template-columns:var(--nvr-sidebar-width) minmax(0,1fr);background:var(--nvr-bg);transition:grid-template-columns .18s ease}.nvr-shell.sidebar-collapsed{grid-template-columns:var(--nvr-sidebar-collapsed) minmax(0,1fr)}
-.nvr-sidebar{position:sticky;top:0;height:100vh;z-index:30;display:flex;flex-direction:column;min-width:0;background:var(--nvr-sidebar);border-right:1px solid var(--nvr-border)}
-.brand-row{height:68px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid var(--nvr-border);overflow:hidden}.brand-mark{flex:0 0 36px;width:36px;height:36px;display:grid;place-items:center;color:white;border-radius:10px;background:linear-gradient(145deg,#397cf0,#6c9fff);box-shadow:0 6px 20px rgba(76,141,255,.22)}.brand-mark :deep(svg){width:19px}.brand-copy{min-width:0;display:flex;flex-direction:column;line-height:1.2;white-space:nowrap}.brand-copy strong{font-size:14px}.brand-copy span{margin-top:4px;color:var(--nvr-muted);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
-.nav-scroll{flex:1;overflow:auto;padding:14px 10px}.nav-group+.nav-group{margin-top:22px}.nav-caption{padding:0 10px 7px;color:#607085;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}.nav-item,.collapse-button,.top-collapse{appearance:none;border:0;color:#9aa7b7;background:transparent;cursor:pointer}.nav-item{position:relative;width:100%;height:42px;display:flex;align-items:center;gap:11px;padding:0 11px;margin:2px 0;border-radius:8px;font-size:13px;text-align:left;white-space:nowrap;overflow:hidden;transition:.15s}.nav-item:hover{color:#d9e2ec;background:rgba(255,255,255,.045)}.nav-item.active{color:#f2f6fa;background:rgba(76,141,255,.13)}.nav-item.active:before{content:'';position:absolute;left:0;width:2px;height:20px;border-radius:0 2px 2px 0;background:var(--nvr-blue)}.nav-icon{flex:0 0 18px;width:18px;height:18px}.sidebar-collapsed .nav-item{justify-content:center;padding:0}.sidebar-bottom{padding:10px;border-top:1px solid var(--nvr-border)}.collapse-button{width:100%;height:36px;display:flex;align-items:center;justify-content:center;gap:8px;color:#66758a;font-size:12px}.collapse-button:hover{color:var(--nvr-text)}.collapse-button :deep(svg){width:16px}
-.nvr-workspace{min-width:0;min-height:100vh;display:grid;grid-template-rows:68px minmax(0,1fr) 30px}.nvr-topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;background:rgba(11,15,20,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--nvr-border)}.topbar-title{display:flex;align-items:center;gap:10px;min-width:0}.topbar-title>div{display:flex;flex-direction:column;min-width:0}.topbar-title strong{font-size:15px;font-weight:650}.topbar-title span{margin-top:3px;color:#66758a;font-size:10px}.top-collapse{width:32px;height:32px;display:grid;place-items:center;border-radius:7px}.top-collapse:hover{color:var(--nvr-text);background:rgba(255,255,255,.05)}.top-collapse :deep(svg){width:16px}.system-pill{display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--nvr-border);border-radius:999px;font-size:11px;background:rgba(255,255,255,.025)}.system-pill :deep(svg){width:13px}.system-pill.healthy{color:var(--nvr-green)}.system-pill.danger{color:var(--nvr-red)}
-.nvr-workspace-content{min-width:0;overflow-x:hidden;background:var(--nvr-bg)}
+.nvr-shell{min-height:100vh;display:grid;grid-template-columns:var(--nvr-sidebar-width) minmax(0,1fr);background:var(--nvr-bg);transition:grid-template-columns .18s ease,background-color .18s ease}.nvr-shell.sidebar-collapsed{grid-template-columns:var(--nvr-sidebar-collapsed) minmax(0,1fr)}
+.nvr-sidebar{position:sticky;top:0;height:100vh;z-index:30;display:flex;flex-direction:column;min-width:0;background:var(--nvr-sidebar);border-right:1px solid var(--nvr-border);transition:background-color .18s ease,border-color .18s ease}
+.brand-row{height:68px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid var(--nvr-border);overflow:hidden}.brand-mark{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;color:white;border-radius:9px;background:linear-gradient(145deg,#397cf0,#6c9fff);box-shadow:var(--nvr-brand-shadow)}.brand-mark :deep(svg){width:18px}.brand-copy{min-width:0;display:flex;flex-direction:column;line-height:1.2;white-space:nowrap}.brand-copy strong{font-size:13px;font-weight:650;letter-spacing:-.01em}.brand-copy span{margin-top:4px;color:var(--nvr-muted);font-size:9px;letter-spacing:.14em;text-transform:uppercase}
+.nav-scroll{flex:1;overflow:auto;padding:14px 10px}.nav-group+.nav-group{margin-top:22px}.nav-caption{padding:0 10px 7px;color:var(--nvr-subtle);font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}.nav-item,.collapse-button,.top-collapse,.theme-toggle{appearance:none;border:0;color:var(--nvr-nav-text);background:transparent;cursor:pointer}.nav-item{position:relative;width:100%;height:40px;display:flex;align-items:center;gap:11px;padding:0 11px;margin:2px 0;border-radius:8px;font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;transition:.15s}.nav-item:hover{color:var(--nvr-nav-hover-text);background:var(--nvr-nav-hover)}.nav-item.active{color:var(--nvr-nav-active-text);background:var(--nvr-nav-active)}.nav-item.active:before{content:'';position:absolute;left:0;width:2px;height:18px;border-radius:0 2px 2px 0;background:var(--nvr-blue)}.nav-icon{flex:0 0 17px;width:17px;height:17px}.sidebar-collapsed .nav-item{justify-content:center;padding:0}.sidebar-bottom{padding:10px;border-top:1px solid var(--nvr-border)}.collapse-button{width:100%;height:34px;display:flex;align-items:center;justify-content:center;gap:8px;color:var(--nvr-subtle);font-size:11px;border-radius:7px}.collapse-button:hover{color:var(--nvr-text);background:var(--nvr-control-hover)}.collapse-button :deep(svg){width:15px}
+.nvr-workspace{min-width:0;min-height:100vh;display:grid;grid-template-rows:68px minmax(0,1fr) 30px}.nvr-topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;background:var(--nvr-topbar);backdrop-filter:blur(18px) saturate(1.15);border-bottom:1px solid var(--nvr-border);transition:background-color .18s ease,border-color .18s ease}.topbar-title{display:flex;align-items:center;gap:10px;min-width:0}.topbar-title>div{display:flex;flex-direction:column;min-width:0}.topbar-title strong{font-size:14px;font-weight:650;letter-spacing:-.01em}.topbar-title span{margin-top:3px;color:var(--nvr-subtle);font-size:9px}.top-collapse,.theme-toggle{width:32px;height:32px;display:grid;place-items:center;border-radius:7px}.top-collapse:hover,.theme-toggle:hover{color:var(--nvr-text);background:var(--nvr-control-hover)}.top-collapse :deep(svg),.theme-toggle :deep(svg){width:16px}.topbar-actions{display:flex;align-items:center;gap:8px}.theme-toggle{border:1px solid var(--nvr-border);color:var(--nvr-muted);background:var(--nvr-pill-bg)}.system-pill{display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--nvr-border);border-radius:999px;font-size:10px;background:var(--nvr-pill-bg)}.system-pill :deep(svg){width:12px}.system-pill.healthy{color:var(--nvr-green)}.system-pill.danger{color:var(--nvr-red)}
+.nvr-workspace-content{min-width:0;overflow-x:hidden;background:var(--nvr-bg);transition:background-color .18s ease}
 .nvr-workspace-content :deep(.dashboard-head h1),.nvr-workspace-content :deep(.page-heading h1),.nvr-workspace-content :deep(.page-head>div>h2),.nvr-workspace-content :deep(.wall-header>div>h2),.nvr-workspace-content :deep(.page>.topbar>div>h2){display:none}
 .nvr-workspace-content :deep(.dashboard-head>div:first-child>.eyebrow),.nvr-workspace-content :deep(.dashboard-head>div:first-child>p),.nvr-workspace-content :deep(.page-heading>div:first-child>p),.nvr-workspace-content :deep(.page-head>div:first-child>p),.nvr-workspace-content :deep(.wall-header>div:first-child>.eyebrow),.nvr-workspace-content :deep(.wall-header>div:first-child>p),.nvr-workspace-content :deep(.page>.topbar>div:first-child>.hint){display:none}
-.nvr-statusbar{position:sticky;bottom:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;color:#718095;background:#0d1218;border-top:1px solid var(--nvr-border);font-size:10px}.status-left,.status-items{display:flex;align-items:center;gap:14px;white-space:nowrap}.status-dot{width:6px;height:6px;border-radius:50%}.status-dot.ok{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.status-dot.bad{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.status-items b{color:#aeb9c6;font-weight:600}.status-items .storage-warning{color:var(--nvr-yellow)}.status-items .storage-critical{color:var(--nvr-red)}
+.nvr-statusbar{position:sticky;bottom:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;color:var(--nvr-muted);background:var(--nvr-statusbar);border-top:1px solid var(--nvr-border);font-size:9px;transition:background-color .18s ease,border-color .18s ease}.status-left,.status-items{display:flex;align-items:center;gap:14px;white-space:nowrap}.status-dot{width:6px;height:6px;border-radius:50%}.status-dot.ok{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.status-dot.bad{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.status-items b{color:var(--nvr-text-soft);font-weight:600}.status-items .storage-warning{color:var(--nvr-yellow)}.status-items .storage-critical{color:var(--nvr-red)}
 @media(max-width:900px){.nvr-shell{grid-template-columns:var(--nvr-sidebar-collapsed) minmax(0,1fr)}.nvr-sidebar{width:var(--nvr-sidebar-collapsed)}.brand-copy,.nav-caption,.nav-item span,.collapse-button span{display:none!important}.nav-item{justify-content:center;padding:0}.status-items span:nth-child(3),.status-items span:nth-child(4){display:none}}
-@media(max-width:620px){.nvr-shell{grid-template-columns:0 minmax(0,1fr)}.nvr-sidebar{transform:translateX(-68px);pointer-events:none}.nvr-shell:not(.sidebar-collapsed){grid-template-columns:var(--nvr-sidebar-width) minmax(0,1fr)}.nvr-shell:not(.sidebar-collapsed) .nvr-sidebar{width:var(--nvr-sidebar-width);transform:none;pointer-events:auto}.nvr-shell:not(.sidebar-collapsed) .brand-copy,.nvr-shell:not(.sidebar-collapsed) .nav-caption,.nvr-shell:not(.sidebar-collapsed) .nav-item span,.nvr-shell:not(.sidebar-collapsed) .collapse-button span{display:initial!important}.nvr-shell:not(.sidebar-collapsed) .nav-item{justify-content:flex-start;padding:0 11px}.nvr-statusbar{overflow:hidden}.status-items span:nth-child(2){display:none}}
+@media(max-width:620px){.nvr-shell{grid-template-columns:0 minmax(0,1fr)}.nvr-sidebar{transform:translateX(-68px);pointer-events:none}.nvr-shell:not(.sidebar-collapsed){grid-template-columns:var(--nvr-sidebar-width) minmax(0,1fr)}.nvr-shell:not(.sidebar-collapsed) .nvr-sidebar{width:var(--nvr-sidebar-width);transform:none;pointer-events:auto}.nvr-shell:not(.sidebar-collapsed) .brand-copy,.nvr-shell:not(.sidebar-collapsed) .nav-caption,.nvr-shell:not(.sidebar-collapsed) .nav-item span,.nvr-shell:not(.sidebar-collapsed) .collapse-button span{display:initial!important}.nvr-shell:not(.sidebar-collapsed) .nav-item{justify-content:flex-start;padding:0 11px}.nvr-statusbar{overflow:hidden}.status-items span:nth-child(2){display:none}.system-pill span{display:none}.system-pill{padding:7px}.topbar-actions{gap:6px}}
 </style>
