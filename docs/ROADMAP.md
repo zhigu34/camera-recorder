@@ -78,6 +78,8 @@
 - Shell 状态轮询复用 `/api/system/status`，不再额外拉取 `/api/cameras` 计算总数
 - Dashboard 健康状态切换为 `/ws/status` 实时推送，HTTP 仅用于首次加载与断线兜底
 - 双主题 token 基础、深浅模式切换与本地偏好持久化
+- 摄像头设备身份元数据：`manufacturer` / `model` / `form_factor`
+- 实时监控显示实际生效主码流 / 子码流
 
 当前状态模型：
 
@@ -93,9 +95,100 @@ schedule_state
   manual_override / manual_paused / probe_required / error
 ```
 
+## 统一待办清单
+
+本节作为所有尚未完成事项的统一入口。新需求优先归入这里，再按版本拆分实施，避免分散在聊天或临时改动中。
+
+### A. 摄像头设备中心与深链接
+
+- [ ] 摄像头页升级为设备中心：设备身份、运行状态、实时预览、录像策略、能力集中展示
+- [ ] 根据 `form_factor` 提供枪机 / 半球 / 炮塔 / PTZ / 门铃 / 室内机统一设备轮廓
+- [ ] 根据 `manufacturer + model` 建立可扩展的具体型号图片 / 设备资料映射机制；无匹配时自动回退到外形轮廓
+- [ ] 支持 `/cameras?camera_id=<id>`，直接打开指定摄像头详情
+- [ ] 实时监控“摄像头配置”直接打开对应摄像头，而不是只进入列表
+- [ ] 事件中心、Dashboard、Health 可下钻到准确摄像头
+- [ ] 摄像头详情增加能力区：主 / 子码流、音频、ONVIF、事件、PTZ 等能力标记
+
+### B. ONVIF 与设备发现
+
+- [ ] ONVIF 基础客户端与认证
+- [ ] 局域网设备发现（明确开启后执行，不默认后台扫描）
+- [ ] 自动读取 manufacturer / model / firmware / serial / MAC
+- [ ] 自动读取 Media Profiles、主码流 / 子码流 URI、编码和分辨率
+- [ ] ONVIF 信息与现有手工 RTSP 配置合并，保持 RTSP 为最终录像输入
+- [ ] 评估 / 接入 PullPoint / Events，用摄像头原生 motion / person / smart event 作为低资源事件源
+- [ ] PTZ 能力识别，后续决定是否提供基础控制
+
+### C. 智能事件录像
+
+- [ ] 新增独立 `recording_policy`，取值 `manual / automatic / scheduled / event`
+- [ ] 新增 `event_state`，取值 `disabled / armed / triggered / cooldown`
+- [ ] 事件规则支持“触发摄像头 → 一个或多个目标录像摄像头”
+- [ ] 优先接入摄像头原生 ONVIF / 厂商 person / motion 事件
+- [ ] 无原生智能事件时，使用子码流低 FPS 本地 person detection
+- [ ] 支持置信度、连续命中帧数、最短录像时长、无人延迟停止、冷却时间
+- [ ] 支持 Webhook / MQTT / Home Assistant / PIR 等外部事件源
+- [ ] 事件中心关联触发源、目标摄像头、规则和产生的录像片段
+- [ ] 第二阶段增加约 10 秒可配置预录环形缓存
+- [ ] 后续扩展 `vehicle / motion / door_open` 等事件类型
+- [ ] 多路推理时评估 OpenVINO / NVIDIA / Coral 等硬件加速路径
+
+### D. 精确页面下钻与前端路由
+
+- [ ] `/recordings/browser?recording_id=<id>` 精确打开录像
+- [ ] `/recordings/manage?recording_id=<id>` 精确定位录像资产
+- [ ] `/uploads?task_id=<id>` 精确定位上传任务
+- [ ] `/settings?section=archive` 精确打开归档设置
+- [ ] 事件相关操作跳到准确实体，不只跳页面
+- [ ] 录像管理“播放”打开准确录像而不是仅进入回放页
+- [ ] 上传管理“上传设置”深链到归档设置
+- [ ] 引入 Vue Router，替换 Shell 手写 pathname / popstate 路由
+
+### E. 前端状态与组件架构
+
+- [ ] 建立 Pinia `cameraStore` / status store，减少页面各自重复拉取摄像头和系统状态
+- [ ] 实时监控 Recorder 状态复用共享 `/ws/status`，移除独立 5 秒 `/api/system/status` 轮询
+- [ ] 统一摄像头、录像、上传等共享 API 类型
+- [ ] 清理 PlaybackTelemetryBridge 的全局 document listener，改成明确组件 / store 通道
+- [ ] 清理回放时间轴 / 月历 legend 的运行时 DOM 插入，改成明确组件挂载位
+- [ ] 设置页面增加 dirty-state 离开保护
+- [ ] 建立统一 loading / skeleton / empty / error / motion 规范
+
+### F. UI 设计系统继续收敛
+
+- [ ] 深色 / 浅色模式覆盖所有页面，清理剩余写死颜色
+- [ ] 摄像头设备中心完成 UniFi Protect 类的设备卡 / 详情层级，但保持 Camera Recorder 自身视觉
+- [ ] Dashboard 异常优先并支持准确下钻
+- [ ] 实时监控继续“画面优先、控制弱化”，配置型操作全部回设备中心
+- [ ] 事件中心升级为时间线 / 活动流，并突出摄像头、事件类型和录像关联
+- [ ] 回放强化播放器、24h 时间轴、兼容性、事件和录像片段的视觉连续性
+- [ ] 上传 / 录像管理统一筛选器、批量操作与详情结构
+- [ ] 响应式断点与窄屏信息密度统一
+
+### G. 运维、发布与长期维护
+
+- [ ] 10 路 24h / 72h 真实稳定性验收
+- [ ] 主动断网、摄像头重启、RTSP 抖动、FFmpeg 异常退出恢复测试
+- [ ] OpenList/WebDAV 故障期间本地录像持续性验收
+- [ ] 磁盘 critical 自动保护实机验收
+- [ ] Chrome / Safari / Edge 的 H.264 / HEVC / 云端回放实机矩阵
+- [ ] 日志查看 / 下载入口与日志轮转策略
+- [ ] 配置导入导出
+- [ ] 更完整操作审计
+- [ ] 发布版本与数据库迁移说明
+- [ ] Prometheus Metrics
+- [ ] Webhook / 企业微信 / Telegram 等通知通道
+- [ ] 增加 lint / dead-code 检查
+- [ ] 逐步删除旧 `status` API 兼容依赖
+- [ ] OpenAPI 与文档持续对齐
+
 ## 当前优先级
 
-### 1. 真实稳定性验证
+### 1. 摄像头设备中心与准确下钻
+
+先完成统一待办 A，并以 `/cameras?camera_id=<id>` 作为其他实体深链接的第一条标准实现。
+
+### 2. 真实稳定性验证
 
 - 10 路 24h 连续录像
 - 10 路 72h 连续录像
@@ -105,7 +198,7 @@ schedule_state
 - 磁盘 critical 自动保护
 - 根据真实数据校准稳定性验收阈值
 
-### 2. 回放实机验收
+### 3. 回放实机验收
 
 使用 Chrome / Safari / Edge 验证：
 
@@ -124,7 +217,7 @@ schedule_state
 - HEVC fallback 条件
 - Proxy 缓存策略
 
-### 3. UI 设计系统与交互收敛
+### 4. UI 设计系统与交互收敛
 
 目标：达到成熟 NVR 控制台的界面质感，参考 UniFi Protect 一类产品的信息密度与交互层级，但保持 Camera Recorder 自身视觉和功能语义。
 
@@ -138,10 +231,10 @@ schedule_state
 - 响应式断点和窄屏信息密度统一
 - 后续增加统一的 motion / hover / loading 规范
 
-### 4. 维护面继续收敛
+### 5. 维护面继续收敛
 
 - 逐步删除旧 `status` API 兼容依赖
-- 将上传管理 / 事件中心等适合实时展示的页面逐步接入 WebSocket
+- 将适合实时展示的页面统一接入共享 WebSocket / Store，减少重复轮询
 - 收敛真正可复用的前端共享类型，避免为了抽象而统一不同语义的状态文案
 - 文档与 OpenAPI 保持一致
 - 增加 lint / dead-code 检查
@@ -184,11 +277,10 @@ schedule_state
 
 - 新增独立 `recording_policy` / `event_state`，不把事件录像混入 `schedule_state`
 - 支持“事件摄像头 → 一个或多个指定摄像头”的录像触发规则
-- 第一阶段使用子码流低 FPS 人体检测，检测到 `person` 后由 RecorderManager 启动主码流录像
+- 优先使用摄像头原生 ONVIF / 厂商事件，无法提供可靠智能事件时再使用子码流低 FPS 人体检测
 - 支持连续命中阈值、置信度、最短录像时长、无人延迟停止和冷却时间
 - 事件进入事件中心，并关联触发摄像头、目标录像摄像头和录像片段
 - 支持外部 Webhook / MQTT / Home Assistant / PIR 等事件源
-- 摄像头原生 ONVIF / ISAPI / CGI 人体事件作为低资源触发源进行适配评估
 - 第二阶段增加约 10 秒可配置预录环形缓存，保留事件发生前画面
 - 后续扩展 `vehicle`、motion、door_open 等事件类型
 
@@ -222,7 +314,7 @@ OpenList/WebDAV 已作为统一归档层，后续重点：
 - 多存储目标策略
 - 更完整事件规则
 - 远程管理
-- 设备发现 / ONVIF（评估后决定）
+- ONVIF 发现 / 设备资料 / Profiles / Events 完整化
 
 ## 长期原则
 
