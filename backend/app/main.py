@@ -57,8 +57,8 @@ async def lifespan(_: FastAPI):
     await upload_manager.start()
 
     # Auto-record startup is owned by the schedule manager. With schedules disabled
-    # this preserves the old 24/7 auto_record behavior; enabled schedules only start
-    # cameras while the deployment-local time is inside a configured window.
+    # this preserves the old 24/7 auto_record behavior; enabled weekly schedules only
+    # start cameras while deployment-local time is inside a configured window.
     await recording_schedule_manager.start()
 
     # Start background observability/protection after recorder auto-start. Planned
@@ -84,7 +84,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.8.11",
+    version="0.8.12",
     lifespan=lifespan,
 )
 
