@@ -38,9 +38,9 @@ function elapsed(attempt: Attempt) { return Math.max(0, Number((nowMs() - attemp
 function browserInfo() {
   const ua = navigator.userAgent
   const candidates: Array<[string, RegExp]> = [
-    ['Edge', /Edg\/(\d+)/],
-    ['Chrome', /Chrome\/(\d+)/],
-    ['Firefox', /Firefox\/(\d+)/],
+    ['Edge', /Edg(?:A|iOS)?\/(\d+)/],
+    ['Chrome', /(?:Chrome|CriOS)\/(\d+)/],
+    ['Firefox', /(?:Firefox|FxiOS)\/(\d+)/],
     ['Safari', /Version\/(\d+).+Safari/],
   ]
   for (const [browser, pattern] of candidates) {
@@ -172,6 +172,21 @@ function onLoadedMetadata(event: Event) {
   if (attempt && attempt.metadataMs === undefined) attempt.metadataMs = elapsed(attempt)
 }
 
+function reportFirstFrame(video: HTMLVideoElement, attempt: Attempt, signal: string) {
+  if (attempt.firstFrameReported) return
+  attempt.firstFrameReported = true
+  void report(video, attempt, 'first_frame', elapsed(attempt), signal)
+}
+
+function armFrameCallback(video: HTMLVideoElement, attempt: Attempt) {
+  if (attempt.firstFrameReported || attempt.frameCallbackArmed) return false
+  const frameVideo = video as VideoWithFrameCallback
+  if (typeof frameVideo.requestVideoFrameCallback !== 'function') return false
+  attempt.frameCallbackArmed = true
+  frameVideo.requestVideoFrameCallback(() => reportFirstFrame(video, attempt, 'video_frame_callback'))
+  return true
+}
+
 function onLoadedData(event: Event) {
   const video = mediaTarget(event)
   const attempt = video ? attempts.get(video) : undefined
@@ -181,18 +196,15 @@ function onLoadedData(event: Event) {
     attempt.decodeReported = true
     void report(video, attempt, 'decode_ready', attempt.loadedDataMs, 'loadeddata')
   }
+  armFrameCallback(video, attempt)
 }
 
 function onCanPlay(event: Event) {
   const video = mediaTarget(event)
   const attempt = video ? attempts.get(video) : undefined
-  if (attempt && attempt.canplayMs === undefined) attempt.canplayMs = elapsed(attempt)
-}
-
-function reportFirstFrame(video: HTMLVideoElement, attempt: Attempt, signal: string) {
-  if (attempt.firstFrameReported) return
-  attempt.firstFrameReported = true
-  void report(video, attempt, 'first_frame', elapsed(attempt), signal)
+  if (!video || !attempt) return
+  if (attempt.canplayMs === undefined) attempt.canplayMs = elapsed(attempt)
+  armFrameCallback(video, attempt)
 }
 
 function onPlaying(event: Event) {
@@ -200,13 +212,7 @@ function onPlaying(event: Event) {
   const attempt = video ? attempts.get(video) : undefined
   if (!video || !attempt) return
   if (attempt.playingMs === undefined) attempt.playingMs = elapsed(attempt)
-  if (attempt.firstFrameReported || attempt.frameCallbackArmed) return
-
-  const frameVideo = video as VideoWithFrameCallback
-  if (typeof frameVideo.requestVideoFrameCallback === 'function') {
-    attempt.frameCallbackArmed = true
-    frameVideo.requestVideoFrameCallback(() => reportFirstFrame(video, attempt, 'video_frame_callback'))
-  } else {
+  if (!armFrameCallback(video, attempt) && !attempt.firstFrameReported && !attempt.frameCallbackArmed) {
     reportFirstFrame(video, attempt, 'playing_fallback')
   }
 }
