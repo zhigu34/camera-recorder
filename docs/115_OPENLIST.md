@@ -54,31 +54,34 @@ http://127.0.0.1:5244
 6. 保存。
 7. 在 OpenList 文件页面确认 `/115` 可以正常进入、创建目录和上传文件。
 
-Camera Recorder 的 Compose 默认 WebDAV 地址为：
+默认 WebDAV 地址：
 
 ```text
 http://openlist:5244/dav/115
 ```
 
-因此挂载名称不是 `115` 时，需要同步修改 `docker-compose.yml` 中的 `CAMREC_WEBDAV_URL`。
+如果挂载名称不是 `115`，直接在 Camera Recorder 的 `系统设置` 页面修改 WebDAV URL，无需改 Compose。
 
 ## 4. 开启自动上传
 
-修改 `.env`：
+打开 Camera Recorder：
 
-```env
-CAMREC_UPLOAD_ENABLED=true
-CAMREC_WEBDAV_ROOT=监控录像
-CAMREC_UPLOAD_CONCURRENCY=2
-CAMREC_UPLOAD_RETRY_MAX=8
-CAMREC_LOCAL_RETENTION_HOURS=48
+```text
+http://127.0.0.1:8080
 ```
 
-然后：
+点击右下角 `系统设置`，配置：
 
-```bash
-docker compose up -d
-```
+- 自动上传：开启
+- 上传并发数：默认 2
+- 最大重试次数：默认 8
+- 本地保留时间：默认 48 小时
+- WebDAV URL：`http://openlist:5244/dav/115`
+- 远端根目录：`监控录像`
+- WebDAV 用户名：默认 `admin`
+- WebDAV 密码：填写 OpenList 登录密码
+
+保存后配置直接写入 SQLite 并立即生效，不需要重启 Docker。WebDAV 密码使用 `CAMREC_SECRET_KEY` 加密保存，API 不回显明文。
 
 完成后的远端结构：
 
@@ -121,14 +124,14 @@ OpenList WebDAV
 - 网络/OpenList/115 错误使用指数退避自动重试。
 - PUT 完成后通过 WebDAV HEAD 再次验证文件存在和大小。
 - 只有 `upload_status=success` 的录像才有资格被本地自动清理。
-- 默认本地保留 48 小时；可通过 `CAMREC_LOCAL_RETENTION_HOURS` 修改。
+- 默认本地保留 48 小时，可在 `系统设置` 修改；`-1` 表示永不自动删除。
 - 上传失败不会停止 FFmpeg Recorder。
 
 ## 6. WebDAV 权限
 
 OpenList WebDAV 官方文档：<https://doc.oplist.org/guide/advanced/webdav>
 
-Camera Recorder 默认使用 OpenList `admin` 用户，因此具备管理权限。如果以后改成专用上传用户，需要至少给予：
+Camera Recorder 默认使用 OpenList `admin` 用户。如果以后改成专用上传用户，需要至少给予：
 
 - WebDAV Read
 - WebDAV Management
