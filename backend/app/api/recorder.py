@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.models.camera import Camera
 from app.services.camera_config import runtime_config
 from app.services.recorder_manager import recorder_manager
+from app.services.recording_schedule_manager import recording_schedule_manager
 
 router = APIRouter(prefix="/api/recorder", tags=["recorder"])
 
@@ -25,6 +26,7 @@ async def start_all(db: AsyncSession = Depends(get_db)):
             skipped.append({"camera_id": camera.id, "reason": "Probe required"})
             continue
         started.append(await recorder_manager.start(runtime_config(camera)))
+        recording_schedule_manager.note_manual_start(camera.id)
         camera.status = "recording"
     await db.commit()
     return {"started": started, "skipped": skipped}
@@ -35,6 +37,7 @@ async def stop_all(db: AsyncSession = Depends(get_db)):
     await recorder_manager.stop_all()
     cameras = list(await db.scalars(select(Camera)))
     for camera in cameras:
+        recording_schedule_manager.note_manual_stop(camera.id)
         if camera.status == "recording":
             camera.status = "stopped"
     await db.commit()
