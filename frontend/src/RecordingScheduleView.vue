@@ -128,7 +128,7 @@ function windowDurationLabel(item: RecordingWindow) {
 }
 
 function scheduleText(camera: Camera) {
-  if (!camera.auto_record) return '仅手动'
+  if (!camera.auto_record) return camera.recording_schedule_enabled ? '周计划已配置 · 自动录像关闭' : '仅手动'
   if (!camera.recording_schedule_enabled) return '全天自动录像'
   if (!camera.recording_schedule.length) return '未配置时段'
   return camera.recording_schedule
@@ -165,8 +165,11 @@ function stateType(camera: Camera) {
 
 function applyCameraToForm(camera: Camera) {
   form.name = camera.name
-  form.auto_record = camera.auto_record
   form.recording_schedule_enabled = camera.recording_schedule_enabled
+  // Repair the legacy contradictory combination in the editor. A weekly schedule
+  // is an automatic-recording policy, so opening an existing scheduled camera
+  // should present auto recording as enabled and saving will persist that repair.
+  form.auto_record = camera.recording_schedule_enabled ? true : camera.auto_record
   form.recording_schedule = cloneWindows(camera.recording_schedule)
   if (form.recording_schedule_enabled && !form.recording_schedule.length) addWindow()
 }
@@ -223,8 +226,21 @@ function useAllDay() {
   form.recording_schedule_enabled = false
 }
 
+function setAutoRecord(value: boolean) {
+  form.auto_record = value
+  if (!value && form.recording_schedule_enabled) {
+    form.recording_schedule_enabled = false
+    ElMessage.info('已关闭周计划；周计划需要自动录像开启后才能执行')
+  }
+}
+
 function enableSchedule(value: boolean) {
-  if (value && !form.recording_schedule.length) addWindow()
+  if (!value) return
+  if (!form.auto_record) {
+    form.auto_record = true
+    ElMessage.info('启用周计划已同时开启自动录像')
+  }
+  if (!form.recording_schedule.length) addWindow()
 }
 
 function validateWindows() {
@@ -269,9 +285,10 @@ async function load() {
 async function save() {
   if (!validateWindows()) return
   saving.value = true
+  const scheduleEnabled = form.auto_record && form.recording_schedule_enabled
   const payload = {
-    auto_record: form.auto_record,
-    recording_schedule_enabled: form.recording_schedule_enabled,
+    auto_record: scheduleEnabled ? true : form.auto_record,
+    recording_schedule_enabled: scheduleEnabled,
     recording_schedule: cloneWindows(form.recording_schedule),
   }
   try {
@@ -341,8 +358,8 @@ onMounted(load)
 
       <div class="policy-grid">
         <div class="policy-card" :class="{ active: form.auto_record }">
-          <div class="policy-copy"><strong>自动录像</strong><span>关闭后只允许手动开始录像</span></div>
-          <el-switch v-model="form.auto_record" />
+          <div class="policy-copy"><strong>自动录像</strong><span>周计划依赖此开关；关闭后只允许手动开始录像</span></div>
+          <el-switch v-model="form.auto_record" @change="setAutoRecord" />
         </div>
         <div class="policy-card" :class="{ active: form.recording_schedule_enabled }">
           <div class="policy-copy"><strong>周计划模式</strong><span>{{ form.recording_schedule_enabled ? '只在指定时间窗口自动录像' : '全天自动录像' }}</span></div>
@@ -410,7 +427,7 @@ onMounted(load)
 
       <div v-else class="all-day-state">
         <div class="all-day-icon">24</div>
-        <div><strong>全天自动录像</strong><span>周计划未启用，自动录像摄像头将按全天策略运行。</span></div>
+        <div><strong>{{ form.auto_record ? '全天自动录像' : '仅手动录像' }}</strong><span>{{ form.auto_record ? '周计划未启用，自动录像摄像头将按全天策略运行。' : '自动录像已关闭；启用周计划时会自动重新开启。' }}</span></div>
       </div>
 
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ dialogMode === 'batch' ? '批量应用' : '保存计划' }}</el-button></template>
