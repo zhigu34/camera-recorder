@@ -4,39 +4,15 @@ import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
 
-from app.core.config import settings
 from app.core.database import SessionLocal
 from app.services.event_log import add_event
-
-
-def _recipients() -> list[str]:
-    return [item.strip() for item in settings.smtp_to.split(",") if item.strip()]
+from app.services.notification_settings import EmailNotificationConfig, load_email_notification_config
 
 
 class EmailNotifier:
-    @property
-    def configured(self) -> bool:
-        return bool(
-            settings.email_notifications_enabled
-            and settings.smtp_host.strip()
-            and settings.smtp_from.strip()
-            and _recipients()
-        )
-
-    def status(self) -> dict:
-        return {
-            "enabled": settings.email_notifications_enabled,
-            "configured": self.configured,
-            "smtp_host": settings.smtp_host,
-            "smtp_port": settings.smtp_port,
-            "smtp_from": settings.smtp_from,
-            "smtp_to": _recipients(),
-            "smtp_use_ssl": settings.smtp_use_ssl,
-            "smtp_starttls": settings.smtp_starttls,
-            "offline_alert_seconds": settings.camera_offline_alert_seconds,
-            "recovery_stable_seconds": settings.camera_recovery_stable_seconds,
-            "notify_recovery": settings.email_notify_recovery,
-        }
+    async def load_config(self) -> EmailNotificationConfig:
+        async with SessionLocal() as session:
+            return await load_email_notification_config(session)
 
     async def send(
         self,
@@ -45,12 +21,14 @@ class EmailNotifier:
         body: str,
         camera_id: int | None = None,
         success_code: str = "notification.email_sent",
+        config: EmailNotificationConfig | None = None,
     ) -> bool:
-        if not self.configured:
+        config = config or await self.load_config()
+        if not config.configured:
             return False
 
         try:
-            await asyncio.to_thread(self._send_sync, subject, body)
+            await asyncio.to_thread(self._send_sync, config, subject, body)
         except Exception as exc:
             await self._record_event(
                 level="error",
@@ -78,7 +56,9 @@ class EmailNotifier:
         offline_since: datetime,
         last_error: str | None,
         restart_count: int,
+        config: EmailNotificationConfig | None = None,
     ) -> bool:
+        config = config or await self.load_config()
         now = datetime.now(timezone.utc)
         offline_seconds = max(0, int((now - offline_since).total_seconds()))
         subject = f"[Camera Recorder] 摄像头掉线：{camera_name}"
@@ -98,6 +78,7 @@ class EmailNotifier:
             body=body,
             camera_id=camera_id,
             success_code="notification.camera_offline_email_sent",
+            config=config,
         )
 
     async def send_recovery(
@@ -108,8 +89,10 @@ class EmailNotifier:
         camera_ip: str,
         rtsp_path: str,
         offline_since: datetime,
+        config: EmailNotificationConfig | None = None,
     ) -> bool:
-        if not settings.email_notify_recovery:
+        config = config or await self.load_config()
+        if not config.notify_recovery:
             return False
 
         now = datetime.now(timezone.utc)
@@ -128,52 +111,56 @@ class EmailNotifier:
             body=body,
             camera_id=camera_id,
             success_code="notification.camera_recovery_email_sent",
+            config=config,
         )
 
     async def send_test(self) -> bool:
+        config = await self.load_config()
         now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         return await self.send(
             subject="[Camera Recorder] 邮件通知测试",
             body=f"这是一封 Camera Recorder 测试邮件。\n\n发送时间：{now}\n",
             success_code="notification.test_email_sent",
+            config=config,
         )
 
-    def _send_sync(self, subject: str, body: str) -> None:
+    @staticmethod
+    def _send_sync(config: EmailNotificationConfig, subject: str, body: str) -> None:
         message = EmailMessage()
         message["Subject"] = subject
-        message["From"] = settings.smtp_from
-        message["To"] = ", ".join(_recipients())
+        message["From"] = config.smtp_from
+        message["To"] = ", ".join(config.recipients)
         message.set_content(body)
 
-        if settings.smtp_use_ssl:
+        if config.smtp_use_ssl:
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(
-                settings.smtp_host,
-                settings.smtp_port,
-                timeout=settings.smtp_timeout_seconds,
+                config.smtp_host,
+                config.smtp_port,
+                timeout=config.smtp_timeout_seconds,
                 context=context,
             ) as smtp:
-                self._login(smtp)
+                EmailNotifier._login(smtp, config)
                 smtp.send_message(message)
             return
 
         with smtplib.SMTP(
-            settings.smtp_host,
-            settings.smtp_port,
-            timeout=settings.smtp_timeout_seconds,
+            config.smtp_host,
+            config.smtp_port,
+            timeout=config.smtp_timeout_seconds,
         ) as smtp:
             smtp.ehlo()
-            if settings.smtp_starttls:
+            if config.smtp_starttls:
                 context = ssl.create_default_context()
                 smtp.starttls(context=context)
                 smtp.ehlo()
-            self._login(smtp)
+            EmailNotifier._login(smtp, config)
             smtp.send_message(message)
 
     @staticmethod
-    def _login(smtp: smtplib.SMTP) -> None:
-        if settings.smtp_username:
-            smtp.login(settings.smtp_username, settings.smtp_password)
+    def _login(smtp: smtplib.SMTP, config: EmailNotificationConfig) -> None:
+        if config.smtp_username:
+            smtp.login(config.smtp_username, config.smtp_password)
 
     @staticmethod
     async def _record_event(
@@ -195,7 +182,6 @@ class EmailNotifier:
                 )
                 await session.commit()
         except Exception:
-            # Notification event persistence must never affect recording.
             pass
 
 
