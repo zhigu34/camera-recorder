@@ -22,6 +22,7 @@ class Camera(Base):
     username: Mapped[str] = mapped_column(String(128), default="admin")
     password_encrypted: Mapped[str] = mapped_column(String(1024))
     rtsp_path: Mapped[str] = mapped_column(String(255), default="/ch1/main")
+    sub_rtsp_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_record: Mapped[bool] = mapped_column(Boolean, default=False)
