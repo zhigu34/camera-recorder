@@ -1,5 +1,6 @@
 from app.models.camera import Camera
 from app.models.event import Event
+from app.models.health_sample import CameraHealthSample
 from app.models.notification_settings import NotificationSettings
 from app.models.recording import Recording
 from app.models.system_settings import SystemSettings
@@ -10,6 +11,7 @@ __all__ = [
     "Recording",
     "UploadTask",
     "Event",
+    "CameraHealthSample",
     "NotificationSettings",
     "SystemSettings",
 ]
