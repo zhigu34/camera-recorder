@@ -10,6 +10,7 @@ from app.api.events import router as events_router
 from app.api.notifications import router as notifications_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
+from app.api.settings import router as settings_router
 from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
@@ -20,6 +21,7 @@ from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_manager import storage_snapshot
+from app.services.system_settings import get_or_create_system_settings, load_runtime_settings
 from app.services.upload_manager import upload_manager
 
 
@@ -36,10 +38,16 @@ async def lifespan(_: FastAPI):
 
     await upgrade_database()
     await init_db()
+
+    async with SessionLocal() as session:
+        await get_or_create_system_settings(session)
+        await session.commit()
+        runtime = await load_runtime_settings(session)
+
     await segment_processor.start()
     await upload_manager.start()
 
-    if settings.auto_start_enabled:
+    if runtime.auto_start_enabled:
         async with SessionLocal() as session:
             cameras = list(
                 await session.scalars(
@@ -69,8 +77,8 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title=settings.app_name,
-    version="0.5.0",
+    title="Camera Recorder",
+    version="0.6.0",
     lifespan=lifespan,
 )
 
@@ -88,6 +96,7 @@ app.include_router(recorder_router)
 app.include_router(uploads_router)
 app.include_router(events_router)
 app.include_router(notifications_router)
+app.include_router(settings_router)
 
 
 @app.get("/health")
@@ -97,21 +106,19 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/system/status")
 async def system_status() -> dict:
+    async with SessionLocal() as session:
+        runtime = await load_runtime_settings(session)
+    upload = await upload_manager.status()
     return {
-        "app": settings.app_name,
-        "segment_duration_seconds": settings.segment_duration_seconds,
+        "app": runtime.app_name,
+        "segment_duration_seconds": runtime.segment_duration_seconds,
         "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
-        "upload": {
-            "enabled": settings.upload_enabled,
-            "configured": upload_manager.provider.configured,
-            "active": upload_manager.active,
-            "provider": "openlist_webdav",
-        },
-        "storage": storage_snapshot(),
+        "upload": upload,
+        "storage": await storage_snapshot(),
     }
 
 
 @app.get("/api/system/storage")
 async def system_storage() -> dict:
-    return storage_snapshot()
+    return await storage_snapshot()
