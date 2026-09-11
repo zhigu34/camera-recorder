@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.config import settings
+from app.core.database import SessionLocal
+from app.services.email_notifier import email_notifier
+from app.services.event_log import add_event
 from app.services.ffmpeg_builder import CameraRuntimeConfig, build_record_command, redact_command
 
 
@@ -38,6 +41,10 @@ class CameraWorker:
         self.network_warning_count = 0
         self.last_error: str | None = None
         self.started_at: datetime | None = None
+        self.offline_since: datetime | None = None
+        self.offline_alert_active = False
+        self._offline_alert_task: asyncio.Task | None = None
+        self._recovery_task: asyncio.Task | None = None
         self._log_path = settings.logs_dir / f"camera-{camera.id}.log"
 
     @property
@@ -53,6 +60,10 @@ class CameraWorker:
     async def stop(self) -> None:
         self.stop_requested = True
         self.state = "STOPPING"
+        self._cancel_connectivity_tasks()
+        self.offline_since = None
+        self.offline_alert_active = False
+
         process = self.process
         if process and process.returncode is None:
             try:
@@ -88,6 +99,8 @@ class CameraWorker:
             "network_warning_count": self.network_warning_count,
             "last_error": self.last_error,
             "started_at": self.started_at.isoformat() if self.started_at else None,
+            "offline_since": self.offline_since.isoformat() if self.offline_since else None,
+            "offline_alert_active": self.offline_alert_active,
         }
 
     async def _run_loop(self) -> None:
@@ -110,6 +123,7 @@ class CameraWorker:
             except Exception as exc:  # startup failures should enter reconnect loop
                 self.last_error = str(exc)
                 await self._log(f"failed to start ffmpeg: {exc}")
+                await self._mark_disconnected(self.last_error)
                 if self.stop_requested:
                     break
                 delay = backoff[min(attempt, len(backoff) - 1)]
@@ -121,10 +135,12 @@ class CameraWorker:
             self.state = "RECORDING"
             self.started_at = datetime.now(timezone.utc)
             process_started = time.monotonic()
+            self._start_recovery_confirmation(self.process)
             stderr_task = asyncio.create_task(self._consume_stderr(self.process))
             return_code = await self.process.wait()
             runtime_seconds = time.monotonic() - process_started
             await stderr_task
+            self._cancel_recovery_task()
             self.process = None
 
             if self.stop_requested:
@@ -137,11 +153,132 @@ class CameraWorker:
             self.restart_count += 1
             self.state = "RECONNECTING"
             await self._log(self.last_error)
+            await self._mark_disconnected(self.last_error)
             delay = backoff[min(attempt, len(backoff) - 1)]
             attempt += 1
             await asyncio.sleep(delay)
 
+        self._cancel_connectivity_tasks()
         self.state = "STOPPED"
+
+    async def _mark_disconnected(self, reason: str) -> None:
+        if self.stop_requested:
+            return
+        if self.offline_since is None:
+            self.offline_since = datetime.now(timezone.utc)
+            await self._log(f"camera connectivity lost: {reason}")
+        if self._offline_alert_task is None or self._offline_alert_task.done():
+            self._offline_alert_task = asyncio.create_task(
+                self._offline_alert_after_delay(),
+                name=f"camera-offline-alert-{self.camera.id}",
+            )
+
+    async def _offline_alert_after_delay(self) -> None:
+        try:
+            await asyncio.sleep(max(0.0, settings.camera_offline_alert_seconds))
+            if self.stop_requested or self.offline_since is None or self.offline_alert_active:
+                return
+
+            self.offline_alert_active = True
+            offline_since = self.offline_since
+            await self._record_connectivity_event(
+                level="error",
+                code="camera.offline",
+                message=(
+                    f"摄像头 {self.camera.name} 持续掉线超过 "
+                    f"{int(settings.camera_offline_alert_seconds)} 秒"
+                ),
+            )
+            await email_notifier.send_offline(
+                camera_id=self.camera.id,
+                camera_name=self.camera.name,
+                camera_ip=self.camera.ip,
+                rtsp_path=self.camera.rtsp_path,
+                offline_since=offline_since,
+                last_error=self.last_error,
+                restart_count=self.restart_count,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._log(f"offline notification error: {exc}")
+
+    def _start_recovery_confirmation(self, process: asyncio.subprocess.Process) -> None:
+        self._cancel_recovery_task()
+        if self.offline_since is None:
+            return
+        self._recovery_task = asyncio.create_task(
+            self._confirm_recovery(process),
+            name=f"camera-recovery-confirm-{self.camera.id}",
+        )
+
+    async def _confirm_recovery(self, process: asyncio.subprocess.Process) -> None:
+        try:
+            await asyncio.sleep(max(0.0, settings.camera_recovery_stable_seconds))
+            if (
+                self.stop_requested
+                or self.process is not process
+                or process.returncode is not None
+                or self.offline_since is None
+            ):
+                return
+
+            offline_since = self.offline_since
+            had_alert = self.offline_alert_active
+            self.offline_since = None
+            self.offline_alert_active = False
+            self._cancel_offline_alert_task()
+            self.last_error = None
+
+            if had_alert:
+                await self._record_connectivity_event(
+                    level="info",
+                    code="camera.recovered",
+                    message=f"摄像头 {self.camera.name} 录像连接已恢复",
+                )
+                await email_notifier.send_recovery(
+                    camera_id=self.camera.id,
+                    camera_name=self.camera.name,
+                    camera_ip=self.camera.ip,
+                    rtsp_path=self.camera.rtsp_path,
+                    offline_since=offline_since,
+                )
+            await self._log("camera connectivity stable")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._log(f"recovery notification error: {exc}")
+
+    async def _record_connectivity_event(self, *, level: str, code: str, message: str) -> None:
+        try:
+            async with SessionLocal() as session:
+                add_event(
+                    session,
+                    level=level,
+                    category="camera",
+                    code=code,
+                    message=message,
+                    camera_id=self.camera.id,
+                )
+                await session.commit()
+        except Exception as exc:
+            await self._log(f"failed to persist connectivity event: {exc}")
+
+    def _cancel_connectivity_tasks(self) -> None:
+        self._cancel_offline_alert_task()
+        self._cancel_recovery_task()
+
+    def _cancel_offline_alert_task(self) -> None:
+        task = self._offline_alert_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._offline_alert_task = None
+
+    def _cancel_recovery_task(self) -> None:
+        task = self._recovery_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._recovery_task = None
 
     async def _consume_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:
