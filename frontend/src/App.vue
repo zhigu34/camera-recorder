@@ -35,6 +35,30 @@ interface Recording {
   mp4_path: string
 }
 
+interface UploadTask {
+  id: number
+  recording_id: number
+  provider: string
+  remote_path: string
+  status: string
+  retry_count: number
+  last_error?: string | null
+  started_at?: string | null
+  completed_at?: string | null
+  next_retry_at?: string | null
+}
+
+interface UploadStatus {
+  enabled: boolean
+  configured: boolean
+  active: boolean
+  provider: string
+  webdav_url: string
+  webdav_root: string
+  local_retention_hours: number
+  counts: Record<string, number>
+}
+
 interface SystemStatus {
   app: string
   segment_duration_seconds: number
@@ -45,12 +69,20 @@ interface SystemStatus {
     ffmpeg_version?: string | null
   }
   recorders: Array<{ camera_id: number; state: string; pid?: number | null }>
+  upload?: {
+    enabled: boolean
+    configured: boolean
+    active: boolean
+    provider: string
+  }
 }
 
 const page = ref('dashboard')
 const loading = ref(false)
 const cameras = ref<Camera[]>([])
 const recordings = ref<Recording[]>([])
+const uploads = ref<UploadTask[]>([])
+const uploadStatus = ref<UploadStatus | null>(null)
 const status = ref<SystemStatus | null>(null)
 const dialogVisible = ref(false)
 const saving = ref(false)
@@ -71,6 +103,19 @@ const recordingCount = computed(() =>
   cameras.value.filter((camera) => runtimeState(camera.id) === 'RECORDING').length,
 )
 
+const pendingUploadCount = computed(() =>
+  (uploadStatus.value?.counts.pending || 0) +
+  (uploadStatus.value?.counts.uploading || 0) +
+  (uploadStatus.value?.counts.retry_wait || 0),
+)
+
+const pageTitle = computed(() => {
+  if (page.value === 'cameras') return '摄像头管理'
+  if (page.value === 'recordings') return '录像文件'
+  if (page.value === 'uploads') return '115 上传'
+  return '仪表盘'
+})
+
 function runtimeState(cameraId: number) {
   return status.value?.recorders.find((item) => item.camera_id === cameraId)?.state || 'STOPPED'
 }
@@ -87,17 +132,29 @@ function sizeText(bytes?: number | null) {
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
 
+function uploadTagType(value: string) {
+  if (value === 'success') return 'success'
+  if (value === 'failed') return 'danger'
+  if (value === 'uploading') return 'primary'
+  if (value === 'retry_wait') return 'warning'
+  return 'info'
+}
+
 async function loadAll() {
   loading.value = true
   try {
-    const [systemRes, cameraRes, recordingRes] = await Promise.all([
+    const [systemRes, cameraRes, recordingRes, uploadStatusRes, uploadTasksRes] = await Promise.all([
       axios.get<SystemStatus>('/api/system/status'),
       axios.get<Camera[]>('/api/cameras'),
       axios.get<Recording[]>('/api/recordings?limit=100'),
+      axios.get<UploadStatus>('/api/uploads'),
+      axios.get<UploadTask[]>('/api/uploads/tasks?limit=100'),
     ])
     status.value = systemRes.data
     cameras.value = cameraRes.data
     recordings.value = recordingRes.data
+    uploadStatus.value = uploadStatusRes.data
+    uploads.value = uploadTasksRes.data
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '加载失败')
   } finally {
@@ -126,7 +183,8 @@ async function createCamera() {
 async function probe(camera: Camera) {
   try {
     const { data } = await axios.post(`/api/cameras/${camera.id}/probe`)
-    ElMessage.success(`${camera.name}: ${data.video_codec || '-'} ${data.width || '-'}×${data.height || '-'} / ${data.fps?.toFixed?.(2) || '-'}fps`)
+    const detectedFps = typeof data.fps === 'number' ? data.fps.toFixed(2) : '-'
+    ElMessage.success(`${camera.name}: ${data.video_codec || '-'} ${data.width || '-'}×${data.height || '-'} / ${detectedFps}fps`)
     await loadAll()
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : 'Probe 失败')
@@ -172,6 +230,26 @@ async function stopAll() {
   await loadAll()
 }
 
+async function retryUpload(task: UploadTask) {
+  try {
+    await axios.post(`/api/uploads/tasks/${task.id}/retry`)
+    ElMessage.success(`上传任务 #${task.id} 已重新排队`)
+    await loadAll()
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '重试失败')
+  }
+}
+
+async function scanUploads() {
+  try {
+    await axios.post('/api/uploads/scan')
+    ElMessage.success('已触发上传扫描')
+    await loadAll()
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '上传未启用')
+  }
+}
+
 onMounted(loadAll)
 </script>
 
@@ -183,13 +261,14 @@ onMounted(loadAll)
         <el-menu-item index="dashboard">仪表盘</el-menu-item>
         <el-menu-item index="cameras">摄像头</el-menu-item>
         <el-menu-item index="recordings">录像文件</el-menu-item>
+        <el-menu-item index="uploads">115 上传</el-menu-item>
       </el-menu>
     </el-aside>
 
     <el-container>
       <el-header class="header">
         <div>
-          <strong>{{ page === 'dashboard' ? '仪表盘' : page === 'cameras' ? '摄像头管理' : '录像文件' }}</strong>
+          <strong>{{ pageTitle }}</strong>
           <span class="subtitle">RTSP 长连接 · H.265/AAC 原码流</span>
         </div>
         <div class="header-actions">
@@ -202,10 +281,11 @@ onMounted(loadAll)
       <el-main v-loading="loading">
         <template v-if="page === 'dashboard'">
           <el-row :gutter="16">
-            <el-col :span="6"><el-card><div class="metric">{{ cameras.length }}</div><div class="muted">摄像头</div></el-card></el-col>
-            <el-col :span="6"><el-card><div class="metric">{{ recordingCount }}</div><div class="muted">录像中</div></el-card></el-col>
-            <el-col :span="6"><el-card><div class="metric">{{ recordings.length }}</div><div class="muted">最近录像</div></el-card></el-col>
-            <el-col :span="6">
+            <el-col :span="5"><el-card><div class="metric">{{ cameras.length }}</div><div class="muted">摄像头</div></el-card></el-col>
+            <el-col :span="5"><el-card><div class="metric">{{ recordingCount }}</div><div class="muted">录像中</div></el-card></el-col>
+            <el-col :span="5"><el-card><div class="metric">{{ recordings.length }}</div><div class="muted">最近录像</div></el-card></el-col>
+            <el-col :span="5"><el-card><div class="metric">{{ pendingUploadCount }}</div><div class="muted">上传队列</div></el-card></el-col>
+            <el-col :span="4">
               <el-card>
                 <el-tag :type="status?.ffmpeg.setts_available ? 'success' : 'danger'">
                   {{ status?.ffmpeg.setts_available ? 'setts 可用' : 'setts 不可用' }}
@@ -260,7 +340,7 @@ onMounted(loadAll)
           </el-card>
         </template>
 
-        <template v-else>
+        <template v-else-if="page === 'recordings'">
           <el-card>
             <el-table :data="recordings" empty-text="暂无已完成录像">
               <el-table-column prop="camera_id" label="Camera ID" width="100" />
@@ -268,8 +348,43 @@ onMounted(loadAll)
               <el-table-column label="时长" width="100"><template #default="{ row }">{{ row.duration ? `${row.duration.toFixed(1)}s` : '-' }}</template></el-table-column>
               <el-table-column label="大小" width="110"><template #default="{ row }">{{ sizeText(row.file_size) }}</template></el-table-column>
               <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag :type="row.health_status === 'healthy' ? 'success' : 'warning'">{{ row.health_status }}</el-tag></template></el-table-column>
-              <el-table-column prop="upload_status" label="上传" width="100" />
+              <el-table-column label="上传" width="120"><template #default="{ row }"><el-tag :type="uploadTagType(row.upload_status)">{{ row.upload_status }}</el-tag></template></el-table-column>
               <el-table-column prop="mp4_path" label="文件" min-width="320" show-overflow-tooltip />
+            </el-table>
+          </el-card>
+        </template>
+
+        <template v-else>
+          <el-card class="upload-summary">
+            <div class="upload-head">
+              <div>
+                <el-tag :type="uploadStatus?.active ? 'success' : 'warning'">
+                  {{ uploadStatus?.active ? '自动上传运行中' : '自动上传未启用' }}
+                </el-tag>
+                <span class="muted upload-note">
+                  OpenList {{ uploadStatus?.configured ? '已配置' : '未配置' }} · 本地保留 {{ uploadStatus?.local_retention_hours ?? '-' }} 小时
+                </span>
+              </div>
+              <el-button type="primary" plain @click="scanUploads">立即扫描</el-button>
+            </div>
+            <div class="muted top-gap">远端：{{ uploadStatus?.webdav_url || '-' }}/{{ uploadStatus?.webdav_root || '' }}</div>
+          </el-card>
+
+          <el-card class="section-card">
+            <el-table :data="uploads" empty-text="暂无上传任务">
+              <el-table-column prop="id" label="ID" width="70" />
+              <el-table-column prop="recording_id" label="录像ID" width="90" />
+              <el-table-column label="状态" width="120">
+                <template #default="{ row }"><el-tag :type="uploadTagType(row.status)">{{ row.status }}</el-tag></template>
+              </el-table-column>
+              <el-table-column prop="retry_count" label="重试" width="80" />
+              <el-table-column prop="remote_path" label="115路径" min-width="320" show-overflow-tooltip />
+              <el-table-column prop="last_error" label="最近错误" min-width="240" show-overflow-tooltip />
+              <el-table-column label="操作" width="100" fixed="right">
+                <template #default="{ row }">
+                  <el-button v-if="row.status === 'failed' || row.status === 'retry_wait'" size="small" @click="retryUpload(row)">重试</el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </el-card>
         </template>
@@ -314,4 +429,6 @@ onMounted(loadAll)
 .top-gap { margin-top: 10px; }
 .section-card { margin-top: 16px; }
 .toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.upload-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.upload-note { margin-left: 12px; }
 </style>
