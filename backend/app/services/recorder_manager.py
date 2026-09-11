@@ -1,5 +1,6 @@
 import asyncio
 import signal
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,6 +22,7 @@ _NETWORK_MARKERS = (
     "rtsp error",
     "invalid data found",
 )
+_STABLE_CONNECTION_SECONDS = 60.0
 
 
 class CameraWorker:
@@ -99,9 +101,7 @@ class CameraWorker:
             self.state = "STARTING" if attempt == 0 else "RECONNECTING"
             try:
                 command = build_record_command(self.camera, output_dir)
-                await self._log(
-                    f"starting ffmpeg: {' '.join(redact_command(command))}"
-                )
+                await self._log(f"starting ffmpeg: {' '.join(redact_command(command))}")
                 self.process = await asyncio.create_subprocess_exec(
                     *command,
                     stdout=asyncio.subprocess.DEVNULL,
@@ -120,15 +120,20 @@ class CameraWorker:
 
             self.state = "RECORDING"
             self.started_at = datetime.now(timezone.utc)
+            process_started = time.monotonic()
             stderr_task = asyncio.create_task(self._consume_stderr(self.process))
             return_code = await self.process.wait()
+            runtime_seconds = time.monotonic() - process_started
             await stderr_task
             self.process = None
 
             if self.stop_requested:
                 break
 
-            self.last_error = f"ffmpeg exited with code {return_code}"
+            if runtime_seconds >= _STABLE_CONNECTION_SECONDS:
+                attempt = 0
+
+            self.last_error = f"ffmpeg exited with code {return_code} after {runtime_seconds:.1f}s"
             self.restart_count += 1
             self.state = "RECONNECTING"
             await self._log(self.last_error)
