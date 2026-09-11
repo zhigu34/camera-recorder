@@ -128,7 +128,7 @@ async def system_status() -> dict:
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
         "segment_processor": segment_processor.status(),
-        "upload": upload_manager.status(),
+        "upload": await upload_manager.status(),
         "alerts": {
             "monitor": alert_monitor.status(),
             "dispatcher": alert_dispatcher.status(),
