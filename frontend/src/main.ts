@@ -4,6 +4,7 @@ import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 import './styles/nvr-theme.css'
+import './styles/recording-browser.css'
 
 import Root from './Root.vue'
 
