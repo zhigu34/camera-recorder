@@ -9,6 +9,12 @@ interface Camera {
   enabled: boolean
 }
 
+interface RecentRecording {
+  id: number
+  camera_id: number
+  started_at?: string | null
+}
+
 interface PlaybackState {
   state: 'direct' | 'ready' | 'needed' | 'generating' | 'error'
   direct: boolean
@@ -48,6 +54,7 @@ interface BrowserResult {
 const cameras = ref<Camera[]>([])
 const selectedCamera = ref<number | null>(null)
 const selectedDate = ref(todayString())
+const latestRecording = ref<RecentRecording | null>(null)
 const data = ref<BrowserResult | null>(null)
 const loading = ref(false)
 const playerVisible = ref(false)
@@ -57,7 +64,6 @@ const preparing = ref(false)
 const proxyError = ref('')
 
 const recordings = computed(() => data.value?.items || [])
-const readyRecordings = computed(() => recordings.value.filter((item) => item.status === 'ready'))
 
 function todayString() {
   const now = new Date()
@@ -65,6 +71,11 @@ function todayString() {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}`
+}
+
+function recordingDate(value?: string | null) {
+  if (!value || value.length < 10) return null
+  return value.slice(0, 10)
 }
 
 function goBack() {
@@ -114,12 +125,36 @@ function healthType(value: string) {
   return 'warning'
 }
 
-async function loadCameras() {
-  const response = await axios.get<Camera[]>('/api/cameras')
-  cameras.value = response.data
-  if (selectedCamera.value === null && cameras.value.length) {
+async function loadInitialSelection() {
+  const [cameraResponse, recordingResponse] = await Promise.all([
+    axios.get<Camera[]>('/api/cameras'),
+    axios.get<RecentRecording[]>('/api/recordings?limit=1'),
+  ])
+  cameras.value = cameraResponse.data
+  latestRecording.value = recordingResponse.data[0] || null
+
+  const latest = latestRecording.value
+  if (latest && cameras.value.some((camera) => camera.id === latest.camera_id)) {
+    selectedCamera.value = latest.camera_id
+    selectedDate.value = recordingDate(latest.started_at) || todayString()
+    return
+  }
+
+  if (cameras.value.length) {
     selectedCamera.value = cameras.value[0].id
   }
+}
+
+async function jumpToLatest() {
+  const response = await axios.get<RecentRecording[]>('/api/recordings?limit=1')
+  latestRecording.value = response.data[0] || null
+  if (!latestRecording.value) {
+    ElMessage.info('数据库里还没有录像记录')
+    return
+  }
+  selectedCamera.value = latestRecording.value.camera_id
+  selectedDate.value = recordingDate(latestRecording.value.started_at) || todayString()
+  await loadRecordings()
 }
 
 async function loadRecordings() {
@@ -192,7 +227,7 @@ async function play(item: RecordingItem) {
 
 onMounted(async () => {
   try {
-    await loadCameras()
+    await loadInitialSelection()
     await loadRecordings()
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.detail || '初始化失败')
@@ -218,6 +253,7 @@ onMounted(async () => {
         <el-button @click="changeDay(-1)">前一天</el-button>
         <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" @change="loadRecordings" />
         <el-button @click="changeDay(1)">后一天</el-button>
+        <el-button @click="jumpToLatest">最新录像</el-button>
         <el-button type="primary" :loading="loading" @click="loadRecordings">刷新</el-button>
       </div>
 
@@ -256,7 +292,7 @@ onMounted(async () => {
 
     <el-card shadow="never" class="section-gap">
       <template #header><strong>录像片段</strong></template>
-      <el-table :data="recordings" stripe empty-text="当天暂无录像">
+      <el-table :data="recordings" stripe empty-text="当前摄像头在所选日期暂无录像">
         <el-table-column label="开始" width="110"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
         <el-table-column label="时长" width="110"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
         <el-table-column label="大小" width="110"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
