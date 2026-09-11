@@ -3,6 +3,7 @@ import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import HealthView from './HealthView.vue'
 import PreviewView from './PreviewView.vue'
+import RecordingBrowserView from './RecordingBrowserView.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
 
 const path = window.location.pathname
@@ -10,6 +11,7 @@ const isSettings = path === '/settings'
 const isBatchCameras = path === '/cameras/batch'
 const isPreview = path === '/preview'
 const isHealth = path === '/health-center'
+const isRecordingBrowser = path === '/recordings/browser'
 
 function openSettings() {
   window.location.href = '/settings'
@@ -26,6 +28,10 @@ function openPreview() {
 function openHealth() {
   window.location.href = '/health-center'
 }
+
+function openRecordingBrowser() {
+  window.location.href = '/recordings/browser'
+}
 </script>
 
 <template>
@@ -33,9 +39,11 @@ function openHealth() {
   <BatchCamerasView v-else-if="isBatchCameras" />
   <PreviewView v-else-if="isPreview" />
   <HealthView v-else-if="isHealth" />
+  <RecordingBrowserView v-else-if="isRecordingBrowser" />
   <template v-else>
     <App />
     <div class="quick-actions">
+      <el-button type="primary" plain @click="openRecordingBrowser">录像浏览</el-button>
       <el-button type="warning" plain @click="openHealth">系统健康</el-button>
       <el-button type="success" @click="openPreview">实时预览</el-button>
       <el-button type="success" plain @click="openBatchCameras">批量添加摄像头</el-button>
