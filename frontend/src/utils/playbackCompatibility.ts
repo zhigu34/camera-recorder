@@ -63,7 +63,13 @@ export function hevcSupportHint(): HevcHint {
   const hint = hvc1 || hev1
   if (hint === 'probably') return 'probably'
   if (hint === 'maybe') return 'maybe'
-  return 'unsupported'
+
+  // An empty canPlayType() result is not a reliable negative HEVC capability
+  // signal in several browser/OS combinations. Hardware decode can still work
+  // even when the browser does not advertise hvc1/hev1 here. Treat it as
+  // unknown and let the real <video> playback attempt decide; the player will
+  // fall back to the H.264 compatibility proxy only after a media error.
+  return 'unknown'
 }
 
 export function isBrowserSafeAudio(codec?: string | null): boolean {
