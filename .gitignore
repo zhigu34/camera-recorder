@@ -35,6 +35,10 @@ logs/
 *.mov
 *.ts
 
+# Local build artifacts
+vendor/ffmpeg/*.tar.xz
+vendor/ffmpeg/*.part
+
 # IDE / OS
 .DS_Store
 .idea/
