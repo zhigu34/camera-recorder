@@ -124,17 +124,14 @@ def test_recording_browser_includes_evening_local_timestamp(monkeypatch):
         assert delete_response.status_code == 204
 
 
-def test_cloud_playback_can_restore_successfully_archived_recording(monkeypatch):
+def test_cloud_playback_uses_openlist_stream_without_predownload(monkeypatch):
     camera_name = f"pytest-cloud-{uuid.uuid4().hex[:10]}"
     mp4_path = f"/tmp/{camera_name}_2026-09-10_10-00-00.mp4"
-    captured = {}
 
-    async def fake_start(recording_id, remote_path, runtime):
-        captured["recording_id"] = recording_id
-        captured["remote_path"] = remote_path
-        return {"state": "downloading", "error": None}
+    async def fail_if_predownloaded(*args, **kwargs):
+        raise AssertionError("cloud playback must not pre-download the entire MP4")
 
-    monkeypatch.setattr(recordings_api.cloud_playback_manager, "start", fake_start)
+    monkeypatch.setattr(recordings_api.cloud_playback_manager, "start", fail_if_predownloaded)
 
     with TestClient(app) as client:
         camera_response = client.post(
@@ -206,15 +203,31 @@ def test_cloud_playback_can_restore_successfully_archived_recording(monkeypatch)
         finally:
             connection.close()
 
+        browser = client.get(
+            "/api/recordings/browser",
+            params={"camera_id": camera_id, "date": "2026-09-10"},
+        )
+        assert browser.status_code == 200
+        playback = browser.json()["items"][0]["playback"]
+        assert playback["original_available"] is False
+        assert playback["remote_available"] is True
+        assert playback["source_kind"] == "openlist_stream"
+
         response = client.post(f"/api/recordings/{recording_id}/cloud-playback")
         assert response.status_code == 200
         body = response.json()
         assert body["remote_available"] is True
-        assert body["cloud_state"] == "downloading"
-        assert captured == {
-            "recording_id": recording_id,
-            "remote_path": "监控录像/测试/2026-09-10/cloud.mp4",
-        }
+        assert body["original_available"] is True
+        assert body["source_kind"] == "openlist_stream"
+        assert body["cloud_state"] == "streaming"
+
+        stream = client.get(
+            f"/api/recordings/{recording_id}/stream",
+            params={"source": "original"},
+            follow_redirects=False,
+        )
+        assert stream.status_code == 307
+        assert stream.headers["location"] == f"/api/recordings/{recording_id}/cloud-stream"
 
         delete_response = client.delete(f"/api/cameras/{camera_id}")
         assert delete_response.status_code == 204
