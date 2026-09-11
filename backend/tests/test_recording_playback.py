@@ -16,6 +16,7 @@ def test_h264_is_direct_playback(tmp_path):
 
     assert state["state"] == "direct"
     assert state["direct"] is True
+    assert state["progress"] is None
     assert list(tmp_path.iterdir()) == []
 
 
@@ -35,8 +36,9 @@ def test_proxy_command_copies_aac_audio(tmp_path):
 
     audio_index = command.index("-c:a")
     assert command[audio_index + 1] == "copy"
-    assert "-pix_fmt" in command
     assert command[command.index("-pix_fmt") + 1] == "yuv420p"
+    assert command[command.index("-progress") + 1] == "pipe:2"
+    assert "-nostats" in command
 
 
 def test_proxy_command_transcodes_non_aac_audio(tmp_path):
@@ -59,6 +61,7 @@ def test_live_proxy_command_is_fragmented_and_low_latency(tmp_path):
     assert command[command.index("-tune") + 1] == "zerolatency"
     assert command[command.index("-pix_fmt") + 1] == "yuv420p"
     assert command[command.index("-c:a") + 1] == "copy"
+    assert command[command.index("-progress") + 1] == "pipe:2"
     movflags = command[command.index("-movflags") + 1]
     assert "frag_keyframe" in movflags
     assert "empty_moov" in movflags
@@ -75,18 +78,25 @@ def test_live_proxy_command_accepts_remote_url():
     assert command[command.index("-c:a") + 1] == "copy"
 
 
-def test_live_proxy_status_is_visible():
+def test_live_proxy_status_includes_progress():
     manager = RecordingPlaybackManager()
     manager._live_ids.add(77)
+    manager._start_progress(77, 600, "live")
+    manager._update_progress(77, 123.4)
 
     state = manager.status(77, "hevc")
 
     assert state["state"] == "streaming"
     assert state["direct"] is False
+    assert state["progress"]["mode"] == "live"
+    assert state["progress"]["elapsed_seconds"] == 123.4
+    assert state["progress"]["duration_seconds"] == 600.0
+    assert state["progress"]["percent"] == 20.6
+    assert state["progress"]["cancellable"] is True
 
 
 @pytest.mark.asyncio
-async def test_live_proxy_streams_first_bytes_and_caches(monkeypatch, tmp_path):
+async def test_live_proxy_streams_first_bytes_tracks_progress_and_caches(monkeypatch, tmp_path):
     manager = RecordingPlaybackManager()
     manager.proxy_dir = tmp_path / "proxies"
     source = tmp_path / "source.mp4"
@@ -99,9 +109,11 @@ async def test_live_proxy_streams_first_bytes_and_caches(monkeypatch, tmp_path):
             self.stdout.feed_data(b"fragmented-mp4")
             self.stdout.feed_eof()
             self.stderr = asyncio.StreamReader()
+            self.stderr.feed_data(b"out_time_us=300000000\nprogress=continue\n")
             self.stderr.feed_eof()
 
         async def wait(self):
+            await asyncio.sleep(0)
             self.returncode = 0
             return 0
 
@@ -121,9 +133,12 @@ async def test_live_proxy_streams_first_bytes_and_caches(monkeypatch, tmp_path):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
     monkeypatch.setattr(manager, "_finalize_live_cache", fake_finalize)
 
-    session = await manager.open_live_proxy(55, source, "aac")
+    session = await manager.open_live_proxy(55, source, "aac", duration_seconds=600)
     assert session is not None
-    assert manager.status(55, "hevc")["state"] == "streaming"
+    await asyncio.sleep(0)
+    state = manager.status(55, "hevc")
+    assert state["state"] == "streaming"
+    assert state["progress"]["percent"] == 50.0
 
     chunks = []
     async for chunk in session.stream():
@@ -142,18 +157,32 @@ async def test_hevc_proxy_generation_is_atomic(monkeypatch, tmp_path):
     source.write_bytes(b"hevc-source")
 
     class FakeProcess:
-        returncode = 0
+        def __init__(self):
+            self.returncode = None
+            self.stderr = asyncio.StreamReader()
+            self.stderr.feed_data(b"out_time_us=600000000\nprogress=end\n")
+            self.stderr.feed_eof()
+            self.target = None
 
-        async def communicate(self):
-            return b"", b""
+        async def wait(self):
+            await asyncio.sleep(0)
+            self.returncode = 0
+            return 0
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
 
     async def fake_create_subprocess_exec(*command, **kwargs):
+        process = FakeProcess()
         Path(command[-1]).write_bytes(b"proxy-data")
-        return FakeProcess()
+        return process
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create_subprocess_exec)
 
-    state = await manager.start(42, source, "hevc", "aac")
+    state = await manager.start(42, source, "hevc", "aac", duration_seconds=600)
     assert state["state"] == "generating"
 
     for _ in range(100):
@@ -165,6 +194,43 @@ async def test_hevc_proxy_generation_is_atomic(monkeypatch, tmp_path):
     assert final["state"] == "ready"
     assert manager.proxy_path(42).read_bytes() == b"proxy-data"
     assert not manager.proxy_path(42).with_suffix(".part.mp4").exists()
+
+
+@pytest.mark.asyncio
+async def test_cancel_active_proxy_terminates_process_and_removes_partial_files(tmp_path):
+    manager = RecordingPlaybackManager()
+    manager.proxy_dir = tmp_path / "proxies"
+    manager.proxy_dir.mkdir(parents=True)
+    partial = manager.live_temp_path(88)
+    partial.write_bytes(b"partial")
+    manager._live_ids.add(88)
+    manager._start_progress(88, 600, "live")
+
+    class FakeProcess:
+        def __init__(self):
+            self.returncode = None
+            self.terminated = False
+
+        def terminate(self):
+            self.terminated = True
+            self.returncode = -15
+
+        async def wait(self):
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    process = FakeProcess()
+    manager._processes[88] = process
+
+    result = await manager.cancel(88)
+
+    assert result == {"cancelled": True, "state": "cancelled"}
+    assert process.terminated is True
+    assert not partial.exists()
+    assert 88 not in manager._progress
+    assert 88 not in manager._errors
 
 
 def test_old_proxy_cache_is_removed(tmp_path):
