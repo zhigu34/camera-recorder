@@ -66,7 +66,7 @@ class StorageCleanupManager:
                 pass
 
     @staticmethod
-    def _usage() -> tuple[shutil._ntuple_diskusage, float]:
+    def _usage() -> tuple[Any, float]:
         settings.recordings_dir.mkdir(parents=True, exist_ok=True)
         usage = shutil.disk_usage(settings.recordings_dir)
         percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
@@ -111,7 +111,6 @@ class StorageCleanupManager:
                 return self.status()
 
             now = datetime.now(timezone.utc)
-            cutoff = now - timedelta(hours=max(0, runtime.local_retention_hours))
             self._status.update(
                 {
                     "running": True,
@@ -125,6 +124,22 @@ class StorageCleanupManager:
                 }
             )
 
+            if runtime.local_retention_hours < 0:
+                self._status.update({"running": False, "last_result": "disabled"})
+                await self._audit(
+                    code="storage.emergency_cleanup_blocked",
+                    level="error",
+                    message="磁盘空间 critical，但本地录像自动清理已被禁用",
+                    metadata={
+                        "used_percent": round(before_percent, 2),
+                        "critical_percent": runtime.storage_critical_percent,
+                        "local_retention_hours": runtime.local_retention_hours,
+                    },
+                    throttle=True,
+                )
+                return self.status()
+
+            cutoff = now - timedelta(hours=runtime.local_retention_hours)
             await self._audit(
                 code="storage.emergency_cleanup_started",
                 level="warning",
