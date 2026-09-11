@@ -273,6 +273,11 @@ async def update_camera(
     password = values.pop("password", None)
     sub_rtsp_path_present = "sub_rtsp_path" in values
     sub_rtsp_path = values.pop("sub_rtsp_path", None)
+    nullable_identity = {
+        key: values.pop(key)
+        for key in ("manufacturer", "model")
+        if key in values
+    }
     schedule_changed = bool(
         {"enabled", "auto_record", "recording_schedule_enabled", "recording_schedule"}
         & set(values)
@@ -280,6 +285,8 @@ async def update_camera(
     for key, value in values.items():
         if value is not None:
             setattr(camera, key, value)
+    for key, value in nullable_identity.items():
+        setattr(camera, key, value)
     if sub_rtsp_path_present:
         camera.sub_rtsp_path = sub_rtsp_path.strip() if sub_rtsp_path else None
     if password is not None:
