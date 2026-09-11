@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.api.cameras import router as cameras_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
+from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
 from app.models.camera import Camera
@@ -15,6 +16,7 @@ from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
+from app.services.upload_manager import upload_manager
 
 
 @asynccontextmanager
@@ -30,6 +32,7 @@ async def lifespan(_: FastAPI):
 
     await init_db()
     await segment_processor.start()
+    await upload_manager.start()
 
     if settings.auto_start_enabled:
         async with SessionLocal() as session:
@@ -55,13 +58,14 @@ async def lifespan(_: FastAPI):
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
     await segment_processor.scan_once()
+    await upload_manager.stop()
     await segment_processor.stop()
     await close_db()
 
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.2.0",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -76,6 +80,7 @@ app.add_middleware(
 app.include_router(cameras_router)
 app.include_router(recordings_router)
 app.include_router(recorder_router)
+app.include_router(uploads_router)
 
 
 @app.get("/health")
@@ -90,4 +95,10 @@ async def system_status() -> dict:
         "segment_duration_seconds": settings.segment_duration_seconds,
         "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
+        "upload": {
+            "enabled": settings.upload_enabled,
+            "configured": upload_manager.provider.configured,
+            "active": upload_manager.active,
+            "provider": "openlist_webdav",
+        },
     }
