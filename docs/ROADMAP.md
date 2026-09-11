@@ -2,7 +2,7 @@
 
 > 当前阶段：V0.9.x 前端与状态模型收敛。
 >
-> 录像、回放、OpenList/WebDAV 归档、实时预览、健康中心、事件中心和邮件告警等核心能力已经落地，当前重点从“补页面”转向状态一致性、稳定性验证和维护面清理。
+> 录像、回放、OpenList/WebDAV 归档、实时预览、健康中心、事件中心和邮件告警等核心能力已经落地，当前重点从“补页面”转向状态一致性、稳定性验证、智能事件能力和 UI 设计系统收敛。
 
 ## 已完成阶段
 
@@ -77,6 +77,7 @@
 - 清理 `RootV2`、`CamerasViewV2`、`HealthViewV2`、`RecordingBrowserViewV3` 等历史版本后缀
 - Shell 状态轮询复用 `/api/system/status`，不再额外拉取 `/api/cameras` 计算总数
 - Dashboard 健康状态切换为 `/ws/status` 实时推送，HTTP 仅用于首次加载与断线兜底
+- 双主题 token 基础、深浅模式切换与本地偏好持久化
 
 当前状态模型：
 
@@ -123,7 +124,21 @@ schedule_state
 - HEVC fallback 条件
 - Proxy 缓存策略
 
-### 3. 维护面继续收敛
+### 3. UI 设计系统与交互收敛
+
+目标：达到成熟 NVR 控制台的界面质感，参考 UniFi Protect 一类产品的信息密度与交互层级，但保持 Camera Recorder 自身视觉和功能语义。
+
+- 深色 / 浅色主题完整覆盖，主题偏好本地持久化并支持首次跟随系统
+- 所有页面逐步从写死颜色迁移到统一 `--nvr-*` design tokens
+- 统一 Shell、导航、顶栏、状态栏、卡片、表格、筛选器、弹窗和空状态
+- 减少边框噪音，用层级、留白、弱背景和状态色表达结构
+- 实时监控强化画面优先，控制器按需浮现
+- Dashboard 改为异常优先与可下钻布局
+- 录像回放强化时间轴、播放器、事件与片段之间的视觉连续性
+- 响应式断点和窄屏信息密度统一
+- 后续增加统一的 motion / hover / loading 规范
+
+### 4. 维护面继续收敛
 
 - 逐步删除旧 `status` API 兼容依赖
 - 将上传管理 / 事件中心等适合实时展示的页面逐步接入 WebSocket
@@ -154,7 +169,9 @@ schedule_state
 - 更完整的操作审计
 - 发布版本与迁移说明
 
-## V1.1 稳定性增强
+## V1.1 智能事件录像与稳定性增强
+
+稳定性：
 
 - 更细粒度录像健康评分
 - 长期稳定性趋势
@@ -162,6 +179,28 @@ schedule_state
 - 告警冷却与策略细化
 - Webhook / 企业微信 / Telegram 等通知通道
 - Prometheus Metrics
+
+智能事件录像：
+
+- 新增独立 `recording_policy` / `event_state`，不把事件录像混入 `schedule_state`
+- 支持“事件摄像头 → 一个或多个指定摄像头”的录像触发规则
+- 第一阶段使用子码流低 FPS 人体检测，检测到 `person` 后由 RecorderManager 启动主码流录像
+- 支持连续命中阈值、置信度、最短录像时长、无人延迟停止和冷却时间
+- 事件进入事件中心，并关联触发摄像头、目标录像摄像头和录像片段
+- 支持外部 Webhook / MQTT / Home Assistant / PIR 等事件源
+- 摄像头原生 ONVIF / ISAPI / CGI 人体事件作为低资源触发源进行适配评估
+- 第二阶段增加约 10 秒可配置预录环形缓存，保留事件发生前画面
+- 后续扩展 `vehicle`、motion、door_open 等事件类型
+
+建议状态模型：
+
+```text
+recording_policy
+  manual / automatic / scheduled / event
+
+event_state
+  disabled / armed / triggered / cooldown
+```
 
 ## V1.2 存储与归档增强
 
