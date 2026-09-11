@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -15,7 +15,8 @@ def camera(*, enabled: bool = True, windows=None):
 
 
 def local_time(hour: int, minute: int = 0) -> datetime:
-    return datetime(2026, 9, 11, hour, minute, tzinfo=timezone.utc).astimezone()
+    local_tz = datetime.now().astimezone().tzinfo
+    return datetime(2026, 9, 11, hour, minute, tzinfo=local_tz)
 
 
 def test_schedule_disabled_keeps_all_day_behavior() -> None:
