@@ -13,11 +13,19 @@ def test_health_summary_shape() -> None:
     assert "total" in body["cameras"]
     assert "recording" in body["cameras"]
     assert "abnormal" in body["cameras"]
+    assert "online" in body["cameras"]
+    assert "offline" in body["cameras"]
+    assert "unknown" in body["cameras"]
     assert "segments" in body["recordings_24h"]
     assert "used_percent" in body["storage"]
     assert "cleanup" in body["storage"]
     assert "last_result" in body["storage"]["cleanup"]
     assert isinstance(body["camera_health"], list)
+    for camera in body["camera_health"]:
+        assert camera["connectivity_status"] in {"unknown", "online", "offline"}
+        assert isinstance(camera["recorder_state"], str)
+        assert isinstance(camera["schedule_state"], str)
+        assert camera["state"] == camera["recorder_state"]
 
 
 def test_health_trends_shape() -> None:
