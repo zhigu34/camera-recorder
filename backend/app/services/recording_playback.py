@@ -7,10 +7,15 @@ from app.core.config import settings
 
 _PROXY_CACHE_MAX_AGE_SECONDS = 24 * 3600
 _LIVE_START_TIMEOUT_SECONDS = 20.0
+MediaSource = Path | str
 
 
 class PlaybackProxyError(RuntimeError):
     pass
+
+
+def _source_exists(source: MediaSource) -> bool:
+    return not isinstance(source, Path) or source.exists()
 
 
 async def _capture_stderr(reader: asyncio.StreamReader | None) -> str:
@@ -116,8 +121,6 @@ class RecordingPlaybackManager:
         self._tasks: dict[int, asyncio.Task] = {}
         self._errors: dict[int, str] = {}
         self._live_ids: set[int] = set()
-        # Playback transcoding is deliberately conservative so a user opening a
-        # recording cannot steal CPU from the primary multi-camera recording path.
         self._semaphore = asyncio.Semaphore(1)
 
     def proxy_path(self, recording_id: int) -> Path:
@@ -128,14 +131,6 @@ class RecordingPlaybackManager:
 
     @staticmethod
     def can_direct_play(video_codec: str | None) -> bool:
-        """Return codecs that are safe to direct-play without client probing.
-
-        HEVC is intentionally not included here. Some browsers/platforms can play
-        hvc1/hev1 natively and the frontend will try the original file first, but
-        support is client-dependent. This method remains the guaranteed fallback
-        policy used by the API's `source=auto` mode.
-        """
-
         return (video_codec or "").lower() in {"h264", "avc", "avc1"}
 
     @staticmethod
@@ -180,18 +175,18 @@ class RecordingPlaybackManager:
     async def start(
         self,
         recording_id: int,
-        source: Path,
+        source: MediaSource,
         video_codec: str | None,
         audio_codec: str | None = None,
     ) -> dict[str, Any]:
         state = self.status(recording_id, video_codec)
         if state["state"] == "direct":
-            if not source.exists():
+            if not _source_exists(source):
                 raise FileNotFoundError(str(source))
             return state
         if state["state"] in {"ready", "generating", "streaming"}:
             return state
-        if not source.exists():
+        if not _source_exists(source):
             raise FileNotFoundError(str(source))
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
         await self.cleanup_cache()
@@ -206,17 +201,12 @@ class RecordingPlaybackManager:
     async def open_live_proxy(
         self,
         recording_id: int,
-        source: Path,
+        source: MediaSource,
         audio_codec: str | None,
     ) -> LiveProxySession | None:
-        """Start a fragmented-MP4 H.264 proxy that can be played immediately.
+        """Start an H.264 fragmented-MP4 proxy from a local path or remote URL."""
 
-        The same bytes are saved to a temporary fMP4 file. When transcoding
-        completes, that file is remuxed with stream-copy into the normal faststart
-        proxy cache so later playback keeps normal HTTP Range seeking.
-        """
-
-        if not source.exists():
+        if not _source_exists(source):
             raise FileNotFoundError(str(source))
         target = self.proxy_path(recording_id)
         if target.exists() and target.stat().st_size > 0:
@@ -226,8 +216,6 @@ class RecordingPlaybackManager:
         await self.cleanup_cache()
         await self._semaphore.acquire()
         try:
-            # A queued request may have waited for another proxy generation to
-            # finish. Re-check the cache before spending CPU on duplicate work.
             if target.exists() and target.stat().st_size > 0:
                 self._semaphore.release()
                 return None
@@ -291,9 +279,6 @@ class RecordingPlaybackManager:
 
     @staticmethod
     def _append_audio_options(command: list[str], audio_codec: str | None) -> None:
-        # Camera recordings are normally AAC already. Copying compatible audio
-        # avoids wasting CPU and preserves the original audio quality. Unknown or
-        # incompatible audio is converted to AAC for broad browser compatibility.
         if (audio_codec or "").lower() == "aac":
             command += ["-c:a", "copy"]
         else:
@@ -301,7 +286,7 @@ class RecordingPlaybackManager:
 
     @classmethod
     def build_proxy_command(
-        cls, source: Path, target: Path, audio_codec: str | None
+        cls, source: MediaSource, target: Path, audio_codec: str | None
     ) -> list[str]:
         command = [
             settings.ffmpeg_bin,
@@ -334,7 +319,7 @@ class RecordingPlaybackManager:
         return command
 
     @classmethod
-    def build_live_proxy_command(cls, source: Path, audio_codec: str | None) -> list[str]:
+    def build_live_proxy_command(cls, source: MediaSource, audio_codec: str | None) -> list[str]:
         command = [
             settings.ffmpeg_bin,
             "-nostdin",
@@ -411,8 +396,6 @@ class RecordingPlaybackManager:
                 live_temp.unlink(missing_ok=True)
                 return
             cache_temp.unlink(missing_ok=True)
-            # The completed fMP4 itself remains a valid fallback cache even if the
-            # cheap stream-copy normalization unexpectedly fails.
             if live_temp.exists() and live_temp.stat().st_size > 0:
                 live_temp.replace(target)
                 return
@@ -428,7 +411,7 @@ class RecordingPlaybackManager:
     async def _generate(
         self,
         recording_id: int,
-        source: Path,
+        source: MediaSource,
         audio_codec: str | None,
     ) -> None:
         async with self._semaphore:
