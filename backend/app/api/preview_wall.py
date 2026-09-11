@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.models.camera import Camera
-from app.services.camera_preview import CameraPreviewError, resolve_preview_path
+from app.services.camera_preview import resolve_preview_path
 from app.services.preview_wall import WallPreviewSource, stream_preview_frames
 from app.services.system_settings import load_runtime_settings
 
@@ -27,6 +27,27 @@ class WallStartRequest(BaseModel):
     slots: list[WallSlotRequest] = Field(default_factory=list, max_length=9)
 
 
+def _source_for_camera(
+    *,
+    camera: Camera,
+    password: str,
+    rtsp_path: str,
+    rtsp_timeout_us: int,
+    fps: int,
+    width: int,
+) -> WallPreviewSource:
+    return WallPreviewSource(
+        ip=camera.ip,
+        port=camera.rtsp_port,
+        username=camera.username,
+        password=password,
+        rtsp_path=rtsp_path,
+        rtsp_timeout_us=rtsp_timeout_us,
+        fps=fps,
+        width=width,
+    )
+
+
 @router.websocket("/ws/preview-wall")
 async def preview_wall(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -37,7 +58,11 @@ async def preview_wall(websocket: WebSocket) -> None:
         async with send_lock:
             await websocket.send_json(payload)
 
-    async def stream_slot(slot: WallSlotRequest, source: WallPreviewSource) -> None:
+    async def stream_slot(
+        slot: WallSlotRequest,
+        source: WallPreviewSource,
+        fallback: WallPreviewSource | None,
+    ) -> None:
         sent_first = False
 
         async def on_frame(frame: bytes) -> None:
@@ -53,12 +78,28 @@ async def preview_wall(websocket: WebSocket) -> None:
             await stream_preview_frames(source, on_frame)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception as primary_exc:
+            if fallback is not None:
+                with suppress(Exception):
+                    await send_json({
+                        "type": "slot_fallback",
+                        "slot": slot.index,
+                        "detail": "子码流不可用，已自动切换主码流",
+                    })
+                try:
+                    await stream_preview_frames(fallback, on_frame)
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as fallback_exc:
+                    primary_exc = RuntimeError(
+                        f"子码流与主码流均无法预览: {fallback_exc}"
+                    )
             with suppress(Exception):
                 await send_json({
                     "type": "slot_error",
                     "slot": slot.index,
-                    "detail": str(exc),
+                    "detail": str(primary_exc),
                 })
 
     try:
@@ -81,7 +122,9 @@ async def preview_wall(websocket: WebSocket) -> None:
 
         async with SessionLocal() as db:
             runtime = await load_runtime_settings(db)
-            resolved: list[tuple[WallSlotRequest, WallPreviewSource]] = []
+            resolved: list[
+                tuple[WallSlotRequest, WallPreviewSource, WallPreviewSource | None]
+            ] = []
             for slot in request.slots:
                 camera = await db.get(Camera, slot.camera_id)
                 if camera is None or not camera.enabled:
@@ -93,12 +136,12 @@ async def preview_wall(websocket: WebSocket) -> None:
                     continue
                 try:
                     password = decrypt_secret(camera.password_encrypted)
-                    rtsp_path, _ = resolve_preview_path(
+                    rtsp_path, selected_stream = resolve_preview_path(
                         main_path=camera.rtsp_path,
                         sub_path=camera.sub_rtsp_path,
                         stream=slot.stream,
                     )
-                except (CameraPreviewError, Exception) as exc:
+                except Exception as exc:
                     await send_json({
                         "type": "slot_error",
                         "slot": slot.index,
@@ -106,24 +149,33 @@ async def preview_wall(websocket: WebSocket) -> None:
                     })
                     continue
 
-                resolved.append((
-                    slot,
-                    WallPreviewSource(
-                        ip=camera.ip,
-                        port=camera.rtsp_port,
-                        username=camera.username,
+                source = _source_for_camera(
+                    camera=camera,
+                    password=password,
+                    rtsp_path=rtsp_path,
+                    rtsp_timeout_us=runtime.rtsp_timeout_us,
+                    fps=request.fps,
+                    width=request.width,
+                )
+                fallback = None
+                if slot.stream == "auto" and selected_stream == "sub":
+                    fallback = _source_for_camera(
+                        camera=camera,
                         password=password,
-                        rtsp_path=rtsp_path,
+                        rtsp_path=camera.rtsp_path,
                         rtsp_timeout_us=runtime.rtsp_timeout_us,
                         fps=request.fps,
                         width=request.width,
-                    ),
-                ))
+                    )
+                resolved.append((slot, source, fallback))
 
-        for slot, source in resolved:
-            tasks.append(asyncio.create_task(stream_slot(slot, source)))
+        for slot, source, fallback in resolved:
+            tasks.append(asyncio.create_task(stream_slot(slot, source, fallback)))
 
-        await send_json({"type": "started", "slots": [slot.index for slot, _ in resolved]})
+        await send_json({
+            "type": "started",
+            "slots": [slot.index for slot, _, _ in resolved],
+        })
 
         while True:
             message = await websocket.receive()
