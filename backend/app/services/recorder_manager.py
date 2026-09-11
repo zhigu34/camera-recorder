@@ -3,6 +3,7 @@ import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -27,6 +28,7 @@ _NETWORK_MARKERS = (
     "invalid data found",
 )
 _STABLE_CONNECTION_SECONDS = 60.0
+_CONSECUTIVE_FAILURE_THRESHOLD = 3
 
 
 class CameraWorker:
@@ -40,12 +42,17 @@ class CameraWorker:
         self.warning_count = 0
         self.timestamp_warning_count = 0
         self.network_warning_count = 0
+        self.consecutive_failure_count = 0
+        self.failure_streak_alert_active = False
+        self.last_failure_at: datetime | None = None
         self.last_error: str | None = None
         self.started_at: datetime | None = None
         self.offline_since: datetime | None = None
         self.offline_alert_active = False
+        self._outage_restart_base = 0
         self._offline_alert_task: asyncio.Task | None = None
         self._recovery_task: asyncio.Task | None = None
+        self._stability_task: asyncio.Task | None = None
         self._log_path = settings.logs_dir / f"camera-{camera.id}.log"
 
     @property
@@ -62,6 +69,7 @@ class CameraWorker:
         self.stop_requested = True
         self.state = "STOPPING"
         self._cancel_connectivity_tasks()
+        self._cancel_stability_task()
         self.offline_since = None
         self.offline_alert_active = False
 
@@ -90,6 +98,21 @@ class CameraWorker:
         self.state = "STOPPED"
 
     def snapshot(self) -> dict:
+        now = datetime.now(timezone.utc)
+        effective_failures = self.consecutive_failure_count
+        if (
+            self.state == "RECORDING"
+            and self.started_at is not None
+            and (now - self.started_at).total_seconds() >= _STABLE_CONNECTION_SECONDS
+        ):
+            effective_failures = 0
+
+        current_offline_seconds = 0
+        current_outage_restarts = 0
+        if self.offline_since is not None:
+            current_offline_seconds = max(0, int((now - self.offline_since).total_seconds()))
+            current_outage_restarts = max(0, self.restart_count - self._outage_restart_base)
+
         return {
             "camera_id": self.camera.id,
             "state": self.state,
@@ -98,9 +121,14 @@ class CameraWorker:
             "warning_count": self.warning_count,
             "timestamp_warning_count": self.timestamp_warning_count,
             "network_warning_count": self.network_warning_count,
+            "consecutive_failure_count": effective_failures,
+            "continuous_failure_active": effective_failures >= _CONSECUTIVE_FAILURE_THRESHOLD,
+            "last_failure_at": self.last_failure_at.isoformat() if self.last_failure_at else None,
             "last_error": self.last_error,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "offline_since": self.offline_since.isoformat() if self.offline_since else None,
+            "current_offline_seconds": current_offline_seconds,
+            "current_outage_restarts": current_outage_restarts,
             "offline_alert_active": self.offline_alert_active,
         }
 
@@ -125,13 +153,26 @@ class CameraWorker:
                 )
             except Exception as exc:
                 self.last_error = str(exc)
+                self.restart_count += 1
+                self.consecutive_failure_count += 1
+                self.last_failure_at = datetime.now(timezone.utc)
                 await self._log(f"failed to start ffmpeg: {exc}")
+                await self._record_camera_event(
+                    level="error",
+                    code="camera.ffmpeg_start_failed",
+                    message=f"摄像头 {self.camera.name} FFmpeg 启动失败",
+                    metadata={
+                        "reason": self.last_error[-1000:],
+                        "restart_count": self.restart_count,
+                        "consecutive_failures": self.consecutive_failure_count,
+                    },
+                )
                 await self._mark_disconnected(self.last_error)
+                await self._check_failure_streak()
                 if self.stop_requested:
                     break
                 delay = backoff[min(attempt, len(backoff) - 1)]
                 attempt += 1
-                self.restart_count += 1
                 await asyncio.sleep(delay)
                 continue
 
@@ -139,11 +180,13 @@ class CameraWorker:
             self.started_at = datetime.now(timezone.utc)
             process_started = time.monotonic()
             self._start_recovery_confirmation(self.process)
+            self._start_stability_confirmation(self.process)
             stderr_task = asyncio.create_task(self._consume_stderr(self.process))
             return_code = await self.process.wait()
             runtime_seconds = time.monotonic() - process_started
             await stderr_task
             self._cancel_recovery_task()
+            self._cancel_stability_task()
             self.process = None
 
             if self.stop_requested:
@@ -151,25 +194,107 @@ class CameraWorker:
 
             if runtime_seconds >= _STABLE_CONNECTION_SECONDS:
                 attempt = 0
+                self.consecutive_failure_count = 0
+                self.failure_streak_alert_active = False
 
             self.last_error = f"ffmpeg exited with code {return_code} after {runtime_seconds:.1f}s"
             self.restart_count += 1
+            self.consecutive_failure_count += 1
+            self.last_failure_at = datetime.now(timezone.utc)
             self.state = "RECONNECTING"
             await self._log(self.last_error)
+            await self._record_camera_event(
+                level="error",
+                code="camera.ffmpeg_exited",
+                message=f"摄像头 {self.camera.name} FFmpeg 异常退出",
+                metadata={
+                    "return_code": return_code,
+                    "runtime_seconds": round(runtime_seconds, 3),
+                    "restart_count": self.restart_count,
+                    "consecutive_failures": self.consecutive_failure_count,
+                },
+            )
             await self._mark_disconnected(self.last_error)
+            await self._check_failure_streak()
             delay = backoff[min(attempt, len(backoff) - 1)]
             attempt += 1
             await asyncio.sleep(delay)
 
         self._cancel_connectivity_tasks()
+        self._cancel_stability_task()
         self.state = "STOPPED"
+
+    async def _check_failure_streak(self) -> None:
+        if (
+            self.consecutive_failure_count < _CONSECUTIVE_FAILURE_THRESHOLD
+            or self.failure_streak_alert_active
+        ):
+            return
+        self.failure_streak_alert_active = True
+        await self._record_camera_event(
+            level="error",
+            code="camera.ffmpeg_failure_streak",
+            message=(
+                f"摄像头 {self.camera.name} FFmpeg 连续失败 "
+                f"{self.consecutive_failure_count} 次"
+            ),
+            metadata={
+                "consecutive_failures": self.consecutive_failure_count,
+                "restart_count": self.restart_count,
+                "threshold": _CONSECUTIVE_FAILURE_THRESHOLD,
+                "last_error": self.last_error[-1000:] if self.last_error else None,
+            },
+        )
+
+    def _start_stability_confirmation(self, process: asyncio.subprocess.Process) -> None:
+        self._cancel_stability_task()
+        self._stability_task = asyncio.create_task(
+            self._confirm_stable_process(process),
+            name=f"camera-stable-{self.camera.id}",
+        )
+
+    async def _confirm_stable_process(self, process: asyncio.subprocess.Process) -> None:
+        try:
+            await asyncio.sleep(_STABLE_CONNECTION_SECONDS)
+            if (
+                self.stop_requested
+                or self.process is not process
+                or process.returncode is not None
+            ):
+                return
+            had_streak = self.failure_streak_alert_active
+            previous_failures = self.consecutive_failure_count
+            self.consecutive_failure_count = 0
+            self.failure_streak_alert_active = False
+            if had_streak:
+                await self._record_camera_event(
+                    level="info",
+                    code="camera.ffmpeg_stable",
+                    message=f"摄像头 {self.camera.name} FFmpeg 已稳定运行 60 秒",
+                    metadata={"previous_consecutive_failures": previous_failures},
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._log(f"stability confirmation error: {exc}")
 
     async def _mark_disconnected(self, reason: str) -> None:
         if self.stop_requested:
             return
         if self.offline_since is None:
             self.offline_since = datetime.now(timezone.utc)
+            self._outage_restart_base = max(0, self.restart_count - 1)
             await self._log(f"camera connectivity lost: {reason}")
+            await self._record_camera_event(
+                level="warning",
+                code="camera.connection_lost",
+                message=f"摄像头 {self.camera.name} 录像连接中断",
+                metadata={
+                    "offline_since": self.offline_since.isoformat(),
+                    "reason": reason[-1000:],
+                    "restart_count": self.restart_count,
+                },
+            )
         if self._offline_alert_task is None or self._offline_alert_task.done():
             self._offline_alert_task = asyncio.create_task(
                 self._offline_alert_after_delay(),
@@ -186,7 +311,7 @@ class CameraWorker:
             config = await email_notifier.load_config()
             self.offline_alert_active = True
             offline_since = self.offline_since
-            await self._record_connectivity_event(
+            await self._record_camera_event(
                 level="error",
                 code="camera.offline",
                 message=(
@@ -232,14 +357,33 @@ class CameraWorker:
                 return
 
             offline_since = self.offline_since
+            recovered_at = datetime.now(timezone.utc)
+            outage_seconds = max(0.0, (recovered_at - offline_since).total_seconds())
+            outage_restarts = max(0, self.restart_count - self._outage_restart_base)
             had_alert = self.offline_alert_active
             self.offline_since = None
             self.offline_alert_active = False
+            self._outage_restart_base = self.restart_count
             self._cancel_offline_alert_task()
             self.last_error = None
 
+            await self._record_camera_event(
+                level="info",
+                code="camera.connection_restored",
+                message=(
+                    f"摄像头 {self.camera.name} 录像连接恢复，"
+                    f"本次中断 {outage_seconds:.1f} 秒"
+                ),
+                metadata={
+                    "offline_since": offline_since.isoformat(),
+                    "recovered_at": recovered_at.isoformat(),
+                    "duration_seconds": round(outage_seconds, 3),
+                    "outage_restarts": outage_restarts,
+                },
+            )
+
             if had_alert:
-                await self._record_connectivity_event(
+                await self._record_camera_event(
                     level="info",
                     code="camera.recovered",
                     message=f"摄像头 {self.camera.name} 录像连接已恢复",
@@ -260,7 +404,14 @@ class CameraWorker:
         except Exception as exc:
             await self._log(f"recovery notification error: {exc}")
 
-    async def _record_connectivity_event(self, *, level: str, code: str, message: str) -> None:
+    async def _record_camera_event(
+        self,
+        *,
+        level: str,
+        code: str,
+        message: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         try:
             async with SessionLocal() as session:
                 add_event(
@@ -270,10 +421,11 @@ class CameraWorker:
                     code=code,
                     message=message,
                     camera_id=self.camera.id,
+                    metadata=metadata,
                 )
                 await session.commit()
         except Exception as exc:
-            await self._log(f"failed to persist connectivity event: {exc}")
+            await self._log(f"failed to persist camera event: {exc}")
 
     def _cancel_connectivity_tasks(self) -> None:
         self._cancel_offline_alert_task()
@@ -290,6 +442,12 @@ class CameraWorker:
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
         self._recovery_task = None
+
+    def _cancel_stability_task(self) -> None:
+        task = self._stability_task
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        self._stability_task = None
 
     async def _consume_stderr(self, process: asyncio.subprocess.Process) -> None:
         if process.stderr is None:
