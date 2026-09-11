@@ -4,6 +4,13 @@
   padding: 0 !important;
 }
 
+.playback-health.embedded {
+  width: 100%;
+  max-width: none !important;
+  margin: 16px 0 0 !important;
+  padding: 0 !important;
+}
+
 .playback-health .el-card {
   overflow: hidden;
   border-color: var(--nvr-border-strong) !important;
@@ -78,6 +85,7 @@
 }
 
 .playback-health .el-table {
+  width: 100%;
   --el-table-bg-color: var(--nvr-surface);
   --el-table-tr-bg-color: var(--nvr-surface);
   --el-table-header-bg-color: #111820;
@@ -125,6 +133,9 @@
 @media (max-width: 720px) {
   .playback-health {
     margin: 10px 14px 20px !important;
+  }
+  .playback-health.embedded {
+    margin: 12px 0 0 !important;
   }
   .playback-health .backend-strip {
     grid-template-columns: 1fr;
