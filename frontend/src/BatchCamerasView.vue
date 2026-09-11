@@ -12,6 +12,7 @@ interface CameraCreatePayload {
   username: string
   password: string
   rtsp_path: string
+  sub_rtsp_path?: string | null
   enabled: boolean
   auto_record: boolean
   timestamp_mode: TimestampMode
@@ -48,8 +49,8 @@ function parseBatch(text: string): ParsedBatch {
     if (!line || line.startsWith('#')) return
 
     const parts = rawLine.split('|')
-    if (parts.length < 4 || parts.length > 7) {
-      errors.push(`第 ${lineNumber} 行：字段数量应为 4～7 个，使用 | 分隔`)
+    if (parts.length < 4 || parts.length > 8) {
+      errors.push(`第 ${lineNumber} 行：字段数量应为 4～8 个，使用 | 分隔`)
       return
     }
 
@@ -61,6 +62,7 @@ function parseBatch(text: string): ParsedBatch {
     const rawMode = ((parts[5] || '').trim() || 'reconstruct') as TimestampMode
     const rawPort = (parts[6] || '').trim()
     const rtspPort = rawPort ? Number(rawPort) : 554
+    const subRtspPath = (parts[7] || '').trim() || null
 
     if (!name) errors.push(`第 ${lineNumber} 行：名称不能为空`)
     if (!ip) errors.push(`第 ${lineNumber} 行：IP/主机不能为空`)
@@ -92,6 +94,7 @@ function parseBatch(text: string): ParsedBatch {
         username,
         password,
         rtsp_path: rtspPath,
+        sub_rtsp_path: subRtspPath,
         timestamp_mode: rawMode,
         enabled: true,
         auto_record: false,
@@ -108,9 +111,9 @@ const errorCount = computed(() => parsed.value.errors.length)
 
 function fillExample() {
   rawText.value = [
-    '# 名称|IP|用户名|密码|RTSP路径|时间戳模式|RTSP端口(可选)',
-    '监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct',
-    '监控-门口|192.168.1.101|admin|你的密码|/ch1/main|native|554',
+    '# 名称|IP|用户名|密码|主码流RTSP路径|时间戳模式|RTSP端口(可选)|子码流RTSP路径(可选)',
+    '监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub',
+    '监控-门口|192.168.1.101|admin|你的密码|/ch1/main|native|554|/ch1/sub',
   ].join('\n')
 }
 
@@ -162,8 +165,8 @@ async function submitBatch() {
 
     <el-card>
       <el-alert type="info" :closable="false" show-icon>
-        <template #title>格式：名称 | IP | 用户名 | 密码 | RTSP路径 | 时间戳模式 | RTSP端口（可选）</template>
-        用户名留空默认 admin，RTSP 路径留空默认 /ch1/main，时间戳模式留空默认 reconstruct，端口留空默认 554。
+        <template #title>格式：名称 | IP | 用户名 | 密码 | 主码流路径 | 时间戳模式 | RTSP端口 | 子码流路径</template>
+        最少只填前 4 项。主码流默认 /ch1/main，模式默认 reconstruct，端口默认 554；子码流可以留空，实时预览会尝试把 /main 自动推测为 /sub。
         空行和以 # 开头的注释行会自动忽略。
       </el-alert>
 
@@ -178,7 +181,7 @@ async function submitBatch() {
         :rows="14"
         resize="vertical"
         spellcheck="false"
-        placeholder="监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct"
+        placeholder="监控-大厅|192.168.1.100|admin|你的密码|/ch1/main|reconstruct|554|/ch1/sub"
       />
 
       <div class="summary">
