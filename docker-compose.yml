@@ -10,26 +10,13 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      CAMREC_APP_NAME: ${CAMREC_APP_NAME:-Camera Recorder}
       CAMREC_SECRET_KEY: ${CAMREC_SECRET_KEY:-camera-recorder-local-change-me}
       CAMREC_DATABASE_URL: sqlite+aiosqlite:////app/data/camera.db
+      CAMREC_DATA_DIR: /app/data
       CAMREC_RECORDINGS_DIR: /app/recordings
       CAMREC_STAGING_DIR: /app/staging
       CAMREC_FAILED_DIR: /app/failed
       CAMREC_LOGS_DIR: /app/logs
-      CAMREC_SEGMENT_DURATION_SECONDS: ${CAMREC_SEGMENT_DURATION_SECONDS:-600}
-      CAMREC_REMUX_CONCURRENCY: ${CAMREC_REMUX_CONCURRENCY:-2}
-      CAMREC_RTSP_TIMEOUT_US: ${CAMREC_RTSP_TIMEOUT_US:-5000000}
-      CAMREC_AUTO_START_ENABLED: ${CAMREC_AUTO_START_ENABLED:-true}
-      CAMREC_ALIGN_SEGMENTS_TO_CLOCK: ${CAMREC_ALIGN_SEGMENTS_TO_CLOCK:-true}
-      CAMREC_UPLOAD_ENABLED: ${CAMREC_UPLOAD_ENABLED:-false}
-      CAMREC_UPLOAD_CONCURRENCY: ${CAMREC_UPLOAD_CONCURRENCY:-2}
-      CAMREC_UPLOAD_RETRY_MAX: ${CAMREC_UPLOAD_RETRY_MAX:-8}
-      CAMREC_WEBDAV_URL: http://openlist:5244/dav/115
-      CAMREC_WEBDAV_ROOT: ${CAMREC_WEBDAV_ROOT:-监控录像}
-      CAMREC_WEBDAV_USERNAME: admin
-      CAMREC_WEBDAV_PASSWORD: ${OPENLIST_ADMIN_PASSWORD:-camera-recorder-openlist-change-me}
-      CAMREC_LOCAL_RETENTION_HOURS: ${CAMREC_LOCAL_RETENTION_HOURS:-48}
     volumes:
       - ./data:/app/data
       - ./recordings:/app/recordings
