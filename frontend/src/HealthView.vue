@@ -32,6 +32,17 @@ interface CameraHealth {
   recordings_24h: RecordingStats
 }
 
+interface StorageCleanupState {
+  running: boolean
+  last_run_at: string | null
+  last_result: string | null
+  deleted_files: number
+  freed_bytes: number
+  before_percent: number | null
+  after_percent: number | null
+  last_error: string | null
+}
+
 interface HealthSnapshot {
   generated_at: string
   process_started_at: string
@@ -51,6 +62,7 @@ interface HealthSnapshot {
     free_bytes: number
     used_percent: number
     state: 'healthy' | 'warning' | 'critical'
+    cleanup: StorageCleanupState
   }
   camera_health: CameraHealth[]
 }
@@ -232,6 +244,22 @@ function verdictLabel(value: StabilityVerdict) {
   if (value === 'fail') return '未通过'
   if (value === 'collecting') return '采集中'
   return '未监控'
+}
+
+function cleanupType(value?: string | null) {
+  if (value === 'completed') return 'success'
+  if (value === 'blocked' || value === 'disabled' || value === 'failed') return 'danger'
+  if (value === 'running') return 'warning'
+  return 'info'
+}
+
+function cleanupLabel(value?: string | null) {
+  if (value === 'completed') return '已完成'
+  if (value === 'blocked') return '无安全候选'
+  if (value === 'disabled') return '自动清理已禁用'
+  if (value === 'failed') return '执行失败'
+  if (value === 'running') return '清理中'
+  return '待命'
 }
 
 function stateTagType(state: string, abnormal: boolean) {
@@ -533,8 +561,13 @@ onBeforeUnmount(() => {
           <el-card shadow="never">
             <template #header>
               <div class="card-head">
-                <strong>磁盘</strong>
-                <el-tag :type="storageTagType()">{{ snapshot.storage.state }}</el-tag>
+                <div class="title-row compact">
+                  <strong>磁盘与自动保护</strong>
+                  <el-tag :type="storageTagType()">{{ snapshot.storage.state }}</el-tag>
+                </div>
+                <el-tag :type="cleanupType(snapshot.storage.cleanup.last_result)">
+                  {{ cleanupLabel(snapshot.storage.cleanup.last_result) }}
+                </el-tag>
               </div>
             </template>
             <el-progress :percentage="snapshot.storage.used_percent" :stroke-width="18" />
@@ -542,6 +575,20 @@ onBeforeUnmount(() => {
               <span>已用 {{ formatBytes(snapshot.storage.used_bytes) }}</span>
               <span>剩余 {{ formatBytes(snapshot.storage.free_bytes) }}</span>
               <span>总计 {{ formatBytes(snapshot.storage.total_bytes) }}</span>
+            </div>
+            <div class="cleanup-detail">
+              <template v-if="snapshot.storage.cleanup.last_run_at">
+                <span>最近检查 {{ formatStartedAt(snapshot.storage.cleanup.last_run_at) }}</span>
+                <span>删除 {{ snapshot.storage.cleanup.deleted_files }} 个</span>
+                <span>释放 {{ formatBytes(snapshot.storage.cleanup.freed_bytes) }}</span>
+                <span v-if="snapshot.storage.cleanup.before_percent !== null && snapshot.storage.cleanup.after_percent !== null">
+                  占用 {{ snapshot.storage.cleanup.before_percent }}% → {{ snapshot.storage.cleanup.after_percent }}%
+                </span>
+              </template>
+              <span v-else>每 60 秒检查一次；仅在 critical 时清理已上传成功且超过本地保留期的录像。</span>
+            </div>
+            <div v-if="snapshot.storage.cleanup.last_error" class="cleanup-error">
+              {{ snapshot.storage.cleanup.last_error }}
             </div>
           </el-card>
         </el-col>
@@ -667,6 +714,8 @@ p { margin: 8px 0 0; color: #909399; }
 .criteria-note { margin-top: 14px; padding: 10px 12px; background: #f5f7fa; border-radius: 6px; color: #606266; font-size: 12px; line-height: 1.7; }
 .acceptance-table { margin-top: 14px; }
 .disk-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 18px; margin-top: 18px; color: #606266; font-size: 13px; }
+.cleanup-detail { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: #f5f7fa; color: #606266; font-size: 12px; line-height: 1.6; }
+.cleanup-error { margin-top: 8px; color: #f56c6c; font-size: 12px; word-break: break-all; }
 .trend-strip { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; min-height: 155px; }
 .trend-column { flex: 1 0 42px; min-width: 42px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
 .trend-column span { color: #909399; font-size: 10px; white-space: nowrap; }
