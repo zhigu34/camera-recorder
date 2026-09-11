@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.services.camera_identity import infer_camera_form_factor
 
 
 def test_camera_identity_metadata_round_trip_and_clear() -> None:
@@ -45,6 +46,59 @@ def test_camera_identity_metadata_round_trip_and_clear() -> None:
         assert fetched.json()["manufacturer"] is None
         assert fetched.json()["model"] is None
         assert fetched.json()["form_factor"] == "turret"
+
+        deleted = client.delete(f"/api/cameras/{camera_id}")
+        assert deleted.status_code == 204
+
+
+def test_camera_form_factor_catalog_is_conservative() -> None:
+    assert infer_camera_form_factor("Hikvision", "DS-2CD2347G2-LU").form_factor == "turret"
+    assert infer_camera_form_factor("Dahua", "IPC-HFW3849T1-AS-PV").form_factor == "bullet"
+    assert infer_camera_form_factor("Dahua", "IPC-HDW3849H-AS-PV").form_factor == "turret"
+    assert infer_camera_form_factor("Reolink", "RLC-810A").form_factor == "bullet"
+    assert infer_camera_form_factor("Reolink", "RLC-833A").form_factor == "turret"
+    assert infer_camera_form_factor("Ubiquiti", "G4 Doorbell Pro").form_factor == "doorbell"
+    assert infer_camera_form_factor("Unknown", "ABC-123") is None
+
+
+def test_camera_form_factor_is_inferred_when_unspecified_and_manual_choice_wins() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras",
+            json={
+                "name": "pytest-camera-auto-form-factor",
+                "manufacturer": "Hikvision",
+                "model": "DS-2CD2347G2-LU",
+                "form_factor": "unknown",
+                "ip": "192.0.2.121",
+                "username": "admin",
+                "password": "test-secret",
+                "rtsp_path": "/ch1/main",
+                "timestamp_mode": "native",
+            },
+        )
+        assert created.status_code == 201
+        body = created.json()
+        camera_id = body["id"]
+        assert body["form_factor"] == "turret"
+
+        updated = client.put(
+            f"/api/cameras/{camera_id}",
+            json={
+                "manufacturer": "Reolink",
+                "model": "RLC-810A",
+                "form_factor": "dome",
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["form_factor"] == "dome"
+
+        renamed = client.put(
+            f"/api/cameras/{camera_id}",
+            json={"manufacturer": "Dahua", "model": "IPC-HFW3849T1-AS-PV"},
+        )
+        assert renamed.status_code == 200
+        assert renamed.json()["form_factor"] == "dome"
 
         deleted = client.delete(f"/api/cameras/{camera_id}")
         assert deleted.status_code == 204
