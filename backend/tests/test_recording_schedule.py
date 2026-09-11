@@ -4,7 +4,9 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas.camera import CameraRead
 from app.services.recording_schedule import recording_schedule_allows
+from app.services.recording_schedule_manager import recording_schedule_manager
 
 
 def camera(*, enabled: bool = True, windows=None):
@@ -47,6 +49,31 @@ def test_weekly_schedule_and_cross_midnight_use_start_day() -> None:
 
 def test_enabled_schedule_without_windows_records_nothing() -> None:
     assert recording_schedule_allows(camera(enabled=True, windows=[]), local_time(11, 12, 0)) is False
+
+
+def test_camera_read_tolerates_incomplete_legacy_schedule() -> None:
+    now = datetime.now().astimezone()
+    result = CameraRead.model_validate(
+        {
+            "id": 1,
+            "name": "legacy-camera",
+            "ip": "192.0.2.70",
+            "rtsp_port": 554,
+            "username": "admin",
+            "rtsp_path": "/ch1/main",
+            "enabled": True,
+            "auto_record": True,
+            "recording_schedule_enabled": True,
+            "recording_schedule": None,
+            "timestamp_mode": "native",
+            "status": "unknown",
+            "connectivity_status": "unknown",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+    assert result.recording_schedule_enabled is True
+    assert result.recording_schedule == []
 
 
 def test_camera_schedule_create_update_and_read() -> None:
@@ -92,6 +119,48 @@ def test_camera_schedule_create_update_and_read() -> None:
             json={"recording_schedule_enabled": True, "recording_schedule": []},
         )
         assert invalid.status_code == 422
+
+        response = client.delete(f"/api/cameras/{camera_id}")
+        assert response.status_code == 204
+
+
+def test_schedule_update_survives_runtime_reconcile_failure(monkeypatch) -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras",
+            json={
+                "name": "pytest-schedule-runtime-failure",
+                "ip": "192.0.2.89",
+                "password": "test-secret",
+                "timestamp_mode": "native",
+                "auto_record": False,
+            },
+        )
+        assert created.status_code == 201
+        camera_id = created.json()["id"]
+
+        async def broken_reconcile_camera(*args, **kwargs):
+            raise RuntimeError("simulated camera reconcile failure")
+
+        monkeypatch.setattr(
+            recording_schedule_manager,
+            "_reconcile_camera",
+            broken_reconcile_camera,
+        )
+        updated = client.put(
+            f"/api/cameras/{camera_id}",
+            json={
+                "auto_record": True,
+                "recording_schedule_enabled": True,
+                "recording_schedule": [
+                    {"days": [0, 1, 2, 3, 4], "start": "08:00", "end": "18:00"}
+                ],
+            },
+        )
+        assert updated.status_code == 200
+        assert updated.json()["recording_schedule_enabled"] is True
+        assert updated.json()["recording_schedule"][0]["start"] == "08:00"
+        assert recording_schedule_manager.status()["last_error"] is not None
 
         response = client.delete(f"/api/cameras/{camera_id}")
         assert response.status_code == 204
