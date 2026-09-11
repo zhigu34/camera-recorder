@@ -1,11 +1,11 @@
 import os
-from datetime import date as Date, datetime, time, timedelta, timezone
+from datetime import date as Date, datetime, time, timezone
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,8 +14,10 @@ from app.models.recording import Recording
 from app.models.upload import UploadTask
 from app.schemas.recording import RecordingRead
 from app.services.cloud_playback import cloud_playback_manager
+from app.services.cloud_stream import openlist_cloud_streamer
 from app.services.recording_playback import PlaybackProxyError, recording_playback_manager
 from app.services.system_settings import load_runtime_settings
+from app.services.upload_manager import WebDAVError
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 
@@ -50,17 +52,38 @@ def _resolved_source(recording: Recording) -> tuple[Path, str]:
     return local, "missing"
 
 
+def _internal_cloud_stream_url(recording_id: int) -> str:
+    # The backend container always listens on 8000 internally. FFmpeg can consume
+    # this URL without ever receiving OpenList credentials. The endpoint will
+    # either proxy Range bytes or follow OpenList's provider redirect.
+    return f"http://127.0.0.1:8000/api/recordings/{recording_id}/cloud-stream"
+
+
+async def _successful_upload_task(
+    recording_id: int, db: AsyncSession
+) -> UploadTask | None:
+    return await db.scalar(
+        select(UploadTask).where(
+            UploadTask.recording_id == recording_id,
+            UploadTask.status == "success",
+        )
+    )
+
+
 def _playback_payload(recording: Recording) -> dict:
     proxy_state = recording_playback_manager.status(recording.id, recording.video_codec)
     source, source_kind = _resolved_source(recording)
     cloud_state = cloud_playback_manager.status(recording.id)
+    remote_available = recording.upload_status == "success"
+    if source_kind == "missing" and remote_available:
+        source_kind = "openlist_stream"
     return {
         **proxy_state,
         "video_codec": recording.video_codec,
         "audio_codec": recording.audio_codec,
         "original_available": source.exists(),
         "source_kind": source_kind,
-        "remote_available": recording.upload_status == "success",
+        "remote_available": remote_available,
         "cloud_state": cloud_state["state"],
         "cloud_error": cloud_state.get("error"),
         "can_try_original": recording_playback_manager.can_try_original(recording.video_codec),
@@ -219,6 +242,14 @@ async def playback_status(recording_id: int, db: AsyncSession = Depends(get_db))
 
 @router.post("/{recording_id}/cloud-playback")
 async def prepare_cloud_playback(recording_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    """Compatibility probe for the old pre-download cloud playback flow.
+
+    V0.8.6 no longer downloads the whole MP4 before playback. Returning
+    `original_available=True` tells older frontends that an original source is
+    immediately consumable; `/stream?source=original` will route it through the
+    OpenList direct/Range bridge.
+    """
+
     recording = await db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
@@ -228,22 +259,86 @@ async def prepare_cloud_playback(recording_id: int, db: AsyncSession = Depends(g
         return _playback_payload(recording)
     if recording.upload_status != "success":
         raise HTTPException(status_code=409, detail="录像尚未成功归档，无法云端回放")
+    task = await _successful_upload_task(recording.id, db)
+    if task is None:
+        raise HTTPException(status_code=409, detail="未找到成功归档记录")
 
-    task = await db.scalar(
-        select(UploadTask).where(
-            UploadTask.recording_id == recording.id,
-            UploadTask.status == "success",
-        )
+    payload = _playback_payload(recording)
+    payload.update(
+        {
+            "original_available": True,
+            "source_kind": "openlist_stream",
+            "cloud_state": "streaming",
+            "cloud_error": None,
+        }
     )
+    return payload
+
+
+@router.get("/{recording_id}/cloud-stream")
+async def stream_cloud_recording(
+    recording_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Stream an archived MP4 from OpenList without exposing WebDAV credentials.
+
+    OpenList 30x provider links are redirected to the browser when they point to a
+    public external host. Otherwise this endpoint relays only the requested Range
+    bytes. No complete original MP4 is written to local disk.
+    """
+
+    recording = await db.get(Recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="recording not found")
+    if recording.upload_status != "success":
+        raise HTTPException(status_code=409, detail="录像尚未成功归档")
+    task = await _successful_upload_task(recording.id, db)
     if task is None:
         raise HTTPException(status_code=409, detail="未找到成功归档记录")
 
     runtime = await load_runtime_settings(db)
-    cloud = await cloud_playback_manager.start(recording.id, task.remote_path, runtime)
-    payload = _playback_payload(recording)
-    payload["cloud_state"] = cloud["state"]
-    payload["cloud_error"] = cloud.get("error")
-    return payload
+    try:
+        handle = await openlist_cloud_streamer.open(
+            task.remote_path,
+            runtime,
+            range_header=request.headers.get("range"),
+            if_range_header=request.headers.get("if-range"),
+            follow_redirects=False,
+        )
+        direct = openlist_cloud_streamer.public_redirect(handle)
+        if direct:
+            await handle.close()
+            return RedirectResponse(
+                direct,
+                status_code=302,
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Cloud-Playback": "openlist-direct",
+                },
+            )
+
+        # Relative/same-host redirects are often OpenList's own /d or /p paths.
+        # Follow those inside Docker instead of leaking an unreachable hostname to
+        # the browser.
+        if handle.response.status_code in {301, 302, 303, 307, 308}:
+            await handle.close()
+            handle = await openlist_cloud_streamer.open(
+                task.remote_path,
+                runtime,
+                range_header=request.headers.get("range"),
+                if_range_header=request.headers.get("if-range"),
+                follow_redirects=True,
+            )
+
+        return StreamingResponse(
+            handle.iter_bytes(),
+            status_code=handle.response.status_code,
+            media_type=handle.response.headers.get("content-type", "video/mp4"),
+            headers=handle.response_headers(),
+        )
+    except WebDAVError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/{recording_id}/playback")
@@ -252,10 +347,15 @@ async def prepare_playback(recording_id: int, db: AsyncSession = Depends(get_db)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
     source, _ = _resolved_source(recording)
+    media_source: Path | str = source
+    if not source.exists():
+        task = await _successful_upload_task(recording.id, db)
+        if recording.upload_status == "success" and task is not None:
+            media_source = _internal_cloud_stream_url(recording.id)
     try:
         return await recording_playback_manager.start(
             recording.id,
-            source,
+            media_source,
             recording.video_codec,
             recording.audio_codec,
         )
@@ -270,8 +370,13 @@ async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=404, detail="recording not found")
 
     source, _ = _resolved_source(recording)
+    media_source: Path | str = source
     if not source.exists():
-        raise HTTPException(status_code=410, detail="playback source is not available")
+        task = await _successful_upload_task(recording.id, db)
+        if recording.upload_status == "success" and task is not None:
+            media_source = _internal_cloud_stream_url(recording.id)
+        else:
+            raise HTTPException(status_code=410, detail="playback source is not available")
 
     state = recording_playback_manager.status(recording.id, recording.video_codec)
     if state["state"] == "ready":
@@ -282,7 +387,7 @@ async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db
     try:
         session = await recording_playback_manager.open_live_proxy(
             recording.id,
-            source,
+            media_source,
             recording.audio_codec,
         )
     except PlaybackProxyError as exc:
@@ -317,27 +422,39 @@ async def stream_recording(
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
 
-    if source == "original":
-        path, kind = _resolved_source(recording)
-        if kind == "cloud_cache":
-            cloud_playback_manager.mark_accessed(recording.id)
-    elif source == "proxy":
+    if source == "proxy":
         state = recording_playback_manager.status(recording.id, recording.video_codec)
         if state["state"] != "ready":
             raise HTTPException(status_code=409, detail="playback proxy is not ready")
         path = recording_playback_manager.proxy_path(recording.id)
         recording_playback_manager.mark_accessed(recording.id)
-    elif recording_playback_manager.can_direct_play(recording.video_codec):
-        path, kind = _resolved_source(recording)
-        if kind == "cloud_cache":
-            cloud_playback_manager.mark_accessed(recording.id)
-    else:
-        state = recording_playback_manager.status(recording.id, recording.video_codec)
-        if state["state"] != "ready":
-            raise HTTPException(status_code=409, detail="playback proxy is not ready")
-        path = recording_playback_manager.proxy_path(recording.id)
-        recording_playback_manager.mark_accessed(recording.id)
+        if not path.exists():
+            raise HTTPException(status_code=410, detail="playback file no longer exists")
+        return FileResponse(path, media_type="video/mp4")
 
+    use_original = source == "original" or recording_playback_manager.can_direct_play(
+        recording.video_codec
+    )
+    if use_original:
+        path, kind = _resolved_source(recording)
+        if path.exists():
+            if kind == "cloud_cache":
+                cloud_playback_manager.mark_accessed(recording.id)
+            return FileResponse(path, media_type="video/mp4")
+        task = await _successful_upload_task(recording.id, db)
+        if recording.upload_status == "success" and task is not None:
+            return RedirectResponse(
+                url=f"/api/recordings/{recording.id}/cloud-stream",
+                status_code=307,
+                headers={"Cache-Control": "no-store"},
+            )
+        raise HTTPException(status_code=410, detail="playback file no longer exists")
+
+    state = recording_playback_manager.status(recording.id, recording.video_codec)
+    if state["state"] != "ready":
+        raise HTTPException(status_code=409, detail="playback proxy is not ready")
+    path = recording_playback_manager.proxy_path(recording.id)
+    recording_playback_manager.mark_accessed(recording.id)
     if not path.exists():
         raise HTTPException(status_code=410, detail="playback file no longer exists")
     return FileResponse(path, media_type="video/mp4")
