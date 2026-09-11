@@ -11,6 +11,7 @@ from app.models.camera import Camera
 from app.schemas.camera import CameraCreate, CameraProbeResult, CameraRead, CameraUpdate
 from app.services.camera_config import runtime_config
 from app.services.camera_probe import CameraProbeError, probe_camera
+from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
@@ -44,6 +45,15 @@ async def create_camera(payload: CameraCreate, db: AsyncSession = Depends(get_db
     )
     db.add(camera)
     try:
+        await db.flush()
+        add_event(
+            db,
+            level="info",
+            category="camera",
+            code="camera.created",
+            message=f"摄像头 {camera.name} 已创建",
+            camera_id=camera.id,
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -72,6 +82,14 @@ async def update_camera(
     if password is not None:
         camera.password_encrypted = encrypt_secret(password)
 
+    add_event(
+        db,
+        level="info",
+        category="camera",
+        code="camera.updated",
+        message=f"摄像头 {camera.name} 配置已更新",
+        camera_id=camera.id,
+    )
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -105,6 +123,14 @@ async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
     except CameraProbeError as exc:
         camera.status = "probe_failed"
         camera.last_probe_at = datetime.now(timezone.utc)
+        add_event(
+            db,
+            level="error",
+            category="camera",
+            code="camera.probe_failed",
+            message=f"摄像头 {camera.name} Probe 失败: {str(exc)[-500:]}",
+            camera_id=camera.id,
+        )
         await db.commit()
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -130,6 +156,22 @@ async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera.status = "online"
     camera.last_probe_at = now
     camera.last_online_at = now
+    add_event(
+        db,
+        level="info",
+        category="camera",
+        code="camera.probe_ok",
+        message=f"摄像头 {camera.name} Probe 成功",
+        camera_id=camera.id,
+        metadata={
+            "video_codec": result.get("video_codec"),
+            "width": result.get("width"),
+            "height": result.get("height"),
+            "fps": result.get("fps"),
+            "audio_codec": result.get("audio_codec"),
+            "sample_rate": result.get("sample_rate"),
+        },
+    )
     await db.commit()
     return result
 
@@ -141,6 +183,14 @@ async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.start(runtime_config(camera))
     camera.status = "recording"
+    add_event(
+        db,
+        level="info",
+        category="recorder",
+        code="recorder.started",
+        message=f"摄像头 {camera.name} 开始录像",
+        camera_id=camera.id,
+    )
     await db.commit()
     return runtime
 
@@ -150,6 +200,14 @@ async def stop_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     runtime = await recorder_manager.stop(camera_id)
     camera.status = "stopped"
+    add_event(
+        db,
+        level="info",
+        category="recorder",
+        code="recorder.stopped",
+        message=f"摄像头 {camera.name} 停止录像",
+        camera_id=camera.id,
+    )
     await db.commit()
     return runtime
 
@@ -161,6 +219,14 @@ async def restart_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.restart(runtime_config(camera))
     camera.status = "recording"
+    add_event(
+        db,
+        level="warning",
+        category="recorder",
+        code="recorder.restarted",
+        message=f"摄像头 {camera.name} 录像进程已重启",
+        camera_id=camera.id,
+    )
     await db.commit()
     return runtime
 
