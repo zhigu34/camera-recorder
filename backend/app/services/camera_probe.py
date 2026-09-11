@@ -42,12 +42,16 @@ async def probe_camera(
     username: str,
     password: str,
     rtsp_path: str,
+    rtsp_timeout_us: int,
 ) -> dict:
     """Probe video and audio in one RTSP session.
 
-    Audio/video stream metadata must come from the same ffprobe process.  We do
+    Audio/video stream metadata must come from the same ffprobe process. We do
     not compare RTSP stream ``start_time`` values because independent RTP clock
     origins are not a reliable A/V sync metric.
+
+    ``rtsp_timeout_us`` is supplied from SQLite-backed runtime settings. Keep
+    only the internal process watchdog timeout in ``app.core.config``.
     """
 
     url = build_rtsp_url(ip, port, username, password, rtsp_path)
@@ -58,7 +62,7 @@ async def probe_camera(
         "-rtsp_transport",
         "tcp",
         "-timeout",
-        str(settings.rtsp_timeout_us),
+        str(rtsp_timeout_us),
         "-show_streams",
         "-of",
         "json",
