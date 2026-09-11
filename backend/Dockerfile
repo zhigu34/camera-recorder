@@ -1,14 +1,38 @@
 FROM python:3.12-slim
 
 ARG TARGETARCH
+ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
+ARG PYPI_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_INDEX_URL=${PYPI_INDEX_URL} \
+    UV_DEFAULT_INDEX=${PYPI_INDEX_URL}
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl xz-utils tzdata \
-    && rm -rf /var/lib/apt/lists/*
+# Prefer mainland China mirrors during image builds. Debian 12+ container images
+# normally use DEB822 sources, while older variants may still use sources.list.
+# Keep both paths supported so the Dockerfile survives base-image upgrades.
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i \
+        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https\?://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    if [ -f /etc/apt/sources.list ]; then \
+      sed -i \
+        -e "s|https\?://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https\?://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+        -e "s|https\?://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+        /etc/apt/sources.list; \
+    fi; \
+    apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 update; \
+    apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 install -y --no-install-recommends \
+      ca-certificates curl xz-utils tzdata; \
+    rm -rf /var/lib/apt/lists/*
 
 # Use a current static FFmpeg build because Camera Recorder depends on the
 # setts bitstream filter's `prescale` option. BtbN publishes both amd64 and
@@ -20,7 +44,8 @@ RUN set -eux; \
       *) echo "Unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     mkdir -p /tmp/ffmpeg; \
-    curl -fsSL "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${FFMPEG_ARCH}-gpl.tar.xz" \
+    curl -fsSL --retry 3 --retry-delay 2 \
+      "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-${FFMPEG_ARCH}-gpl.tar.xz" \
       -o /tmp/ffmpeg.tar.xz; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
     install -m 0755 /tmp/ffmpeg/bin/ffmpeg /usr/local/bin/ffmpeg; \
