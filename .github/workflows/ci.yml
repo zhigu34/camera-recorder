@@ -42,14 +42,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate deploy script
-        run: bash -n deploy.sh
+      - name: Validate deployment scripts
+        run: |
+          bash -n deploy.sh
+          bash -n scripts/download-ffmpeg.sh
       - name: Cache FFmpeg archive
         uses: actions/cache@v4
         with:
           path: vendor/ffmpeg/ffmpeg-linux64.tar.xz
           key: camera-recorder-ffmpeg-linux64-v1
       - name: Prepare FFmpeg archive
+        env:
+          GITHUB_PROXY_PROMPT: "0"
         run: bash scripts/download-ffmpeg.sh amd64
       - run: docker compose config
       - run: docker compose build backend frontend
