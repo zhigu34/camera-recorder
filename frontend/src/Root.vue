@@ -95,6 +95,12 @@ function navigate(key: string) {
   const entry = entryMap.get(key)
   if (entry) showEntry(entry)
 }
+function openPlaybackCompatibility() {
+  navigate('playback')
+  window.setTimeout(() => {
+    document.getElementById('playback-compatibility')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 80)
+}
 function toggleSidebar() {
   collapsed.value = !collapsed.value
   localStorage.setItem('nvr-sidebar-collapsed', collapsed.value ? '1' : '0')
@@ -169,9 +175,9 @@ onBeforeUnmount(() => {
         <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
         <AlertSettingsView v-else-if="renderKey === 'alerts'" @open-events="navigate('events')" />
         <PreviewView v-else-if="renderKey === 'preview'" />
-        <template v-else-if="renderKey === 'playback'"><RecordingBrowserView /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
+        <template v-else-if="renderKey === 'playback'"><RecordingBrowserView /><PlaybackTelemetryBridge /><PlaybackMetricsPanel /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
         <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
-        <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel /></template>
+        <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel compact @open-playback="openPlaybackCompatibility" /></template>
         <BatchCamerasView v-else-if="renderKey === 'batch'" />
         <SystemSettingsView v-else-if="renderKey === 'settings'" />
       </main>
