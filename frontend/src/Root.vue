@@ -3,7 +3,7 @@ import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import HealthView from './HealthView.vue'
 import PreviewView from './PreviewView.vue'
-import RecordingBrowserView from './RecordingBrowserView.vue'
+import RecordingBrowserViewV2 from './RecordingBrowserViewV2.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
 
 const path = window.location.pathname
@@ -39,7 +39,7 @@ function openRecordingBrowser() {
   <BatchCamerasView v-else-if="isBatchCameras" />
   <PreviewView v-else-if="isPreview" />
   <HealthView v-else-if="isHealth" />
-  <RecordingBrowserView v-else-if="isRecordingBrowser" />
+  <RecordingBrowserViewV2 v-else-if="isRecordingBrowser" />
   <template v-else>
     <App />
     <div class="quick-actions">
