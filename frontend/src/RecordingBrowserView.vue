@@ -55,6 +55,16 @@ interface BrowserResult {
   items: RecordingItem[]
 }
 
+interface TimelineGap {
+  key: string
+  startSeconds: number
+  endSeconds: number
+  durationSeconds: number
+  startLabel: string
+  endLabel: string
+  style: Record<string, string>
+}
+
 type PlaybackMode = '' | 'original' | 'proxy' | 'proxy-live'
 
 const cameras = ref<Camera[]>([])
@@ -71,8 +81,66 @@ const proxyError = ref('')
 const playbackMode = ref<PlaybackMode>('')
 const playbackNotice = ref('')
 const fallbackInProgress = ref(false)
+const autoAdvance = ref(true)
 
 const recordings = computed(() => data.value?.items || [])
+const playableRecordings = computed(() => recordings.value.filter((item) => item.status === 'ready'))
+const activeIndex = computed(() => recordings.value.findIndex((item) => item.id === activeRecording.value?.id))
+const previousRecording = computed(() => {
+  for (let index = activeIndex.value - 1; index >= 0; index -= 1) {
+    if (recordings.value[index].status === 'ready') return recordings.value[index]
+  }
+  return null
+})
+const nextRecording = computed(() => {
+  for (let index = activeIndex.value + 1; index < recordings.value.length; index += 1) {
+    if (recordings.value[index].status === 'ready') return recordings.value[index]
+  }
+  return null
+})
+const activePlayablePosition = computed(() => {
+  if (!activeRecording.value) return 0
+  const index = playableRecordings.value.findIndex((item) => item.id === activeRecording.value?.id)
+  return index >= 0 ? index + 1 : 0
+})
+const timelineGaps = computed<TimelineGap[]>(() => {
+  const result: TimelineGap[] = []
+  let previousEnd: number | null = null
+
+  for (const item of recordings.value) {
+    const start = localSeconds(item.started_at)
+    if (start === null) continue
+    const explicitEnd = localSeconds(item.ended_at)
+    const duration = Math.max(0, Number(item.duration || 0))
+    const end = explicitEnd ?? Math.min(86400, start + duration)
+
+    // Tiny timestamp jitter between adjacent MP4 segments is not a useful NVR
+    // outage signal. Highlight only gaps of at least five seconds.
+    if (previousEnd !== null && start - previousEnd >= 5) {
+      const gapStart = Math.max(0, previousEnd)
+      const gapEnd = Math.min(86400, start)
+      const gapDuration = gapEnd - gapStart
+      const left = (gapStart / 86400) * 100
+      const width = Math.max(0.15, (gapDuration / 86400) * 100)
+      result.push({
+        key: `${gapStart}-${gapEnd}`,
+        startSeconds: gapStart,
+        endSeconds: gapEnd,
+        durationSeconds: gapDuration,
+        startLabel: clockFromSeconds(gapStart),
+        endLabel: clockFromSeconds(gapEnd),
+        style: {
+          left: `${left}%`,
+          width: `${Math.min(width, 100 - left)}%`,
+        },
+      })
+    }
+    previousEnd = previousEnd === null ? end : Math.max(previousEnd, end)
+  }
+
+  return result
+})
+const totalGapSeconds = computed(() => timelineGaps.value.reduce((sum, gap) => sum + gap.durationSeconds, 0))
 const playbackModeLabel = computed(() => {
   if (playbackMode.value === 'proxy-live') return 'H.264 边转边播'
   if (playbackMode.value === 'proxy') return 'H.264 Proxy'
@@ -124,6 +192,21 @@ function localClock(value?: string | null) {
   return match?.[1] || value
 }
 
+function localSeconds(value?: string | null) {
+  if (!value) return null
+  const match = value.match(/T(\d{2}):(\d{2}):(\d{2})/)
+  if (!match) return null
+  return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])
+}
+
+function clockFromSeconds(seconds: number) {
+  const value = Math.max(0, Math.min(86400, Math.round(seconds)))
+  const h = Math.floor(value / 3600)
+  const m = Math.floor((value % 3600) / 60)
+  const s = value % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
 function formatDuration(seconds?: number | null) {
   const value = Math.max(0, Math.round(seconds || 0))
   const h = Math.floor(value / 3600)
@@ -142,10 +225,8 @@ function formatSize(bytes?: number | null) {
 }
 
 function timelineStyle(item: RecordingItem) {
-  if (!item.started_at) return { display: 'none' }
-  const time = item.started_at.match(/T(\d{2}):(\d{2}):(\d{2})/)
-  if (!time) return { display: 'none' }
-  const start = Number(time[1]) * 3600 + Number(time[2]) * 60 + Number(time[3])
+  const start = localSeconds(item.started_at)
+  if (start === null) return { display: 'none' }
   const duration = Math.max(60, Number(item.duration || 0))
   const left = (start / 86400) * 100
   const width = Math.max(0.28, (duration / 86400) * 100)
@@ -159,6 +240,10 @@ function healthType(value: string) {
   if (value === 'healthy') return 'success'
   if (value === 'unhealthy' || value === 'failed') return 'danger'
   return 'warning'
+}
+
+function recordingRowClassName({ row }: { row: RecordingItem }) {
+  return row.id === activeRecording.value?.id ? 'playing-row' : ''
 }
 
 async function loadInitialSelection() {
@@ -305,6 +390,16 @@ async function play(item: RecordingItem) {
   await prepareProxy(item)
 }
 
+async function playPrevious() {
+  if (!previousRecording.value) return
+  await play(previousRecording.value)
+}
+
+async function playNext() {
+  if (!nextRecording.value) return
+  await play(nextRecording.value)
+}
+
 function handleVideoCanPlay() {
   preparing.value = false
   if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) {
@@ -316,6 +411,18 @@ function handleVideoCanPlay() {
   } else if (playbackMode.value === 'proxy') {
     playbackNotice.value = '正在播放已缓存的 H.264 Proxy'
   }
+}
+
+async function handleVideoEnded() {
+  if (autoAdvance.value && nextRecording.value) {
+    playbackNotice.value = `当前片段播放完成，自动续播 ${localClock(nextRecording.value.started_at)}`
+    await play(nextRecording.value)
+    return
+  }
+  preparing.value = false
+  playbackNotice.value = autoAdvance.value
+    ? '已播放到当天最后一个可播放片段'
+    : '当前片段播放完成，自动续播已关闭'
 }
 
 async function handleVideoError() {
@@ -363,7 +470,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h2>录像浏览</h2>
-        <p>H.264 原片直放 · HEVC 优先原片解码 · 不支持时自动边转 H.264 边播放</p>
+        <p>连续回看 · HEVC 优先原片解码 · 不支持时自动边转 H.264 边播放</p>
       </div>
       <el-button @click="goBack">返回主界面</el-button>
     </div>
@@ -386,6 +493,9 @@ onMounted(async () => {
         <span>{{ data.count }} 段录像</span>
         <span>总时长 {{ formatDuration(data.total_duration) }}</span>
         <span>总大小 {{ formatSize(data.total_size) }}</span>
+        <span :class="{ 'gap-summary-alert': timelineGaps.length > 0 }">
+          缺口 {{ timelineGaps.length }} 处 / {{ formatDuration(totalGapSeconds) }}
+        </span>
       </div>
     </el-card>
 
@@ -396,26 +506,42 @@ onMounted(async () => {
       </div>
       <div class="timeline">
         <div class="grid-line" v-for="hour in [3, 6, 9, 12, 15, 18, 21]" :key="hour" :style="{ left: `${hour / 24 * 100}%` }" />
+        <div
+          v-for="gap in timelineGaps"
+          :key="gap.key"
+          class="gap-marker"
+          :style="gap.style"
+          :title="`录像缺口 ${gap.startLabel} ~ ${gap.endLabel} · ${formatDuration(gap.durationSeconds)}`"
+        />
         <button
           v-for="item in recordings"
           :key="item.id"
           class="segment"
-          :class="{ unhealthy: item.health_status !== 'healthy', deleted: item.status === 'deleted' }"
+          :class="{
+            unhealthy: item.health_status !== 'healthy',
+            warning: item.health_status === 'healthy' && item.warning_count > 0,
+            deleted: item.status === 'deleted',
+            active: item.id === activeRecording?.id,
+          }"
           :style="timelineStyle(item)"
+          :disabled="item.status !== 'ready'"
           :title="`${localClock(item.started_at)} · ${formatDuration(item.duration)} · ${item.health_status}`"
           @click="play(item)"
         />
       </div>
       <div class="legend">
         <span><i class="dot normal" />健康录像</span>
+        <span><i class="dot warning-dot" />有警告</span>
         <span><i class="dot bad" />异常录像</span>
+        <span><i class="dot gap-dot" />录像缺口</span>
         <span><i class="dot deleted-dot" />本地已清理</span>
+        <span><i class="dot active-dot" />当前播放</span>
       </div>
     </el-card>
 
     <el-card shadow="never" class="section-gap">
       <template #header><strong>录像片段</strong></template>
-      <el-table :data="recordings" stripe empty-text="当前摄像头在所选日期暂无录像">
+      <el-table :data="recordings" stripe empty-text="当前摄像头在所选日期暂无录像" :row-class-name="recordingRowClassName">
         <el-table-column label="开始" width="110"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
         <el-table-column label="时长" width="110"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
         <el-table-column label="大小" width="110"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
@@ -426,7 +552,9 @@ onMounted(async () => {
         <el-table-column prop="filename" label="文件" min-width="260" show-overflow-tooltip />
         <el-table-column label="播放" width="110" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" type="primary" :disabled="row.status !== 'ready'" @click="play(row)">播放</el-button>
+            <el-button size="small" type="primary" :disabled="row.status !== 'ready'" @click="play(row)">
+              {{ row.id === activeRecording?.id && playerVisible ? '播放中' : '播放' }}
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -438,8 +566,21 @@ onMounted(async () => {
         <span>{{ formatDuration(activeRecording.duration) }}</span>
         <span>{{ activeRecording.video_codec || '-' }}</span>
         <span>{{ activeRecording.width }}×{{ activeRecording.height }}</span>
+        <span v-if="activePlayablePosition">{{ activePlayablePosition }} / {{ playableRecordings.length }}</span>
         <el-tag v-if="playbackModeLabel" :type="playbackMode === 'proxy' || playbackMode === 'proxy-live' ? 'warning' : 'success'">{{ playbackModeLabel }}</el-tag>
       </div>
+
+      <div class="player-controls">
+        <div class="navigation-controls">
+          <el-button :disabled="!previousRecording || preparing" @click="playPrevious">上一段</el-button>
+          <el-button :disabled="!nextRecording || preparing" @click="playNext">下一段</el-button>
+        </div>
+        <label class="auto-advance-control">
+          <span>播放结束自动续播</span>
+          <el-switch v-model="autoAdvance" />
+        </label>
+      </div>
+
       <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
       <div
         class="player-box"
@@ -455,6 +596,7 @@ onMounted(async () => {
           preload="auto"
           @canplay="handleVideoCanPlay"
           @loadeddata="handleVideoCanPlay"
+          @ended="handleVideoEnded"
           @error="handleVideoError"
         />
         <el-empty v-else-if="!preparing && proxyError" :description="proxyError" />
@@ -474,21 +616,32 @@ onMounted(async () => {
 .page-head p { margin: 0; color: #909399; }
 .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .summary { display: flex; flex-wrap: wrap; gap: 22px; margin-top: 14px; color: #606266; font-size: 14px; }
+.gap-summary-alert { color: #e6a23c; font-weight: 600; }
 .section-gap { margin-top: 16px; }
 .axis-labels { display: flex; justify-content: space-between; color: #909399; font-size: 12px; margin-bottom: 8px; }
 .timeline { position: relative; height: 74px; border: 1px solid #dcdfe6; border-radius: 6px; overflow: hidden; background: #fafafa; }
 .grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: #ebeef5; }
-.segment { position: absolute; top: 15px; height: 44px; border: 0; border-radius: 4px; background: #67c23a; cursor: pointer; min-width: 3px; opacity: .92; }
-.segment:hover { filter: brightness(.92); transform: translateY(-1px); }
+.gap-marker { position: absolute; top: 0; bottom: 0; min-width: 2px; background: repeating-linear-gradient(135deg, rgba(230, 162, 60, .32) 0, rgba(230, 162, 60, .32) 5px, rgba(230, 162, 60, .08) 5px, rgba(230, 162, 60, .08) 10px); border-left: 1px solid rgba(230, 162, 60, .75); border-right: 1px solid rgba(230, 162, 60, .75); z-index: 1; }
+.segment { position: absolute; top: 15px; height: 44px; border: 0; border-radius: 4px; background: #67c23a; cursor: pointer; min-width: 3px; opacity: .92; z-index: 2; transition: transform .12s ease, box-shadow .12s ease; }
+.segment:hover:not(:disabled) { filter: brightness(.92); transform: translateY(-1px); }
+.segment.warning { background: #e6a23c; }
 .segment.unhealthy { background: #f56c6c; }
 .segment.deleted { background: #c0c4cc; cursor: not-allowed; }
-.legend { display: flex; gap: 20px; margin-top: 10px; color: #606266; font-size: 13px; }
+.segment.active { box-shadow: 0 0 0 3px #409eff, 0 0 0 5px rgba(64, 158, 255, .22); transform: translateY(-2px); opacity: 1; }
+.legend { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 10px; color: #606266; font-size: 13px; }
 .legend span { display: flex; align-items: center; gap: 6px; }
 .dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
 .normal { background: #67c23a; }
+.warning-dot { background: #e6a23c; }
 .bad { background: #f56c6c; }
+.gap-dot { background: repeating-linear-gradient(135deg, #e6a23c 0, #e6a23c 3px, #fdf6ec 3px, #fdf6ec 6px); }
 .deleted-dot { background: #c0c4cc; }
+.active-dot { background: #409eff; box-shadow: 0 0 0 2px rgba(64, 158, 255, .22); }
+:deep(.el-table .playing-row > td.el-table__cell) { background: #ecf5ff !important; }
 .player-meta { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin-bottom: 10px; color: #606266; }
+.player-controls { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin: 8px 0 12px; }
+.navigation-controls { display: flex; gap: 8px; }
+.auto-advance-control { display: flex; align-items: center; gap: 10px; color: #606266; font-size: 13px; }
 .playback-notice { margin-bottom: 12px; padding: 9px 12px; border-radius: 6px; background: #f4f4f5; color: #606266; font-size: 13px; }
 .player-box { min-height: 360px; background: #111; display: flex; align-items: center; justify-content: center; border-radius: 6px; overflow: hidden; }
 .player-box video { width: 100%; max-height: 70vh; background: #000; }
@@ -497,5 +650,6 @@ onMounted(async () => {
   .page-shell { padding: 14px; }
   .page-head { align-items: flex-start; gap: 12px; }
   .axis-labels span:nth-child(even) { display: none; }
+  .player-controls { align-items: flex-start; flex-direction: column; }
 }
 </style>
