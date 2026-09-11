@@ -45,6 +45,9 @@ async def _camera_or_404(camera_id: int, db: AsyncSession) -> Camera:
 def _new_camera(payload: CameraCreate) -> Camera:
     return Camera(
         name=payload.name,
+        manufacturer=payload.manufacturer,
+        model=payload.model,
+        form_factor=payload.form_factor,
         ip=payload.ip,
         rtsp_port=payload.rtsp_port,
         username=payload.username,
