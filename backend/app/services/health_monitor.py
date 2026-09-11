@@ -11,6 +11,7 @@ from app.models.health_sample import CameraHealthSample
 from app.models.recording import Recording
 from app.models.upload import UploadTask
 from app.services.recorder_manager import recorder_manager
+from app.services.storage_cleanup import storage_cleanup_manager
 from app.services.storage_manager import storage_snapshot
 
 _PROCESS_STARTED_AT = datetime.now(timezone.utc)
@@ -89,8 +90,7 @@ async def health_snapshot() -> dict[str, Any]:
 
         upload_rows = (
             await session.execute(
-                select(UploadTask.status, func.count(UploadTask.id))
-                .group_by(UploadTask.status)
+                select(UploadTask.status, func.count(UploadTask.id)).group_by(UploadTask.status)
             )
         ).all()
 
@@ -162,13 +162,12 @@ async def health_snapshot() -> dict[str, Any]:
                 "timestamp_warning_count": _as_int(runtime.get("timestamp_warning_count")),
                 "network_warning_count": _as_int(runtime.get("network_warning_count")),
                 "last_error": runtime.get("last_error"),
-                "recordings_24h": recording_by_camera.get(
-                    camera.id, _recording_stats_defaults()
-                ),
+                "recordings_24h": recording_by_camera.get(camera.id, _recording_stats_defaults()),
             }
         )
 
     storage = await storage_snapshot()
+    storage["cleanup"] = storage_cleanup_manager.status()
     uptime_seconds = max(0, int(time.monotonic() - _PROCESS_STARTED_MONOTONIC))
 
     return {
@@ -308,9 +307,7 @@ async def health_trends(*, hours: int = 24, bucket_minutes: int = 60) -> dict[st
             "online_rate": _rate(overall_online_samples, overall_expected_samples),
             "recording_segments": overall_segments,
             "complete_segments": overall_complete_segments,
-            "recording_completeness": _rate(
-                overall_complete_segments, overall_segments
-            ),
+            "recording_completeness": _rate(overall_complete_segments, overall_segments),
         },
         "cameras": camera_rows,
         "timeline": timeline,
