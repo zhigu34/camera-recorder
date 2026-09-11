@@ -17,6 +17,9 @@ class Camera(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    manufacturer: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    form_factor: Mapped[str] = mapped_column(String(32), default="unknown")
     ip: Mapped[str] = mapped_column(String(255), index=True)
     rtsp_port: Mapped[int] = mapped_column(Integer, default=554)
     username: Mapped[str] = mapped_column(String(128), default="admin")
