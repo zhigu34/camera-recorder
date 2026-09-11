@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import axios from 'axios'
 import {
   Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
   Monitor, Plus, Setting, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
 } from '@element-plus/icons-vue'
 
-import App from './App.vue'
+import AlertSettingsView from './AlertSettingsView.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasViewV2 from './CamerasViewV2.vue'
 import DashboardView from './DashboardView.vue'
@@ -26,7 +26,7 @@ import UploadManagementView from './UploadManagementView.vue'
 interface NavEntry {
   key: string
   label: string
-  kind: 'dashboard' | 'legacy' | 'route'
+  kind: 'dashboard' | 'route'
   target: string
   group: 'core' | 'ops' | 'settings'
   icon: object
@@ -48,14 +48,11 @@ const navEntries: NavEntry[] = [
   { key: 'recordings', label: '录像管理', kind: 'route', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
   { key: 'uploads', label: '上传管理', kind: 'route', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
   { key: 'events', label: '事件中心', kind: 'route', target: '/events', group: 'ops', icon: markRaw(Bell) },
-  { key: 'alerts', label: '告警设置', kind: 'legacy', target: 'alerts', group: 'ops', icon: markRaw(WarningFilled) },
+  { key: 'alerts', label: '告警设置', kind: 'route', target: '/alerts', group: 'ops', icon: markRaw(WarningFilled) },
   { key: 'batch', label: '批量添加', kind: 'route', target: '/cameras/batch', group: 'ops', icon: markRaw(Plus) },
   { key: 'settings', label: '系统设置', kind: 'route', target: '/settings', group: 'settings', icon: markRaw(Setting) },
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
-const legacyLabels: Record<string, string> = {
-  alerts: '告警设置',
-}
 
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
 const activeKey = ref('dashboard')
@@ -69,7 +66,6 @@ const activeEntry = computed(() => entryMap.get(activeKey.value) || entryMap.get
 const coreEntries = computed(() => navEntries.filter((item) => item.group === 'core'))
 const opsEntries = computed(() => navEntries.filter((item) => item.group === 'ops'))
 const settingsEntry = computed(() => navEntries.find((item) => item.group === 'settings')!)
-const isLegacy = computed(() => activeEntry.value.kind === 'legacy')
 const recordingCount = computed(() => (shellStatus.value?.recorders || []).filter((item) => item.state === 'RECORDING').length)
 const storageState = computed(() => shellStatus.value?.storage?.state || 'healthy')
 const systemHealthy = computed(() => Boolean(
@@ -85,30 +81,18 @@ function locationKey() {
   return navEntries.find((item) => item.kind === 'route' && item.target === path)?.key || 'dashboard'
 }
 function urlFor(entry: NavEntry) {
-  if (entry.kind === 'dashboard') return '/'
-  if (entry.kind === 'legacy') return `/?view=${entry.target}`
-  return entry.target
+  return entry.kind === 'dashboard' ? '/' : entry.target
 }
-async function activateLegacySection(section: string) {
-  await nextTick()
-  window.requestAnimationFrame(() => {
-    const label = legacyLabels[section]
-    if (!label) return
-    const items = Array.from(document.querySelectorAll<HTMLElement>('.legacy-host .sidebar .el-menu-item'))
-    items.find((item) => item.textContent?.trim() === label)?.click()
-  })
-}
-async function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'none' = 'push') {
+function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'none' = 'push') {
   activeKey.value = entry.key
   renderKey.value = entry.key
   const url = urlFor(entry)
   if (historyMode === 'push' && `${window.location.pathname}${window.location.search}` !== url) window.history.pushState({}, '', url)
   else if (historyMode === 'replace') window.history.replaceState({}, '', url)
-  if (entry.kind === 'legacy') await activateLegacySection(entry.target)
 }
 function navigate(key: string) {
   const entry = entryMap.get(key)
-  if (entry) void showEntry(entry)
+  if (entry) showEntry(entry)
 }
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -127,11 +111,11 @@ async function loadShellStatus() {
   }
 }
 function handlePopState() {
-  void showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'none')
+  showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'none')
 }
 
 onMounted(() => {
-  void showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'replace')
+  showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'replace')
   void loadShellStatus()
   statusTimer = window.setInterval(loadShellStatus, 10000)
   window.addEventListener('popstate', handlePopState)
@@ -175,7 +159,7 @@ onBeforeUnmount(() => {
       <header class="nvr-topbar">
         <div class="topbar-title">
           <button class="top-collapse" :title="collapsed ? '展开侧栏' : '收起侧栏'" @click="toggleSidebar"><Expand v-if="collapsed" /><Fold v-else /></button>
-          <div><strong>{{ activeEntry.label }}</strong><span>Camera Recorder · v0.9.0</span></div>
+          <div><strong>{{ activeEntry.label }}</strong><span>Camera Recorder · v0.9.1</span></div>
         </div>
         <div class="system-pill" :class="{ healthy: systemHealthy, danger: !systemHealthy }"><CircleCheckFilled v-if="systemHealthy" /><WarningFilled v-else /><span>{{ statusError ? '状态不可用' : systemHealthy ? '系统正常' : '需要关注' }}</span></div>
       </header>
@@ -186,7 +170,7 @@ onBeforeUnmount(() => {
         <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
         <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
         <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
-        <div v-else-if="isLegacy" class="legacy-host"><App /></div>
+        <AlertSettingsView v-else-if="renderKey === 'alerts'" @open-events="navigate('events')" />
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
         <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
