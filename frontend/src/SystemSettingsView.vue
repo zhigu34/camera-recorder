@@ -36,7 +36,7 @@ const form = reactive({
   upload_enabled: false,
   upload_concurrency: 2,
   upload_retry_max: 8,
-  webdav_url: 'http://openlist:5244/dav/115',
+  webdav_url: 'http://openlist:5244/dav',
   webdav_root: '监控录像',
   webdav_username: 'admin',
   webdav_password: '',
@@ -142,7 +142,10 @@ onMounted(load)
           <span class="unit">%</span>
         </el-form-item>
 
-        <el-divider content-position="left">115 / OpenList 上传</el-divider>
+        <el-divider content-position="left">OpenList / 网盘归档</el-divider>
+        <el-alert class="upload-hint" type="info" :closable="false" show-icon>
+          OpenList 作为统一 WebDAV 入口，后端可以挂载任意 OpenList 支持的网盘或对象存储；这里不绑定具体网盘品牌。
+        </el-alert>
         <el-form-item label="自动上传"><el-switch v-model="form.upload_enabled" /></el-form-item>
         <el-form-item label="上传并发数"><el-input-number v-model="form.upload_concurrency" :min="1" :max="16" /></el-form-item>
         <el-form-item label="最大重试次数"><el-input-number v-model="form.upload_retry_max" :min="1" :max="100" /></el-form-item>
@@ -151,8 +154,14 @@ onMounted(load)
           <span class="unit">小时</span>
           <span class="hint">-1 表示永不自动删除</span>
         </el-form-item>
-        <el-form-item label="WebDAV URL"><el-input v-model="form.webdav_url" /></el-form-item>
-        <el-form-item label="远端根目录"><el-input v-model="form.webdav_root" /></el-form-item>
+        <el-form-item label="OpenList WebDAV 地址">
+          <el-input v-model="form.webdav_url" placeholder="http://openlist:5244/dav" />
+          <span class="hint block-hint">可填 OpenList WebDAV 根地址，也可直接指向某个挂载目录，例如 /dav/aliyun。</span>
+        </el-form-item>
+        <el-form-item label="远端归档目录">
+          <el-input v-model="form.webdav_root" placeholder="监控录像" />
+          <span class="hint block-hint">使用 WebDAV 根地址时，可写成“网盘挂载名/监控录像”；直接指向挂载目录时只需写“监控录像”。</span>
+        </el-form-item>
         <el-form-item label="WebDAV 用户名"><el-input v-model="form.webdav_username" /></el-form-item>
         <el-form-item label="WebDAV 密码">
           <el-input
@@ -185,6 +194,8 @@ h2 { margin: 0 0 6px; }
 .settings-form { max-width: 820px; }
 .hint { color: #909399; font-size: 12px; margin-left: 12px; }
 .topbar .hint { margin-left: 0; }
+.block-hint { display: block; width: 100%; margin: 7px 0 0; line-height: 1.6; }
+.upload-hint { margin-bottom: 18px; }
 .unit { margin-left: 8px; color: #606266; }
 .password-actions { width: 100%; display: flex; gap: 14px; align-items: center; margin-top: 8px; }
 </style>
