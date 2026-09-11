@@ -11,7 +11,7 @@ import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasViewV2 from './CamerasViewV2.vue'
 import DashboardView from './DashboardView.vue'
 import EventCenterView from './EventCenterView.vue'
-import HealthView from './HealthView.vue'
+import HealthViewV2 from './HealthViewV2.vue'
 import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
 import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
@@ -174,7 +174,7 @@ onBeforeUnmount(() => {
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
         <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
-        <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel /></template>
+        <template v-else-if="renderKey === 'health'"><HealthViewV2 /><PlaybackMetricsPanel /></template>
         <BatchCamerasView v-else-if="renderKey === 'batch'" />
         <SystemSettingsView v-else-if="renderKey === 'settings'" />
       </main>
