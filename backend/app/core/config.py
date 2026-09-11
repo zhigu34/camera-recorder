@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     auto_start_enabled: bool = True
     align_segments_to_clock: bool = True
 
+    upload_enabled: bool = False
+    upload_scan_interval_seconds: float = 10.0
+    upload_retry_max: int = 8
+    webdav_url: str = "http://openlist:5244/dav/115/监控录像"
+    webdav_username: str = "admin"
+    webdav_password: str = ""
+    local_retention_hours: int = 48
+
     ffmpeg_bin: str = "ffmpeg"
     ffprobe_bin: str = "ffprobe"
 
