@@ -331,7 +331,8 @@ async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
             rtsp_timeout_us=runtime.rtsp_timeout_us,
         )
     except CameraProbeError as exc:
-        camera.status = "probe_failed"
+        # Probe is the sole owner of persisted connectivity state.
+        camera.status = "offline"
         camera.last_probe_at = datetime.now(timezone.utc)
         add_event(
             db,
@@ -393,7 +394,6 @@ async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.start(_runtime_config_or_409(camera))
     recording_schedule_manager.note_manual_start(camera_id)
-    camera.status = "recording"
     add_event(
         db,
         level="info",
@@ -411,7 +411,6 @@ async def stop_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     runtime = await recorder_manager.stop(camera_id)
     recording_schedule_manager.note_manual_stop(camera_id)
-    camera.status = "stopped"
     add_event(
         db,
         level="info",
@@ -431,7 +430,6 @@ async def restart_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.restart(_runtime_config_or_409(camera))
     recording_schedule_manager.note_manual_start(camera_id)
-    camera.status = "recording"
     add_event(
         db,
         level="warning",
