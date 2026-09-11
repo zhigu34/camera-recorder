@@ -43,12 +43,13 @@ function onBatchCompleted() {
   overflow: hidden;
   border: 1px solid var(--nvr-border-strong) !important;
   border-radius: 12px !important;
+  background: var(--nvr-surface) !important;
 }
 :global(.batch-camera-dialog .el-dialog__header) {
   margin: 0;
   padding: 15px 18px;
   border-bottom: 1px solid var(--nvr-border);
-  background: #111820;
+  background: var(--nvr-surface-2);
 }
 :global(.batch-camera-dialog .el-dialog__title) {
   color: var(--nvr-text);
@@ -57,6 +58,7 @@ function onBatchCompleted() {
 }
 :global(.batch-camera-dialog .el-dialog__body) {
   padding: 0;
+  background: var(--nvr-bg);
 }
 @media (max-width: 720px) {
   :global(.batch-camera-dialog) {
