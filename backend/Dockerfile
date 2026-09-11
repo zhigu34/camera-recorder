@@ -35,6 +35,8 @@ COPY backend/pyproject.toml ./pyproject.toml
 RUN uv sync --no-dev --no-install-project
 
 COPY backend/app ./app
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/migrations ./migrations
 
 ENV PATH="/app/backend/.venv/bin:${PATH}"
 
