@@ -56,10 +56,6 @@ const loading = ref(false)
 const layoutCount = ref<LayoutCount>(4)
 const wallPaused = ref(false)
 const draggingCameraId = ref<number | null>(null)
-const configVisible = ref(false)
-const configCameraId = ref<number | null>(null)
-const subPathDraft = ref('')
-const savingSubPath = ref(false)
 const connectionState = ref<ConnectionState>('idle')
 let statusTimer: number | null = null
 let reconnectTimer: number | null = null
@@ -444,38 +440,9 @@ function openPlayback() {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
-function openStreamConfig(cameraId: number | null) {
-  const camera = cameraById(cameraId)
-  if (!camera) return
-  configCameraId.value = camera.id
-  subPathDraft.value = camera.sub_rtsp_path || ''
-  configVisible.value = true
-}
-
-async function saveSubPath() {
-  const camera = cameraById(configCameraId.value)
-  if (!camera) return
-  savingSubPath.value = true
-  try {
-    const value = subPathDraft.value.trim()
-    await axios.put(`/api/cameras/${camera.id}`, { sub_rtsp_path: value || null })
-    camera.sub_rtsp_path = value || null
-    slots.value.forEach((slot) => {
-      if (slot.cameraId === camera.id) {
-        revokeFrame(slot)
-        slot.loaded = false
-        slot.failed = false
-        slot.activeStream = null
-      }
-    })
-    configVisible.value = false
-    ElMessage.success(value ? '子码流路径已保存并重新连接' : '已清除自定义子码流路径')
-    scheduleConnect()
-  } catch (error) {
-    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '保存失败')
-  } finally {
-    savingSubPath.value = false
-  }
+function openCameraConfig() {
+  window.history.pushState({}, '', '/cameras')
+  window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
 function togglePause() {
@@ -619,7 +586,7 @@ onBeforeUnmount(() => {
 
           <div class="slot-actions">
             <button title="重新连接" @click="restartSlot(index)"><RefreshRight /></button>
-            <button title="子码流配置" @click="openStreamConfig(slot.cameraId)"><Setting /></button>
+            <button title="摄像头配置" @click="openCameraConfig"><Setting /></button>
             <button title="录像回放" @click="openPlayback"><VideoPlay /></button>
             <button title="全屏" @click="enterFullscreen(index)"><FullScreen /></button>
             <button title="移除" @click="clearSlot(index)"><Close /></button>
@@ -644,25 +611,8 @@ onBeforeUnmount(() => {
       <span><i class="note-dot yellow"></i>重连 / 启动</span>
       <span><i class="note-dot gray"></i>未录像</span>
       <span>画面右上角“主码流/子码流”表示实际生效码流；AUTO 只是选择策略。</span>
-      <span>4/9 宫格只使用 1 条浏览器 WebSocket；每路预览 FFmpeg 在断开页面后会自动退出。</span>
+      <span>码流路径等设备配置统一在“摄像头”页面管理。</span>
     </div>
-
-    <el-dialog v-model="configVisible" title="子码流配置" width="520px">
-      <div v-if="cameraById(configCameraId)" class="config-camera">
-        <strong>{{ cameraById(configCameraId)?.name }}</strong>
-        <span>{{ cameraById(configCameraId)?.ip }}</span>
-      </div>
-      <el-form label-position="top">
-        <el-form-item label="子码流 RTSP 路径">
-          <el-input v-model="subPathDraft" placeholder="例如 /ch1/sub" clearable />
-          <div class="form-hint">留空时后端会尝试由主码流路径自动推测；保存后当前 Video Wall 会重新连接。</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="configVisible = false">取消</el-button>
-        <el-button type="primary" :loading="savingSubPath" @click="saveSubPath">保存并重连</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -696,7 +646,6 @@ p { margin: 0; color: #6f7c8d; font-size: 11px; }
 .slot-loading-ws, .slot-state-message { position:absolute; z-index:2; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#66768a; background:#070a0e; font-size:10px; text-align:center; }.loader-ring { width:20px; height:20px; border:2px solid #202a36; border-top-color:var(--nvr-blue); border-radius:50%; animation:spin .8s linear infinite; }.slot-state-message :deep(svg) { width:26px; color:#435267; }.slot-state-message strong { color:#8b98a8; font-size:11px; }.slot-state-message span { max-width:75%; color:#526073; font-size:9px; }.slot-state-message.error strong { color:#f48c8d; }.slot-state-message.error :deep(svg) { color:#b54648; }
 .empty-slot { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; border:1px dashed transparent; color:#3f4b5b; background:transparent; cursor:pointer; }.empty-slot:hover { color:#75859a; border-color:rgba(76,141,255,.2); background:rgba(76,141,255,.025); }.empty-slot :deep(svg) { width:24px; }.empty-slot strong { font-size:10px; }.empty-slot span { font-size:8px; }
 .wall-note { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:10px; color:#556477; font-size:9px; }.wall-note span { display:flex; align-items:center; gap:5px; }.note-dot { width:6px; height:6px; border-radius:50%; }.note-dot.green { background:var(--nvr-green); }.note-dot.yellow { background:var(--nvr-yellow); }.note-dot.gray { background:#526073; }
-.config-camera { display:flex; justify-content:space-between; align-items:center; margin:-4px 0 18px; padding:9px 11px; border-radius:7px; background:rgba(255,255,255,.025); }.config-camera strong { font-size:12px; }.config-camera span { color:var(--nvr-muted); font-size:10px; }.form-hint { margin-top:7px; color:var(--nvr-muted); font-size:10px; line-height:1.55; }
 .wall-slot:fullscreen { width:100vw; height:100vh; aspect-ratio:auto; border-radius:0; background:black; }.wall-slot:fullscreen .preview-image { object-fit:contain; }.wall-slot:fullscreen .slot-actions,.wall-slot:fullscreen .slot-footer { opacity:1; }
 @keyframes spin { to { transform:rotate(360deg); } }
 @media(max-width:960px) { .wall-page{padding:16px}.wall-header{flex-direction:column;align-items:flex-start}.header-actions{justify-content:flex-start}.video-wall.grid-9{grid-template-columns:repeat(2,minmax(0,1fr))} }
