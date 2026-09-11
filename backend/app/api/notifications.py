@@ -82,8 +82,6 @@ async def update_email_settings(
 @router.post("/email/test")
 async def test_email(db: AsyncSession = Depends(get_db)) -> dict:
     config = await load_email_notification_config(db)
-    if not config.email_enabled:
-        raise HTTPException(status_code=409, detail="请先启用邮件告警")
     if not config.configured:
         raise HTTPException(status_code=409, detail="SMTP 配置不完整")
 
