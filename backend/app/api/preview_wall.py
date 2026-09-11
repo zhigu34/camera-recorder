@@ -13,6 +13,7 @@ from app.services.preview_wall import WallPreviewSource, stream_preview_frames
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(tags=["preview-wall"])
+ActualPreviewStream = Literal["sub", "main"]
 
 
 class WallSlotRequest(BaseModel):
@@ -25,6 +26,18 @@ class WallStartRequest(BaseModel):
     fps: int = Field(default=5, ge=1, le=8)
     width: int = Field(default=640, ge=320, le=1280)
     slots: list[WallSlotRequest] = Field(default_factory=list, max_length=9)
+
+
+def _stream_status_payload(
+    event_type: Literal["slot_ready", "slot_fallback"],
+    slot: int,
+    stream: ActualPreviewStream,
+    detail: str | None = None,
+) -> dict:
+    payload: dict = {"type": event_type, "slot": slot, "stream": stream}
+    if detail:
+        payload["detail"] = detail
+    return payload
 
 
 def _source_for_camera(
@@ -61,9 +74,11 @@ async def preview_wall(websocket: WebSocket) -> None:
     async def stream_slot(
         slot: WallSlotRequest,
         source: WallPreviewSource,
+        selected_stream: ActualPreviewStream,
         fallback: WallPreviewSource | None,
     ) -> None:
         sent_first = False
+        active_stream: ActualPreviewStream = selected_stream
 
         async def on_frame(frame: bytes) -> None:
             nonlocal sent_first
@@ -72,7 +87,7 @@ async def preview_wall(websocket: WebSocket) -> None:
                 await websocket.send_bytes(payload)
             if not sent_first:
                 sent_first = True
-                await send_json({"type": "slot_ready", "slot": slot.index})
+                await send_json(_stream_status_payload("slot_ready", slot.index, active_stream))
 
         try:
             await stream_preview_frames(source, on_frame)
@@ -80,12 +95,16 @@ async def preview_wall(websocket: WebSocket) -> None:
             raise
         except Exception as primary_exc:
             if fallback is not None:
+                active_stream = "main"
                 with suppress(Exception):
-                    await send_json({
-                        "type": "slot_fallback",
-                        "slot": slot.index,
-                        "detail": "子码流不可用，已自动切换主码流",
-                    })
+                    await send_json(
+                        _stream_status_payload(
+                            "slot_fallback",
+                            slot.index,
+                            "main",
+                            "子码流不可用，已自动切换主码流",
+                        )
+                    )
                 try:
                     await stream_preview_frames(fallback, on_frame)
                     return
@@ -123,7 +142,12 @@ async def preview_wall(websocket: WebSocket) -> None:
         async with SessionLocal() as db:
             runtime = await load_runtime_settings(db)
             resolved: list[
-                tuple[WallSlotRequest, WallPreviewSource, WallPreviewSource | None]
+                tuple[
+                    WallSlotRequest,
+                    WallPreviewSource,
+                    ActualPreviewStream,
+                    WallPreviewSource | None,
+                ]
             ] = []
             for slot in request.slots:
                 camera = await db.get(Camera, slot.camera_id)
@@ -167,14 +191,18 @@ async def preview_wall(websocket: WebSocket) -> None:
                         fps=request.fps,
                         width=request.width,
                     )
-                resolved.append((slot, source, fallback))
+                resolved.append((slot, source, selected_stream, fallback))
 
-        for slot, source, fallback in resolved:
-            tasks.append(asyncio.create_task(stream_slot(slot, source, fallback)))
+        for slot, source, selected_stream, fallback in resolved:
+            tasks.append(
+                asyncio.create_task(
+                    stream_slot(slot, source, selected_stream, fallback)
+                )
+            )
 
         await send_json({
             "type": "started",
-            "slots": [slot.index for slot, _, _ in resolved],
+            "slots": [slot.index for slot, _, _, _ in resolved],
         })
 
         while True:
