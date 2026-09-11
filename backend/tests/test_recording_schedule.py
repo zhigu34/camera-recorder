@@ -14,28 +14,39 @@ def camera(*, enabled: bool = True, windows=None):
     )
 
 
-def local_time(hour: int, minute: int = 0) -> datetime:
+def local_time(day: int, hour: int, minute: int = 0) -> datetime:
     local_tz = datetime.now().astimezone().tzinfo
-    return datetime(2026, 9, 11, hour, minute, tzinfo=local_tz)
+    return datetime(2026, 9, day, hour, minute, tzinfo=local_tz)
 
 
 def test_schedule_disabled_keeps_all_day_behavior() -> None:
-    assert recording_schedule_allows(camera(enabled=False), local_time(3, 12)) is True
+    assert recording_schedule_allows(camera(enabled=False), local_time(11, 3, 12)) is True
 
 
-def test_schedule_matches_normal_and_cross_midnight_windows() -> None:
-    daytime = camera(windows=[{"start": "08:00", "end": "18:00"}])
-    assert recording_schedule_allows(daytime, local_time(9, 0)) is True
-    assert recording_schedule_allows(daytime, local_time(20, 0)) is False
+def test_legacy_schedule_without_days_still_runs_every_day() -> None:
+    legacy = camera(windows=[{"start": "08:00", "end": "18:00"}])
+    assert recording_schedule_allows(legacy, local_time(11, 9, 0)) is True
+    assert recording_schedule_allows(legacy, local_time(13, 9, 0)) is True
 
-    overnight = camera(windows=[{"start": "22:00", "end": "06:00"}])
-    assert recording_schedule_allows(overnight, local_time(23, 30)) is True
-    assert recording_schedule_allows(overnight, local_time(2, 0)) is True
-    assert recording_schedule_allows(overnight, local_time(12, 0)) is False
+
+def test_weekly_schedule_and_cross_midnight_use_start_day() -> None:
+    weekdays = camera(
+        windows=[{"days": [0, 1, 2, 3, 4], "start": "08:00", "end": "18:00"}]
+    )
+    # 2026-09-11 is Friday; 2026-09-12 is Saturday.
+    assert recording_schedule_allows(weekdays, local_time(11, 9, 0)) is True
+    assert recording_schedule_allows(weekdays, local_time(12, 9, 0)) is False
+
+    friday_overnight = camera(
+        windows=[{"days": [4], "start": "22:00", "end": "06:00"}]
+    )
+    assert recording_schedule_allows(friday_overnight, local_time(11, 23, 30)) is True
+    assert recording_schedule_allows(friday_overnight, local_time(12, 2, 0)) is True
+    assert recording_schedule_allows(friday_overnight, local_time(12, 23, 0)) is False
 
 
 def test_enabled_schedule_without_windows_records_nothing() -> None:
-    assert recording_schedule_allows(camera(enabled=True, windows=[]), local_time(12, 0)) is False
+    assert recording_schedule_allows(camera(enabled=True, windows=[]), local_time(11, 12, 0)) is False
 
 
 def test_camera_schedule_create_update_and_read() -> None:
@@ -50,8 +61,8 @@ def test_camera_schedule_create_update_and_read() -> None:
         "auto_record": False,
         "recording_schedule_enabled": True,
         "recording_schedule": [
-            {"start": "08:00", "end": "12:00"},
-            {"start": "22:00", "end": "06:00"},
+            {"days": [0, 1, 2, 3, 4], "start": "08:00", "end": "12:00"},
+            {"days": [4], "start": "22:00", "end": "06:00"},
         ],
     }
 
@@ -66,12 +77,14 @@ def test_camera_schedule_create_update_and_read() -> None:
             f"/api/cameras/{camera_id}",
             json={
                 "recording_schedule_enabled": True,
-                "recording_schedule": [{"start": "18:30", "end": "23:45"}],
+                "recording_schedule": [
+                    {"days": [5, 6], "start": "18:30", "end": "23:45"}
+                ],
             },
         )
         assert updated.status_code == 200
         assert updated.json()["recording_schedule"] == [
-            {"start": "18:30", "end": "23:45"}
+            {"days": [5, 6], "start": "18:30", "end": "23:45"}
         ]
 
         invalid = client.put(
@@ -82,3 +95,41 @@ def test_camera_schedule_create_update_and_read() -> None:
 
         response = client.delete(f"/api/cameras/{camera_id}")
         assert response.status_code == 204
+
+
+def test_batch_apply_weekly_schedule() -> None:
+    camera_ids: list[int] = []
+    with TestClient(app) as client:
+        for suffix in ("a", "b"):
+            created = client.post(
+                "/api/cameras",
+                json={
+                    "name": f"pytest-schedule-batch-{suffix}",
+                    "ip": f"192.0.2.{90 if suffix == 'a' else 91}",
+                    "password": "test-secret",
+                    "timestamp_mode": "native",
+                    "auto_record": False,
+                },
+            )
+            assert created.status_code == 201
+            camera_ids.append(created.json()["id"])
+
+        payload = {
+            "camera_ids": camera_ids,
+            "auto_record": False,
+            "recording_schedule_enabled": True,
+            "recording_schedule": [
+                {"days": [0, 1, 2, 3, 4], "start": "07:30", "end": "19:00"},
+                {"days": [5, 6], "start": "09:00", "end": "12:00"},
+            ],
+        }
+        applied = client.put("/api/cameras/recording-schedule/batch", json=payload)
+        assert applied.status_code == 200
+        assert applied.json()["updated"] == 2
+        assert sorted(applied.json()["camera_ids"]) == sorted(camera_ids)
+
+        for camera_id in camera_ids:
+            result = client.get(f"/api/cameras/{camera_id}")
+            assert result.status_code == 200
+            assert result.json()["recording_schedule"] == payload["recording_schedule"]
+            client.delete(f"/api/cameras/{camera_id}")
