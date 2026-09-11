@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
+CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor"]
 
 
 class RecordingWindow(BaseModel):
@@ -43,6 +44,9 @@ class RecordingWindow(BaseModel):
 
 class CameraBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
+    manufacturer: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    form_factor: CameraFormFactor = "unknown"
     ip: str = Field(min_length=1, max_length=255)
     rtsp_port: int = Field(default=554, ge=1, le=65535)
     username: str = Field(default="admin", max_length=128)
@@ -53,6 +57,14 @@ class CameraBase(BaseModel):
     recording_schedule_enabled: bool = False
     recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=32)
     timestamp_mode: TimestampMode = "reconstruct"
+
+    @field_validator("manufacturer", "model", mode="before")
+    @classmethod
+    def normalize_optional_identity(cls, value: Any):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
 
 class CameraCreate(CameraBase):
@@ -114,6 +126,9 @@ class RecordingScheduleBatchResult(BaseModel):
 
 class CameraUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
+    manufacturer: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    form_factor: CameraFormFactor | None = None
     ip: str | None = Field(default=None, min_length=1, max_length=255)
     rtsp_port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
@@ -125,6 +140,14 @@ class CameraUpdate(BaseModel):
     recording_schedule_enabled: bool | None = None
     recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=32)
     timestamp_mode: TimestampMode | None = None
+
+    @field_validator("manufacturer", "model", mode="before")
+    @classmethod
+    def normalize_optional_identity(cls, value: Any):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
     @model_validator(mode="after")
     def normalize_schedule_policy(self):
