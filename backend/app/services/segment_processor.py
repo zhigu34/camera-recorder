@@ -15,6 +15,7 @@ from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.models.recording import Recording
 from app.services.recorder_manager import recorder_manager
+from app.services.system_settings import load_runtime_settings
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +129,6 @@ class SegmentProcessor:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._in_progress: set[Path] = set()
-        self._semaphore = asyncio.Semaphore(settings.remux_concurrency)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -158,6 +158,9 @@ class SegmentProcessor:
                 pass
 
     async def scan_once(self) -> None:
+        async with SessionLocal() as session:
+            runtime = await load_runtime_settings(session)
+        semaphore = asyncio.Semaphore(max(1, runtime.remux_concurrency))
         tasks: list[asyncio.Task] = []
         for camera_dir in settings.staging_dir.glob("camera-*"):
             if not camera_dir.is_dir():
@@ -179,14 +182,16 @@ class SegmentProcessor:
                 if age < settings.segment_finalize_grace_seconds:
                     continue
                 self._in_progress.add(path)
-                tasks.append(asyncio.create_task(self._process_guarded(camera_id, path)))
+                tasks.append(asyncio.create_task(self._process_guarded(camera_id, path, semaphore)))
 
         if tasks:
             await asyncio.gather(*tasks)
 
-    async def _process_guarded(self, camera_id: int, path: Path) -> None:
+    async def _process_guarded(
+        self, camera_id: int, path: Path, semaphore: asyncio.Semaphore
+    ) -> None:
         try:
-            async with self._semaphore:
+            async with semaphore:
                 await self.process_segment(camera_id, path)
         except Exception as exc:
             logger.exception("failed to process segment %s: %s", path, exc)
