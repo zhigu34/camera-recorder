@@ -59,6 +59,28 @@ interface UploadStatus {
   counts: Record<string, number>
 }
 
+interface EventItem {
+  id: number
+  camera_id?: number | null
+  recording_id?: number | null
+  level: string
+  category: string
+  code: string
+  message: string
+  created_at: string
+}
+
+interface StorageStatus {
+  path: string
+  total_bytes: number
+  used_bytes: number
+  free_bytes: number
+  used_percent: number
+  state: 'healthy' | 'warning' | 'critical'
+  warning_percent: number
+  critical_percent: number
+}
+
 interface SystemStatus {
   app: string
   segment_duration_seconds: number
@@ -75,6 +97,7 @@ interface SystemStatus {
     active: boolean
     provider: string
   }
+  storage?: StorageStatus
 }
 
 const page = ref('dashboard')
@@ -82,6 +105,7 @@ const loading = ref(false)
 const cameras = ref<Camera[]>([])
 const recordings = ref<Recording[]>([])
 const uploads = ref<UploadTask[]>([])
+const events = ref<EventItem[]>([])
 const uploadStatus = ref<UploadStatus | null>(null)
 const status = ref<SystemStatus | null>(null)
 const dialogVisible = ref(false)
@@ -113,11 +137,17 @@ const pageTitle = computed(() => {
   if (page.value === 'cameras') return '摄像头管理'
   if (page.value === 'recordings') return '录像文件'
   if (page.value === 'uploads') return '115 上传'
+  if (page.value === 'events') return '事件中心'
   return '仪表盘'
 })
 
 function runtimeState(cameraId: number) {
   return status.value?.recorders.find((item) => item.camera_id === cameraId)?.state || 'STOPPED'
+}
+
+function cameraName(cameraId?: number | null) {
+  if (!cameraId) return '-'
+  return cameras.value.find((camera) => camera.id === cameraId)?.name || `#${cameraId}`
 }
 
 function fps(camera: Camera) {
@@ -128,6 +158,7 @@ function fps(camera: Camera) {
 
 function sizeText(bytes?: number | null) {
   if (!bytes) return '-'
+  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(2)} TB`
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(2)} GB`
   return `${(bytes / 1024 ** 2).toFixed(1)} MB`
 }
@@ -140,21 +171,35 @@ function uploadTagType(value: string) {
   return 'info'
 }
 
+function eventTagType(value: string) {
+  if (value === 'critical' || value === 'error') return 'danger'
+  if (value === 'warning') return 'warning'
+  return 'info'
+}
+
+function storageTagType() {
+  if (status.value?.storage?.state === 'critical') return 'danger'
+  if (status.value?.storage?.state === 'warning') return 'warning'
+  return 'success'
+}
+
 async function loadAll() {
   loading.value = true
   try {
-    const [systemRes, cameraRes, recordingRes, uploadStatusRes, uploadTasksRes] = await Promise.all([
+    const [systemRes, cameraRes, recordingRes, uploadStatusRes, uploadTasksRes, eventRes] = await Promise.all([
       axios.get<SystemStatus>('/api/system/status'),
       axios.get<Camera[]>('/api/cameras'),
       axios.get<Recording[]>('/api/recordings?limit=100'),
       axios.get<UploadStatus>('/api/uploads'),
       axios.get<UploadTask[]>('/api/uploads/tasks?limit=100'),
+      axios.get<EventItem[]>('/api/events?limit=200'),
     ])
     status.value = systemRes.data
     cameras.value = cameraRes.data
     recordings.value = recordingRes.data
     uploadStatus.value = uploadStatusRes.data
     uploads.value = uploadTasksRes.data
+    events.value = eventRes.data
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '加载失败')
   } finally {
@@ -262,6 +307,7 @@ onMounted(loadAll)
         <el-menu-item index="cameras">摄像头</el-menu-item>
         <el-menu-item index="recordings">录像文件</el-menu-item>
         <el-menu-item index="uploads">115 上传</el-menu-item>
+        <el-menu-item index="events">事件中心</el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -281,16 +327,24 @@ onMounted(loadAll)
       <el-main v-loading="loading">
         <template v-if="page === 'dashboard'">
           <el-row :gutter="16">
-            <el-col :span="5"><el-card><div class="metric">{{ cameras.length }}</div><div class="muted">摄像头</div></el-card></el-col>
-            <el-col :span="5"><el-card><div class="metric">{{ recordingCount }}</div><div class="muted">录像中</div></el-card></el-col>
-            <el-col :span="5"><el-card><div class="metric">{{ recordings.length }}</div><div class="muted">最近录像</div></el-card></el-col>
-            <el-col :span="5"><el-card><div class="metric">{{ pendingUploadCount }}</div><div class="muted">上传队列</div></el-card></el-col>
+            <el-col :span="4"><el-card><div class="metric">{{ cameras.length }}</div><div class="muted">摄像头</div></el-card></el-col>
+            <el-col :span="4"><el-card><div class="metric">{{ recordingCount }}</div><div class="muted">录像中</div></el-card></el-col>
+            <el-col :span="4"><el-card><div class="metric">{{ recordings.length }}</div><div class="muted">最近录像</div></el-card></el-col>
+            <el-col :span="4"><el-card><div class="metric">{{ pendingUploadCount }}</div><div class="muted">上传队列</div></el-card></el-col>
+            <el-col :span="4">
+              <el-card>
+                <div class="metric">{{ status?.storage?.used_percent ?? '-' }}<span class="metric-unit">%</span></div>
+                <div class="muted">磁盘使用</div>
+                <el-tag class="top-gap" size="small" :type="storageTagType()">{{ status?.storage?.state || '-' }}</el-tag>
+              </el-card>
+            </el-col>
             <el-col :span="4">
               <el-card>
                 <el-tag :type="status?.ffmpeg.setts_available ? 'success' : 'danger'">
                   {{ status?.ffmpeg.setts_available ? 'setts 可用' : 'setts 不可用' }}
                 </el-tag>
                 <div class="muted top-gap">切片 {{ status?.segment_duration_seconds || '-' }} 秒</div>
+                <div class="muted top-gap">剩余 {{ sizeText(status?.storage?.free_bytes) }}</div>
               </el-card>
             </el-col>
           </el-row>
@@ -354,7 +408,7 @@ onMounted(loadAll)
           </el-card>
         </template>
 
-        <template v-else>
+        <template v-else-if="page === 'uploads'">
           <el-card class="upload-summary">
             <div class="upload-head">
               <div>
@@ -385,6 +439,23 @@ onMounted(loadAll)
                   <el-button v-if="row.status === 'failed' || row.status === 'retry_wait'" size="small" @click="retryUpload(row)">重试</el-button>
                 </template>
               </el-table-column>
+            </el-table>
+          </el-card>
+        </template>
+
+        <template v-else>
+          <el-card>
+            <el-table :data="events" empty-text="暂无事件">
+              <el-table-column prop="created_at" label="时间" min-width="190" />
+              <el-table-column label="级别" width="100">
+                <template #default="{ row }"><el-tag :type="eventTagType(row.level)">{{ row.level }}</el-tag></template>
+              </el-table-column>
+              <el-table-column label="摄像头" min-width="140">
+                <template #default="{ row }">{{ cameraName(row.camera_id) }}</template>
+              </el-table-column>
+              <el-table-column prop="category" label="分类" width="110" />
+              <el-table-column prop="code" label="代码" min-width="170" />
+              <el-table-column prop="message" label="信息" min-width="360" show-overflow-tooltip />
             </el-table>
           </el-card>
         </template>
@@ -425,6 +496,7 @@ onMounted(loadAll)
 .subtitle { color: #909399; font-size: 12px; margin-left: 12px; }
 .header-actions { display: flex; gap: 8px; }
 .metric { font-size: 30px; font-weight: 700; }
+.metric-unit { font-size: 15px; margin-left: 2px; color: #606266; }
 .muted { color: #909399; font-size: 13px; }
 .top-gap { margin-top: 10px; }
 .section-card { margin-top: 16px; }
