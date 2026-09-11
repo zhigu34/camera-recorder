@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -54,15 +54,15 @@ class CameraBase(BaseModel):
     recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=32)
     timestamp_mode: TimestampMode = "reconstruct"
 
+
+class CameraCreate(CameraBase):
+    password: str = Field(min_length=1, max_length=512)
+
     @model_validator(mode="after")
     def validate_schedule(self):
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
         return self
-
-
-class CameraCreate(CameraBase):
-    password: str = Field(min_length=1, max_length=512)
 
 
 class CameraBatchCreate(BaseModel):
@@ -151,6 +151,27 @@ class CameraRead(CameraBase):
     last_online_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("recording_schedule", mode="before")
+    @classmethod
+    def normalize_legacy_schedule(cls, value: Any):
+        # Historical rows may contain NULL or malformed schedule JSON. Reading the
+        # camera list must never become a 500 because one old row is incomplete.
+        if not isinstance(value, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            if hasattr(item, "model_dump"):
+                item = item.model_dump()
+            if not isinstance(item, dict):
+                continue
+            days = item.get("days")
+            start = item.get("start")
+            end = item.get("end")
+            if days is None:
+                days = list(range(7))
+            normalized.append({"days": days, "start": start, "end": end})
+        return normalized
 
     @model_validator(mode="after")
     def normalize_legacy_status(self):
