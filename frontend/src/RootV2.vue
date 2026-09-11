@@ -8,6 +8,7 @@ import {
 
 import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
+import CamerasViewV2 from './CamerasViewV2.vue'
 import DashboardView from './DashboardView.vue'
 import HealthView from './HealthView.vue'
 import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
@@ -38,7 +39,7 @@ const navEntries: NavEntry[] = [
   { key: 'dashboard', label: '总览', kind: 'dashboard', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
   { key: 'preview', label: '实时监控', kind: 'route', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
   { key: 'playback', label: '录像回放', kind: 'route', target: '/recordings/browser', group: 'core', icon: markRaw(VideoPlay) },
-  { key: 'cameras', label: '摄像头', kind: 'legacy', target: 'cameras', group: 'core', icon: markRaw(Camera) },
+  { key: 'cameras', label: '摄像头', kind: 'route', target: '/cameras', group: 'core', icon: markRaw(Camera) },
   { key: 'schedule', label: '录制计划', kind: 'route', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
   { key: 'health', label: '系统健康', kind: 'route', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
   { key: 'recordings', label: '录像文件', kind: 'legacy', target: 'recordings', group: 'ops', icon: markRaw(Files) },
@@ -50,7 +51,7 @@ const navEntries: NavEntry[] = [
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
 const legacyLabels: Record<string, string> = {
-  cameras: '摄像头', recordings: '录像文件', uploads: '115 上传', events: '事件中心', alerts: '告警设置',
+  recordings: '录像文件', uploads: '115 上传', events: '事件中心', alerts: '告警设置',
 }
 
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
@@ -85,7 +86,7 @@ function locationKey() {
   const path = window.location.pathname
   if (path === '/') {
     const view = new URLSearchParams(window.location.search).get('view')
-    return view && entryMap.get(view)?.kind === 'legacy' ? view : 'dashboard'
+    return view && entryMap.has(view) ? view : 'dashboard'
   }
   return navEntries.find((item) => item.kind === 'route' && item.target === path)?.key || 'dashboard'
 }
@@ -194,6 +195,7 @@ onBeforeUnmount(() => {
 
       <main class="nvr-workspace-content">
         <DashboardView v-if="renderKey === 'dashboard'" />
+        <CamerasViewV2 v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
         <div v-else-if="isLegacy" class="legacy-host"><App /></div>
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
