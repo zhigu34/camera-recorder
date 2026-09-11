@@ -13,6 +13,7 @@ def test_batch_camera_create_and_skip_existing() -> None:
                 "username": "admin",
                 "password": "test-secret-a",
                 "rtsp_path": "/ch1/main",
+                "sub_rtsp_path": "/ch1/sub",
                 "timestamp_mode": "reconstruct",
             },
             {
@@ -32,6 +33,10 @@ def test_batch_camera_create_and_skip_existing() -> None:
         first_body = first.json()
         assert first_body["created"] == 2
         assert first_body["skipped"] == 0
+
+        created_camera = client.get(f"/api/cameras/{first_body['created_ids'][0]}")
+        assert created_camera.status_code == 200
+        assert created_camera.json()["sub_rtsp_path"] == "/ch1/sub"
 
         second = client.post("/api/cameras/batch", json=payload)
         assert second.status_code == 201
