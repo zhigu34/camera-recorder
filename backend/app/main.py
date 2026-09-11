@@ -20,14 +20,13 @@ from app.services.segment_processor import segment_processor
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     for path in (
+        settings.data_dir,
         settings.recordings_dir,
         settings.staging_dir,
         settings.failed_dir,
         settings.logs_dir,
-        settings.database_url.startswith("sqlite") and settings.recordings_dir.parent / "data",
     ):
-        if path:
-            path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)
 
     await init_db()
     await segment_processor.start()
