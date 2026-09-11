@@ -14,9 +14,14 @@ import {
   VideoPlay,
 } from '@element-plus/icons-vue'
 
+type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor'
+
 interface Camera {
   id: number
   name: string
+  manufacturer?: string | null
+  model?: string | null
+  form_factor: CameraFormFactor
   ip: string
   rtsp_port: number
   username: string
@@ -65,6 +70,9 @@ let refreshTimer: number | null = null
 
 const form = reactive({
   name: '',
+  manufacturer: '',
+  model: '',
+  form_factor: 'unknown' as CameraFormFactor,
   ip: '',
   rtsp_port: 554,
   username: 'admin',
@@ -75,6 +83,16 @@ const form = reactive({
   enabled: true,
   auto_record: false,
 })
+
+const formFactorOptions: Array<{ value: CameraFormFactor; label: string }> = [
+  { value: 'unknown', label: '未指定' },
+  { value: 'bullet', label: '枪机' },
+  { value: 'dome', label: '半球' },
+  { value: 'turret', label: '炮塔 / 海螺' },
+  { value: 'ptz', label: '云台 PTZ' },
+  { value: 'doorbell', label: '门铃' },
+  { value: 'indoor', label: '室内桌面机' },
+]
 
 function apiError(error: unknown, fallback: string) {
   if (axios.isAxiosError(error)) {
@@ -119,6 +137,16 @@ function runtimeLabel(camera: Camera) {
   if (state === 'RECONNECTING') return '重连中'
   if (state === 'STOPPING') return '停止中'
   return '未录像'
+}
+
+function formFactorLabel(value?: CameraFormFactor | null) {
+  return formFactorOptions.find((item) => item.value === value)?.label || '未指定'
+}
+
+function identitySummary(camera: Camera) {
+  const parts = [camera.manufacturer, camera.model, camera.form_factor !== 'unknown' ? formFactorLabel(camera.form_factor) : null]
+    .filter((item): item is string => Boolean(item))
+  return parts.length ? parts.join(' · ') : '设备信息未补充'
 }
 
 function fps(camera: Camera) {
@@ -172,8 +200,14 @@ const summary = computed(() => ({
 const filteredCameras = computed(() => {
   const needle = query.value.trim().toLowerCase()
   return cameras.value.filter((camera) => {
-    const matched = !needle || [camera.name, camera.ip, camera.rtsp_path, camera.sub_rtsp_path || '']
-      .some((value) => value.toLowerCase().includes(needle))
+    const matched = !needle || [
+      camera.name,
+      camera.manufacturer || '',
+      camera.model || '',
+      camera.ip,
+      camera.rtsp_path,
+      camera.sub_rtsp_path || '',
+    ].some((value) => value.toLowerCase().includes(needle))
     if (!matched) return false
     if (filter.value === 'online') return health(camera) === 'online'
     if (filter.value === 'issue') return ['offline', 'unknown'].includes(health(camera))
@@ -206,6 +240,9 @@ function resetForm() {
   editingId.value = null
   Object.assign(form, {
     name: '',
+    manufacturer: '',
+    model: '',
+    form_factor: 'unknown',
     ip: '',
     rtsp_port: 554,
     username: 'admin',
@@ -227,6 +264,9 @@ function openEdit(camera: Camera) {
   editingId.value = camera.id
   Object.assign(form, {
     name: camera.name,
+    manufacturer: camera.manufacturer || '',
+    model: camera.model || '',
+    form_factor: camera.form_factor || 'unknown',
     ip: camera.ip,
     rtsp_port: camera.rtsp_port,
     username: camera.username,
@@ -254,6 +294,9 @@ async function saveCamera() {
   try {
     const payload: Record<string, unknown> = {
       name: form.name.trim(),
+      manufacturer: form.manufacturer.trim() || null,
+      model: form.model.trim() || null,
+      form_factor: form.form_factor,
       ip: form.ip.trim(),
       rtsp_port: form.rtsp_port,
       username: form.username.trim(),
@@ -353,7 +396,7 @@ onBeforeUnmount(() => {
     <div class="page-heading">
       <div>
         <h1>摄像头管理</h1>
-        <p>集中查看接入状态、视频参数与录像运行状态。</p>
+        <p>集中查看接入状态、设备身份、视频参数与录像运行状态。</p>
       </div>
       <div class="heading-actions">
         <el-button :icon="Refresh" @click="loadData()">刷新</el-button>
@@ -378,20 +421,21 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="toolbar">
-      <el-input v-model="query" clearable :prefix-icon="Search" placeholder="搜索名称、IP 或 RTSP 路径" class="search-box" />
+      <el-input v-model="query" clearable :prefix-icon="Search" placeholder="搜索名称、厂商、型号、IP 或 RTSP 路径" class="search-box" />
       <span class="result-count">显示 {{ filteredCameras.length }} / {{ cameras.length }} 台</span>
     </div>
 
     <div v-if="filteredCameras.length" class="camera-list">
       <article v-for="camera in filteredCameras" :key="camera.id" class="camera-card" @dblclick="openDetails(camera)">
         <div class="camera-main">
-          <div class="camera-icon" :class="health(camera)"><VideoCamera /></div>
+          <div class="camera-icon" :class="health(camera)" :title="formFactorLabel(camera.form_factor)"><VideoCamera /></div>
           <div class="camera-copy">
             <div class="camera-name-row">
               <strong>{{ camera.name }}</strong>
               <span class="health-badge" :class="health(camera)"><i></i>{{ healthLabel(camera) }}</span>
               <span class="record-badge" :class="{ active: isRecording(camera.id) }"><i></i>{{ runtimeLabel(camera) }}</span>
             </div>
+            <div class="camera-identity">{{ identitySummary(camera) }}</div>
             <div class="camera-address">{{ camera.ip }}:{{ camera.rtsp_port }} · {{ camera.rtsp_path }}</div>
             <div class="camera-video">{{ videoSummary(camera) }}</div>
           </div>
@@ -454,6 +498,7 @@ onBeforeUnmount(() => {
         <div v-if="selectedCamera" class="drawer-title">
           <div>
             <strong>{{ selectedCamera.name }}</strong>
+            <span>{{ identitySummary(selectedCamera) }}</span>
             <span>{{ selectedCamera.ip }}:{{ selectedCamera.rtsp_port }}</span>
           </div>
           <span class="health-badge" :class="health(selectedCamera)"><i></i>{{ healthLabel(selectedCamera) }}</span>
@@ -482,7 +527,16 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="detail-section">
-          <div class="detail-heading"><strong>连接信息</strong><el-button link type="primary" @click="openEdit(selectedCamera)">编辑</el-button></div>
+          <div class="detail-heading"><strong>设备信息</strong><el-button link type="primary" @click="openEdit(selectedCamera)">编辑</el-button></div>
+          <dl class="detail-grid">
+            <div><dt>厂商</dt><dd>{{ selectedCamera.manufacturer || '未填写' }}</dd></div>
+            <div><dt>型号</dt><dd>{{ selectedCamera.model || '未填写' }}</dd></div>
+            <div><dt>外形</dt><dd>{{ formFactorLabel(selectedCamera.form_factor) }}</dd></div>
+          </dl>
+        </div>
+
+        <div class="detail-section">
+          <div class="detail-heading"><strong>连接信息</strong></div>
           <dl class="detail-grid">
             <div><dt>IP 地址</dt><dd>{{ selectedCamera.ip }}</dd></div>
             <div><dt>RTSP 端口</dt><dd>{{ selectedCamera.rtsp_port }}</dd></div>
@@ -524,10 +578,17 @@ onBeforeUnmount(() => {
       </div>
     </el-drawer>
 
-    <el-dialog v-model="dialogVisible" :title="editingId === null ? '添加 RTSP 摄像头' : '编辑摄像头'" width="620px" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="editingId === null ? '添加 RTSP 摄像头' : '编辑摄像头'" width="680px" destroy-on-close>
       <el-form label-width="88px" class="camera-form" @submit.prevent="saveCamera">
         <div class="form-grid">
           <el-form-item label="名称" class="wide"><el-input v-model="form.name" placeholder="例如：门口摄像头" /></el-form-item>
+          <el-form-item label="厂商"><el-input v-model="form.manufacturer" placeholder="例如 Hikvision" /></el-form-item>
+          <el-form-item label="型号"><el-input v-model="form.model" placeholder="例如 DS-2CD..." /></el-form-item>
+          <el-form-item label="外形" class="wide">
+            <el-select v-model="form.form_factor" style="width: 100%">
+              <el-option v-for="item in formFactorOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+          </el-form-item>
           <el-form-item label="IP 地址"><el-input v-model="form.ip" placeholder="192.168.1.101" /></el-form-item>
           <el-form-item label="RTSP 端口"><el-input-number v-model="form.rtsp_port" :min="1" :max="65535" controls-position="right" /></el-form-item>
           <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
@@ -560,11 +621,11 @@ onBeforeUnmount(() => {
 <style scoped>
 .camera-page{padding:22px;min-height:100%;color:var(--nvr-text)}
 .page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px}.page-heading h1{margin:0;font-size:20px;font-weight:680;letter-spacing:-.01em}.page-heading p{margin:6px 0 0;color:var(--nvr-muted);font-size:12px}.heading-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.summary-card{appearance:none;position:relative;min-height:94px;padding:14px 16px;text-align:left;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px;cursor:pointer;overflow:hidden;transition:.16s}.summary-card:hover{border-color:var(--nvr-border-strong);background:var(--nvr-surface-2)}.summary-card.active{border-color:rgba(76,141,255,.58);box-shadow:0 0 0 1px rgba(76,141,255,.08) inset}.summary-card:after{content:'';position:absolute;left:0;top:14px;bottom:14px;width:2px;background:#637083;border-radius:2px}.summary-card.online:after{background:var(--nvr-green)}.summary-card.issue:after{background:var(--nvr-yellow)}.summary-card.recording:after{background:var(--nvr-red)}.summary-card span{display:block;color:var(--nvr-muted);font-size:11px}.summary-card strong{display:block;margin:7px 0 5px;font-size:25px;line-height:1}.summary-card small{color:#647286;font-size:10px}
-.toolbar{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--nvr-border);border-radius:9px;background:rgba(20,26,34,.72)}.search-box{width:min(390px,100%)}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
-.camera-list{display:flex;flex-direction:column;gap:8px}.camera-card{display:grid;grid-template-columns:minmax(330px,1.6fr) minmax(310px,1fr) auto;align-items:center;gap:16px;padding:14px 15px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);transition:.15s}.camera-card:hover{border-color:var(--nvr-border-strong);background:#161d26}.camera-main{min-width:0;display:flex;align-items:center;gap:12px}.camera-icon{flex:0 0 44px;width:44px;height:44px;display:grid;place-items:center;border-radius:10px;color:#6f7c8e;background:#10161e;border:1px solid var(--nvr-border)}.camera-icon :deep(svg){width:21px}.camera-icon.online{color:var(--nvr-green);background:rgba(46,204,138,.07)}.camera-icon.offline{color:var(--nvr-red);background:rgba(240,93,94,.07)}.camera-icon.unknown{color:var(--nvr-yellow);background:rgba(245,185,66,.06)}.camera-copy{min-width:0}.camera-name-row{display:flex;align-items:center;gap:7px;min-width:0}.camera-name-row strong{max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border:1px solid var(--nvr-border);border-radius:5px;color:var(--nvr-muted);background:#11171f;font-size:10px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:#687688}.health-badge.online i{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active{color:#efb7b8;border-color:rgba(240,93,94,.18);background:rgba(240,93,94,.055)}.record-badge.active i{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.camera-address{margin-top:6px;color:#8290a1;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-video{margin-top:4px;color:#647286;font-size:10px}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(80px,1fr));gap:8px}.camera-signals div{min-width:0}.camera-signals span,.camera-signals b{display:block}.camera-signals span{margin-bottom:4px;color:#647286;font-size:9px}.camera-signals b{color:#aeb9c5;font-size:10px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
-.empty-state{min-height:330px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--nvr-border-strong);border-radius:11px;color:var(--nvr-muted);background:rgba(20,26,34,.42)}.empty-state :deep(svg){width:34px;margin-bottom:12px;color:#536173}.empty-state strong{color:#aeb9c5;font-size:13px}.empty-state span{margin:6px 0 16px;font-size:11px}
-.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px}.drawer-title span:not(.health-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.drawer-body{display:flex;flex-direction:column;gap:13px}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:26px 10px 8px;background:linear-gradient(transparent,rgba(0,0,0,.72));font-size:10px}.preview-overlay span{display:flex;align-items:center;gap:6px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.detail-section{padding:13px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.detail-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}.detail-heading strong{font-size:11px}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid div{min-width:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:#647286;font-size:9px}.detail-grid dd{margin:0;color:#b7c2cd;font-size:10px;overflow-wrap:anywhere}.drawer-actions{position:sticky;bottom:0;display:flex;gap:7px;flex-wrap:wrap;padding:11px 0 2px;background:linear-gradient(transparent 0,var(--nvr-bg) 18px)}
+.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px}.summary-card{appearance:none;position:relative;min-height:94px;padding:14px 16px;text-align:left;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px;cursor:pointer;overflow:hidden;transition:.16s}.summary-card:hover{border-color:var(--nvr-border-strong);background:var(--nvr-surface-2)}.summary-card.active{border-color:rgba(76,141,255,.58);box-shadow:0 0 0 1px rgba(76,141,255,.08) inset}.summary-card:after{content:'';position:absolute;left:0;top:14px;bottom:14px;width:2px;background:var(--nvr-subtle);border-radius:2px}.summary-card.online:after{background:var(--nvr-green)}.summary-card.issue:after{background:var(--nvr-yellow)}.summary-card.recording:after{background:var(--nvr-red)}.summary-card span{display:block;color:var(--nvr-muted);font-size:11px}.summary-card strong{display:block;margin:7px 0 5px;font-size:25px;line-height:1}.summary-card small{color:var(--nvr-subtle);font-size:10px}
+.toolbar{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.search-box{width:min(470px,100%)}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
+.camera-list{display:flex;flex-direction:column;gap:8px}.camera-card{display:grid;grid-template-columns:minmax(360px,1.65fr) minmax(300px,1fr) auto;align-items:center;gap:16px;padding:14px 15px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);transition:.15s}.camera-card:hover{border-color:var(--nvr-border-strong);background:var(--nvr-surface-2)}.camera-main{min-width:0;display:flex;align-items:center;gap:12px}.camera-icon{flex:0 0 44px;width:44px;height:44px;display:grid;place-items:center;border-radius:10px;color:var(--nvr-muted);background:var(--nvr-input);border:1px solid var(--nvr-border)}.camera-icon :deep(svg){width:21px}.camera-icon.online{color:var(--nvr-green);background:rgba(46,204,138,.07)}.camera-icon.offline{color:var(--nvr-red);background:rgba(240,93,94,.07)}.camera-icon.unknown{color:var(--nvr-yellow);background:rgba(245,185,66,.06)}.camera-copy{min-width:0;flex:1}.camera-name-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;min-width:0}.camera-name-row strong{min-width:0;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;font-size:13px;line-height:1.35}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border:1px solid var(--nvr-border);border-radius:5px;color:var(--nvr-muted);background:var(--nvr-input);font-size:10px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.health-badge.online i{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active{color:var(--nvr-red);border-color:rgba(240,93,94,.18);background:rgba(240,93,94,.055)}.record-badge.active i{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.camera-identity{margin-top:5px;color:var(--nvr-text-soft);font-size:10px}.camera-address{margin-top:5px;color:var(--nvr-muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-video{margin-top:4px;color:var(--nvr-subtle);font-size:10px}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(80px,1fr));gap:8px}.camera-signals div{min-width:0}.camera-signals span,.camera-signals b{display:block}.camera-signals span{margin-bottom:4px;color:var(--nvr-subtle);font-size:9px}.camera-signals b{color:var(--nvr-text-soft);font-size:10px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
+.empty-state{min-height:330px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--nvr-border-strong);border-radius:11px;color:var(--nvr-muted);background:var(--nvr-surface)}.empty-state :deep(svg){width:34px;margin-bottom:12px;color:var(--nvr-subtle)}.empty-state strong{color:var(--nvr-text-soft);font-size:13px}.empty-state span{margin:6px 0 16px;font-size:11px}
+.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px;white-space:normal;overflow-wrap:anywhere}.drawer-title span:not(.health-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-body{display:flex;flex-direction:column;gap:13px}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:26px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.72));font-size:10px}.preview-overlay span{display:flex;align-items:center;gap:6px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.detail-section{padding:13px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.detail-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}.detail-heading strong{font-size:11px}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid div{min-width:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.drawer-actions{position:sticky;bottom:0;display:flex;gap:7px;flex-wrap:wrap;padding:11px 0 2px;background:linear-gradient(transparent 0,var(--nvr-bg) 18px)}
 .camera-form{padding-top:4px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-grid .wide{grid-column:1/-1}.form-grid :deep(.el-input-number){width:100%}.switch-group{display:flex;align-items:center;gap:20px;min-height:32px;padding:0 0 18px 88px}.switch-group label{display:flex;align-items:center;gap:9px;color:var(--nvr-muted);font-size:11px}
 @media (max-width:1180px){.camera-card{grid-template-columns:minmax(300px,1fr) auto}.camera-signals{display:none}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.summary-grid{grid-template-columns:1fr 1fr}.camera-card{grid-template-columns:1fr}.camera-actions{justify-content:flex-start;flex-wrap:wrap}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}}
