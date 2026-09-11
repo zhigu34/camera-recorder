@@ -53,7 +53,7 @@ class PlaybackClientMetrics:
                 )
             events[event] = payload
 
-        grouped: dict[tuple[str, str, str, str, str], dict[str, Any]] = defaultdict(
+        grouped: dict[tuple[str, str, str, str, str, str], dict[str, Any]] = defaultdict(
             lambda: {
                 "successful_starts": 0,
                 "startup_errors": 0,
@@ -68,6 +68,7 @@ class PlaybackClientMetrics:
                 continue
             key = (
                 str(sample.get("browser") or "unknown"),
+                str(sample.get("browser_version") or "unknown"),
                 str(sample.get("platform") or "unknown"),
                 str(sample.get("codec") or "unknown"),
                 str(sample.get("playback_mode") or "unknown"),
@@ -92,10 +93,11 @@ class PlaybackClientMetrics:
             compatibility.append(
                 {
                     "browser": key[0],
-                    "platform": key[1],
-                    "codec": key[2],
-                    "playback_mode": key[3],
-                    "source_kind": key[4],
+                    "browser_version": key[1],
+                    "platform": key[2],
+                    "codec": key[3],
+                    "playback_mode": key[4],
+                    "source_kind": key[5],
                     "attempts": attempts,
                     "successful_starts": successes,
                     "startup_errors": failures,
@@ -105,7 +107,14 @@ class PlaybackClientMetrics:
                     "hevc_hints": dict(item["hevc_hints"]),
                 }
             )
-        compatibility.sort(key=lambda item: (-item["attempts"], item["browser"], item["codec"]))
+        compatibility.sort(
+            key=lambda item: (
+                -item["attempts"],
+                item["browser"],
+                item["browser_version"],
+                item["codec"],
+            )
+        )
 
         return {
             "sample_count": len(samples),
