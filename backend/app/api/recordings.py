@@ -27,9 +27,15 @@ def _deployment_timezone():
 def _local_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
+    tz = _deployment_timezone()
+    # Recording timestamps are derived from the segment filename in deployment
+    # local time. SQLite drops tzinfo when storing DateTime values, so a naive
+    # value must be interpreted as deployment-local wall-clock time, not UTC.
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(_deployment_timezone()).isoformat(timespec="seconds")
+        value = value.replace(tzinfo=tz)
+    else:
+        value = value.astimezone(tz)
+    return value.isoformat(timespec="seconds")
 
 
 @router.get("", response_model=list[RecordingRead])
@@ -53,10 +59,14 @@ async def browse_recordings(
 ) -> dict:
     await recording_playback_manager.cleanup_cache()
     tz = _deployment_timezone()
-    local_start = datetime.combine(date, time.min, tzinfo=tz)
-    local_end = datetime.combine(date, time.max, tzinfo=tz)
-    utc_start = local_start.astimezone(timezone.utc).replace(tzinfo=None)
-    utc_end = local_end.astimezone(timezone.utc).replace(tzinfo=None)
+
+    # SQLite stores Recording.started_at as a naive local wall-clock timestamp
+    # because the value originates from the local segment filename. Query using
+    # local naive day boundaries so historical rows remain compatible. Converting
+    # these boundaries to UTC would incorrectly exclude evening recordings in
+    # positive-offset timezones such as Asia/Shanghai.
+    local_start = datetime.combine(date, time.min)
+    local_end = datetime.combine(date, time.max)
 
     recordings = list(
         await db.scalars(
@@ -64,9 +74,8 @@ async def browse_recordings(
             .where(
                 Recording.camera_id == camera_id,
                 Recording.started_at.is_not(None),
-                Recording.started_at >= utc_start,
-                Recording.started_at <= utc_end,
-                Recording.status.in_(("ready", "deleted")),
+                Recording.started_at >= local_start,
+                Recording.started_at <= local_end,
             )
             .order_by(Recording.started_at.asc(), Recording.id.asc())
             .limit(2000)
