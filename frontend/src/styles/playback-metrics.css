@@ -92,6 +92,30 @@
   font-size: 10px;
 }
 
+.playback-health.compact {
+  margin-top: 10px !important;
+}
+
+.playback-health.compact .el-card {
+  background: var(--nvr-surface) !important;
+}
+
+.playback-health.compact .el-card__body {
+  padding: 12px 16px 14px !important;
+}
+
+.playback-health.compact .el-card__header {
+  padding: 11px 16px !important;
+}
+
+.playback-health.compact .compact-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.playback-health.compact .compact-hint {
+  margin-top: 8px;
+}
+
 @media (max-width: 1180px) {
   .playback-health .backend-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -104,5 +128,8 @@
   }
   .playback-health .backend-strip {
     grid-template-columns: 1fr;
+  }
+  .playback-health.compact .compact-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
