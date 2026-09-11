@@ -37,6 +37,34 @@ docker compose down
 
 `down` 不会删除 `data/`、`recordings/`、`staging/`、`failed/`、`logs/` 中的宿主机数据。
 
+### 中国大陆构建源
+
+Dockerfile 默认针对中国大陆网络优化构建依赖：
+
+- Debian APT：清华 TUNA Debian / Debian Security
+- Python pip / uv：清华 TUNA PyPI
+- npm：npmmirror
+
+这些是 Docker build `ARG`，不会增加 `.env` 复杂度。默认直接构建即可：
+
+```bash
+docker compose build --builder default
+```
+
+如果某个环境需要临时切回官方源，可以在构建时覆盖，例如：
+
+```bash
+docker compose build --builder default backend \
+  --build-arg DEBIAN_MIRROR=https://deb.debian.org/debian \
+  --build-arg DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security \
+  --build-arg PYPI_INDEX_URL=https://pypi.org/simple
+
+docker compose build --builder default frontend \
+  --build-arg NPM_REGISTRY=https://registry.npmjs.org
+```
+
+> FFmpeg 静态包当前仍从 GitHub BtbN Releases 下载，因此构建机仍需能访问 GitHub，或为 Docker BuildKit 配置代理。
+
 ### Apple Silicon
 
 Compose 使用 Docker 的 `TARGETARCH` 自动选择 BtbN `linuxarm64` FFmpeg；Intel/AMD 则使用 `linux64`。镜像构建阶段会执行 `ffmpeg -h bsf=setts` 并确认存在 `prescale`，否则直接构建失败，避免运行后才发现时间戳修复能力缺失。
