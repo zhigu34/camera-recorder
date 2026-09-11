@@ -63,7 +63,7 @@ function openRecordingSchedule() {
     <App />
     <div class="quick-actions">
       <el-button type="primary" plain @click="openRecordingBrowser">录像浏览</el-button>
-      <el-button type="primary" plain @click="openRecordingSchedule">录制时段</el-button>
+      <el-button type="primary" plain @click="openRecordingSchedule">录制周计划</el-button>
       <el-button type="warning" plain @click="openHealth">系统健康</el-button>
       <el-button type="success" @click="openPreview">实时预览</el-button>
       <el-button type="success" plain @click="openBatchCameras">批量添加摄像头</el-button>
