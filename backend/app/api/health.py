@@ -1,8 +1,8 @@
 import asyncio
 
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, Query, WebSocket
 
-from app.services.health_monitor import health_snapshot
+from app.services.health_monitor import health_snapshot, health_trends
 
 router = APIRouter(tags=["health"])
 
@@ -10,6 +10,14 @@ router = APIRouter(tags=["health"])
 @router.get("/api/health/summary")
 async def get_health_summary() -> dict:
     return await health_snapshot()
+
+
+@router.get("/api/health/trends")
+async def get_health_trends(
+    hours: int = Query(default=24, ge=1, le=168),
+    bucket_minutes: int = Query(default=60, ge=5, le=1440),
+) -> dict:
+    return await health_trends(hours=hours, bucket_minutes=bucket_minutes)
 
 
 @router.websocket("/ws/status")
