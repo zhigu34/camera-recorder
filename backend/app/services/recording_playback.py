@@ -241,11 +241,15 @@ class RecordingPlaybackManager:
 
     def status(self, recording_id: int, video_codec: str | None) -> dict[str, Any]:
         progress = self._public_progress(recording_id)
-        if self.can_direct_play(video_codec):
-            return {"state": "direct", "direct": True, "error": None, "progress": None}
+        # Prefer an already-built browser compatibility proxy even when the
+        # original H.264 recording would normally be direct-playable. A proxy may
+        # have been created after a real browser rejected the original profile,
+        # pixel format, audio stream, or container combination.
         proxy = self.proxy_path(recording_id)
         if proxy.exists() and proxy.stat().st_size > 0:
             return {"state": "ready", "direct": False, "error": None, "progress": None}
+        if self.can_direct_play(video_codec):
+            return {"state": "direct", "direct": True, "error": None, "progress": None}
         if recording_id in self._live_ids:
             return {"state": "streaming", "direct": False, "error": None, "progress": progress}
         task = self._tasks.get(recording_id)
@@ -427,10 +431,19 @@ class RecordingPlaybackManager:
 
     @staticmethod
     def _append_audio_options(command: list[str], audio_codec: str | None) -> None:
-        if (audio_codec or "").lower() == "aac":
-            command += ["-c:a", "copy"]
-        else:
-            command += ["-c:a", "aac", "-b:a", "96k"]
+        # Always normalize compatibility proxies to AAC-LC. Copying camera AAC
+        # preserves unknown AAC profiles/sample rates and can still produce a file
+        # that plays video but has no audio in Chrome/Firefox/Safari.
+        command += [
+            "-c:a",
+            "aac",
+            "-profile:a",
+            "aac_low",
+            "-b:a",
+            "128k",
+            "-ar",
+            "48000",
+        ]
 
     @staticmethod
     def _append_progress_options(command: list[str]) -> None:
@@ -454,17 +467,17 @@ class RecordingPlaybackManager:
             "-map",
             "0:a?",
             "-vf",
-            "scale='min(1280,iw)':-2",
+            "scale='min(1920,iw)':-2",
             "-c:v",
             "libx264",
             "-preset",
             "veryfast",
             "-crf",
-            "25",
+            "20",
             "-pix_fmt",
             "yuv420p",
             "-threads",
-            "2",
+            "4",
         ]
         cls._append_audio_options(command, audio_codec)
         cls._append_progress_options(command)
@@ -486,7 +499,7 @@ class RecordingPlaybackManager:
             "-map",
             "0:a?",
             "-vf",
-            "scale='min(1280,iw)':-2",
+            "scale='min(1920,iw)':-2",
             "-c:v",
             "libx264",
             "-preset",
@@ -494,11 +507,11 @@ class RecordingPlaybackManager:
             "-tune",
             "zerolatency",
             "-crf",
-            "25",
+            "21",
             "-pix_fmt",
             "yuv420p",
             "-threads",
-            "2",
+            "4",
             "-force_key_frames",
             "expr:gte(t,n_forced*2)",
         ]
