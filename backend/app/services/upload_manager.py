@@ -88,6 +88,38 @@ class OpenListWebDAVProvider:
                     f"uploaded size mismatch: local={file_size}, remote={remote_size}"
                 )
 
+    async def download(self, remote_path: str, target: Path) -> None:
+        """Download one archived object to a caller-owned temporary path."""
+
+        if not self.configured:
+            raise WebDAVError("OpenList WebDAV credentials are not configured")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        auth = httpx.BasicAuth(self.username, self.password)
+        timeout = httpx.Timeout(connect=10.0, read=300.0, write=300.0, pool=30.0)
+        async with httpx.AsyncClient(auth=auth, timeout=timeout, follow_redirects=True) as client:
+            async with client.stream("GET", self._url(remote_path)) as response:
+                if response.status_code != 200:
+                    body = await response.aread()
+                    raise WebDAVError(
+                        f"GET {remote_path} failed: HTTP {response.status_code} {body[:500].decode(errors='replace')}"
+                    )
+                expected = response.headers.get("content-length")
+                written = 0
+                with target.open("wb") as handle:
+                    async for block in response.aiter_bytes(4 * 1024 * 1024):
+                        if not block:
+                            continue
+                        await asyncio.to_thread(handle.write, block)
+                        written += len(block)
+
+        if written <= 0:
+            raise WebDAVError(f"GET {remote_path} returned an empty file")
+        if expected and int(expected) != written:
+            raise WebDAVError(
+                f"downloaded size mismatch: expected={expected}, downloaded={written}"
+            )
+
 
 class UploadManager:
     def __init__(self) -> None:
