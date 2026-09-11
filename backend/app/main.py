@@ -22,6 +22,7 @@ from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
+from app.services.storage_cleanup import storage_cleanup_manager
 from app.services.storage_manager import storage_snapshot
 from app.services.system_settings import get_or_create_system_settings, load_runtime_settings
 from app.services.upload_manager import upload_manager
@@ -68,12 +69,15 @@ async def lifespan(_: FastAPI):
                 camera.status = "recording"
             await session.commit()
 
-    # Start sampling after auto-start so planned startup/shutdown transitions do not
-    # pollute availability metrics.
+    # Start background observability/protection after recorder auto-start. Planned
+    # startup transitions should not pollute health metrics, and cleanup must never
+    # delay recorder startup.
     await health_sampler.start()
+    await storage_cleanup_manager.start()
 
     yield
 
+    await storage_cleanup_manager.stop()
     await health_sampler.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
@@ -85,7 +89,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.7.1",
+    version="0.7.2",
     lifespan=lifespan,
 )
 
@@ -124,9 +128,12 @@ async def system_status() -> dict:
         "recorders": recorder_manager.status(),
         "upload": upload,
         "storage": await storage_snapshot(),
+        "storage_cleanup": storage_cleanup_manager.status(),
     }
 
 
 @app.get("/api/system/storage")
 async def system_storage() -> dict:
-    return await storage_snapshot()
+    snapshot = await storage_snapshot()
+    snapshot["cleanup"] = storage_cleanup_manager.status()
+    return snapshot
