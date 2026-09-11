@@ -74,11 +74,17 @@ class RecordingScheduleManager:
         self._managed.discard(camera_id)
         self._manual_paused.discard(camera_id)
         self._manual_running.add(camera_id)
+        snapshot = self._camera_status.get(camera_id)
+        if snapshot is not None:
+            snapshot.update({"mode": "manual", "schedule_state": "manual_override"})
 
     def note_manual_stop(self, camera_id: int) -> None:
         self._managed.discard(camera_id)
         self._manual_running.discard(camera_id)
         self._manual_paused.add(camera_id)
+        snapshot = self._camera_status.get(camera_id)
+        if snapshot is not None:
+            snapshot.update({"mode": "manual_paused", "schedule_state": "manual_paused"})
 
     def clear_override(self, camera_id: int) -> None:
         self._managed.discard(camera_id)
@@ -90,6 +96,7 @@ class RecordingScheduleManager:
 
         self._manual_running.discard(camera_id)
         self._manual_paused.discard(camera_id)
+        self._camera_status.pop(camera_id, None)
         if recorder_manager.is_running(camera_id):
             self._managed.add(camera_id)
 
@@ -100,15 +107,17 @@ class RecordingScheduleManager:
     def state_for(self, camera: Camera) -> str:
         """Return schedule state without mixing in connectivity or recorder state."""
 
+        # Manual actions must be visible immediately instead of waiting for the
+        # next periodic reconcile to refresh the cached schedule snapshot.
+        if camera.id in self._manual_running:
+            return "manual_override"
+        if camera.id in self._manual_paused:
+            return "manual_paused"
         snapshot = self._camera_status.get(camera.id)
         if snapshot and snapshot.get("schedule_state"):
             return str(snapshot["schedule_state"])
         if not camera.enabled or not camera.auto_record:
             return "disabled"
-        if camera.id in self._manual_running:
-            return "manual_override"
-        if camera.id in self._manual_paused:
-            return "manual_paused"
         if camera.recording_schedule_enabled:
             in_window = recording_schedule_allows(camera, datetime.now().astimezone())
             return "in_window" if in_window else "scheduled"
