@@ -1,6 +1,7 @@
 import os
 from datetime import date as Date, datetime, time, timezone
 from pathlib import Path
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -36,6 +37,18 @@ def _local_iso(value: datetime | None) -> str | None:
     else:
         value = value.astimezone(tz)
     return value.isoformat(timespec="seconds")
+
+
+def _playback_payload(recording: Recording) -> dict:
+    state = recording_playback_manager.status(recording.id, recording.video_codec)
+    source = Path(recording.mp4_path)
+    return {
+        **state,
+        "video_codec": recording.video_codec,
+        "audio_codec": recording.audio_codec,
+        "original_available": source.exists(),
+        "can_try_original": recording_playback_manager.can_try_original(recording.video_codec),
+    }
 
 
 @router.get("", response_model=list[RecordingRead])
@@ -88,7 +101,6 @@ async def browse_recordings(
     for recording in recordings:
         total_duration += float(recording.duration or 0)
         total_size += int(recording.file_size or 0)
-        playback = recording_playback_manager.status(recording.id, recording.video_codec)
         items.append(
             {
                 "id": recording.id,
@@ -107,7 +119,7 @@ async def browse_recordings(
                 "upload_status": recording.upload_status,
                 "warning_count": recording.warning_count,
                 "filename": Path(recording.mp4_path).name,
-                "playback": playback,
+                "playback": _playback_payload(recording),
             }
         )
 
@@ -127,7 +139,7 @@ async def playback_status(recording_id: int, db: AsyncSession = Depends(get_db))
     recording = await db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
-    return recording_playback_manager.status(recording.id, recording.video_codec)
+    return _playback_payload(recording)
 
 
 @router.post("/{recording_id}/playback")
@@ -137,18 +149,35 @@ async def prepare_playback(recording_id: int, db: AsyncSession = Depends(get_db)
         raise HTTPException(status_code=404, detail="recording not found")
     source = Path(recording.mp4_path)
     try:
-        return await recording_playback_manager.start(recording.id, source, recording.video_codec)
+        return await recording_playback_manager.start(
+            recording.id,
+            source,
+            recording.video_codec,
+            recording.audio_codec,
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=410, detail="local recording file no longer exists")
 
 
 @router.get("/{recording_id}/stream")
-async def stream_recording(recording_id: int, db: AsyncSession = Depends(get_db)):
+async def stream_recording(
+    recording_id: int,
+    source: Literal["auto", "original", "proxy"] = Query(default="auto"),
+    db: AsyncSession = Depends(get_db),
+):
     recording = await db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
 
-    if recording_playback_manager.can_direct_play(recording.video_codec):
+    if source == "original":
+        path = Path(recording.mp4_path)
+    elif source == "proxy":
+        state = recording_playback_manager.status(recording.id, recording.video_codec)
+        if state["state"] != "ready":
+            raise HTTPException(status_code=409, detail="playback proxy is not ready")
+        path = recording_playback_manager.proxy_path(recording.id)
+        recording_playback_manager.mark_accessed(recording.id)
+    elif recording_playback_manager.can_direct_play(recording.video_codec):
         path = Path(recording.mp4_path)
     else:
         state = recording_playback_manager.status(recording.id, recording.video_codec)
