@@ -10,6 +10,7 @@ import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasViewV2 from './CamerasViewV2.vue'
 import DashboardView from './DashboardView.vue'
+import EventCenterView from './EventCenterView.vue'
 import HealthView from './HealthView.vue'
 import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
 import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
@@ -46,14 +47,14 @@ const navEntries: NavEntry[] = [
   { key: 'health', label: '系统健康', kind: 'route', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
   { key: 'recordings', label: '录像管理', kind: 'route', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
   { key: 'uploads', label: '上传管理', kind: 'route', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
-  { key: 'events', label: '事件中心', kind: 'legacy', target: 'events', group: 'ops', icon: markRaw(Bell) },
+  { key: 'events', label: '事件中心', kind: 'route', target: '/events', group: 'ops', icon: markRaw(Bell) },
   { key: 'alerts', label: '告警设置', kind: 'legacy', target: 'alerts', group: 'ops', icon: markRaw(WarningFilled) },
   { key: 'batch', label: '批量添加', kind: 'route', target: '/cameras/batch', group: 'ops', icon: markRaw(Plus) },
   { key: 'settings', label: '系统设置', kind: 'route', target: '/settings', group: 'settings', icon: markRaw(Setting) },
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
 const legacyLabels: Record<string, string> = {
-  events: '事件中心', alerts: '告警设置',
+  alerts: '告警设置',
 }
 
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
@@ -184,6 +185,7 @@ onBeforeUnmount(() => {
         <CamerasViewV2 v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
         <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
         <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
+        <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
         <div v-else-if="isLegacy" class="legacy-host"><App /></div>
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
