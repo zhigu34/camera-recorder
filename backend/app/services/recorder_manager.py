@@ -9,6 +9,7 @@ from app.core.database import SessionLocal
 from app.services.email_notifier import email_notifier
 from app.services.event_log import add_event
 from app.services.ffmpeg_builder import CameraRuntimeConfig, build_record_command, redact_command
+from app.services.system_settings import load_runtime_settings
 
 
 _TIMESTAMP_MARKERS = (
@@ -113,7 +114,9 @@ class CameraWorker:
         while not self.stop_requested:
             self.state = "STARTING" if attempt == 0 else "RECONNECTING"
             try:
-                command = build_record_command(self.camera, output_dir)
+                async with SessionLocal() as session:
+                    runtime = await load_runtime_settings(session)
+                command = build_record_command(self.camera, output_dir, runtime)
                 await self._log(f"starting ffmpeg: {' '.join(redact_command(command))}")
                 self.process = await asyncio.create_subprocess_exec(
                     *command,
