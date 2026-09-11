@@ -11,6 +11,7 @@ from app.api.notifications import router as notifications_router
 from app.api.playback_control import router as playback_control_router
 from app.api.playback_metrics import router as playback_metrics_router
 from app.api.preview_wall import router as preview_wall_router
+from app.api.recording_management import router as recording_management_router
 from app.api.recording_navigation import router as recording_navigation_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
@@ -100,6 +101,7 @@ app.add_middleware(PlaybackPrefetchMiddleware)
 
 app.include_router(cameras_router)
 app.include_router(recordings_router)
+app.include_router(recording_management_router)
 app.include_router(playback_control_router)
 app.include_router(playback_metrics_router)
 app.include_router(recording_navigation_router)
@@ -120,27 +122,18 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/system/status")
 async def system_status() -> dict:
-    async with SessionLocal() as session:
-        runtime = await load_runtime_settings(session)
-    upload = await upload_manager.status()
+    runtime = await load_runtime_settings()
     return {
-        "app": runtime.app_name,
-        "segment_duration_seconds": runtime.segment_duration_seconds,
-        "ffmpeg": await capabilities_dict(),
+        "ffmpeg": capabilities_dict(),
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
-        "upload": upload,
-        "storage": await storage_snapshot(),
-        "storage_cleanup": storage_cleanup_manager.status(),
+        "segment_processor": segment_processor.status(),
+        "upload": upload_manager.status(),
         "alerts": {
             "monitor": alert_monitor.status(),
-            "dispatcher": alert_dispatcher.snapshot(),
+            "dispatcher": alert_dispatcher.status(),
         },
+        "playback_prefetch": playback_prefetch_manager.status(),
+        "storage_cleanup": storage_cleanup_manager.status(),
+        "storage": storage_snapshot(runtime.storage_warning_percent, runtime.storage_critical_percent),
     }
-
-
-@app.get("/api/system/storage")
-async def system_storage() -> dict:
-    snapshot = await storage_snapshot()
-    snapshot["cleanup"] = storage_cleanup_manager.status()
-    return snapshot
