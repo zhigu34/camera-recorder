@@ -27,6 +27,7 @@ from app.services.camera_preview import (
 from app.services.camera_probe import CameraProbeError, probe_camera
 from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
+from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
@@ -50,6 +51,8 @@ def _new_camera(payload: CameraCreate) -> Camera:
         sub_rtsp_path=payload.sub_rtsp_path.strip() if payload.sub_rtsp_path else None,
         enabled=payload.enabled,
         auto_record=payload.auto_record,
+        recording_schedule_enabled=payload.recording_schedule_enabled,
+        recording_schedule=[item.model_dump() for item in payload.recording_schedule],
         timestamp_mode=payload.timestamp_mode,
     )
 
@@ -224,6 +227,10 @@ async def update_camera(
     password = values.pop("password", None)
     sub_rtsp_path_present = "sub_rtsp_path" in values
     sub_rtsp_path = values.pop("sub_rtsp_path", None)
+    schedule_changed = bool(
+        {"enabled", "auto_record", "recording_schedule_enabled", "recording_schedule"}
+        & set(values)
+    )
     for key, value in values.items():
         if value is not None:
             setattr(camera, key, value)
@@ -231,6 +238,9 @@ async def update_camera(
         camera.sub_rtsp_path = sub_rtsp_path.strip() if sub_rtsp_path else None
     if password is not None:
         camera.password_encrypted = encrypt_secret(password)
+
+    if camera.recording_schedule_enabled and not camera.recording_schedule:
+        raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
 
     add_event(
         db,
@@ -246,6 +256,9 @@ async def update_camera(
         await db.rollback()
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     await db.refresh(camera)
+    if schedule_changed:
+        recording_schedule_manager.clear_override(camera.id)
+        await recording_schedule_manager.reconcile()
     return camera
 
 
@@ -254,6 +267,7 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     if recorder_manager.is_running(camera_id):
         await recorder_manager.stop(camera_id)
+    recording_schedule_manager.forget(camera_id)
     await db.delete(camera)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -335,6 +349,7 @@ async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.start(_runtime_config_or_409(camera))
+    recording_schedule_manager.note_manual_start(camera_id)
     camera.status = "recording"
     add_event(
         db,
@@ -352,6 +367,7 @@ async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
 async def stop_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     runtime = await recorder_manager.stop(camera_id)
+    recording_schedule_manager.note_manual_stop(camera_id)
     camera.status = "stopped"
     add_event(
         db,
@@ -371,6 +387,7 @@ async def restart_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.restart(_runtime_config_or_409(camera))
+    recording_schedule_manager.note_manual_start(camera_id)
     camera.status = "recording"
     add_event(
         db,
