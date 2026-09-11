@@ -62,6 +62,11 @@ class CameraCreate(CameraBase):
     def validate_schedule(self):
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
+        # A weekly recording schedule is an automatic-recording policy. Treating
+        # schedule_enabled=true together with auto_record=false as valid creates a
+        # contradictory state where configured windows can never start recording.
+        if self.recording_schedule_enabled:
+            self.auto_record = True
         return self
 
 
@@ -95,6 +100,10 @@ class RecordingScheduleBatchApply(BaseModel):
     def validate_schedule(self):
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
+        if self.recording_schedule_enabled:
+            self.auto_record = True
+        elif not self.auto_record:
+            self.recording_schedule_enabled = False
         return self
 
 
@@ -116,6 +125,16 @@ class CameraUpdate(BaseModel):
     recording_schedule_enabled: bool | None = None
     recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=32)
     timestamp_mode: TimestampMode | None = None
+
+    @model_validator(mode="after")
+    def normalize_schedule_policy(self):
+        if self.recording_schedule_enabled is True:
+            if self.recording_schedule == []:
+                raise ValueError("recording schedule requires at least one time window")
+            self.auto_record = True
+        elif self.auto_record is False:
+            self.recording_schedule_enabled = False
+        return self
 
 
 class CameraRead(CameraBase):
