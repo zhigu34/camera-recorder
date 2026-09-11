@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.recording import Recording
 from app.models.upload import UploadTask
+from app.services.system_settings import RuntimeSettings, load_runtime_settings
 
 
 class WebDAVError(RuntimeError):
@@ -17,10 +18,10 @@ class WebDAVError(RuntimeError):
 
 
 class OpenListWebDAVProvider:
-    def __init__(self) -> None:
-        self.base_url = settings.webdav_url.rstrip("/")
-        self.username = settings.webdav_username
-        self.password = settings.webdav_password
+    def __init__(self, runtime: RuntimeSettings) -> None:
+        self.base_url = runtime.webdav_url.rstrip("/")
+        self.username = runtime.webdav_username
+        self.password = runtime.webdav_password
 
     @property
     def configured(self) -> bool:
@@ -91,12 +92,23 @@ class UploadManager:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
-        self._semaphore = asyncio.Semaphore(max(1, settings.upload_concurrency))
-        self.provider = OpenListWebDAVProvider()
 
-    @property
-    def active(self) -> bool:
-        return settings.upload_enabled and self.provider.configured
+    async def runtime(self) -> RuntimeSettings:
+        async with SessionLocal() as session:
+            return await load_runtime_settings(session)
+
+    async def status(self) -> dict:
+        runtime = await self.runtime()
+        provider = OpenListWebDAVProvider(runtime)
+        return {
+            "enabled": runtime.upload_enabled,
+            "configured": provider.configured,
+            "active": runtime.upload_enabled and provider.configured,
+            "provider": "openlist_webdav",
+            "webdav_url": runtime.webdav_url,
+            "webdav_root": runtime.webdav_root,
+            "local_retention_hours": runtime.local_retention_hours,
+        }
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -114,9 +126,11 @@ class UploadManager:
 
     async def _run(self) -> None:
         while not self._stop.is_set():
-            if self.active:
-                await self.scan_once()
-                await self.cleanup_uploaded_files()
+            runtime = await self.runtime()
+            provider = OpenListWebDAVProvider(runtime)
+            if runtime.upload_enabled and provider.configured:
+                await self.scan_once(runtime)
+                await self.cleanup_uploaded_files(runtime)
             try:
                 await asyncio.wait_for(
                     self._stop.wait(), timeout=settings.upload_scan_interval_seconds
@@ -124,19 +138,23 @@ class UploadManager:
             except TimeoutError:
                 pass
 
-    def remote_path_for(self, recording: Recording) -> str:
+    def remote_path_for(self, recording: Recording, runtime: RuntimeSettings) -> str:
         source = Path(recording.mp4_path)
         try:
             relative = source.relative_to(settings.recordings_dir)
         except ValueError:
             relative = Path(source.name)
-        root = settings.webdav_root.strip("/")
+        root = runtime.webdav_root.strip("/")
         parts = [root] if root else []
         parts.extend(relative.parts)
         return PurePosixPath(*parts).as_posix()
 
-    async def scan_once(self) -> None:
-        await self._ensure_tasks()
+    async def scan_once(self, runtime: RuntimeSettings | None = None) -> None:
+        runtime = runtime or await self.runtime()
+        provider = OpenListWebDAVProvider(runtime)
+        if not runtime.upload_enabled or not provider.configured:
+            return
+        await self._ensure_tasks(runtime)
         now = datetime.now(timezone.utc)
         async with SessionLocal() as session:
             task_ids = list(
@@ -144,17 +162,20 @@ class UploadManager:
                     select(UploadTask.id)
                     .where(
                         UploadTask.status.in_(("pending", "retry_wait")),
-                        UploadTask.retry_count < settings.upload_retry_max,
+                        UploadTask.retry_count < runtime.upload_retry_max,
                         or_(UploadTask.next_retry_at.is_(None), UploadTask.next_retry_at <= now),
                     )
                     .order_by(UploadTask.id)
-                    .limit(max(1, settings.upload_concurrency) * 2)
+                    .limit(max(1, runtime.upload_concurrency) * 2)
                 )
             )
         if task_ids:
-            await asyncio.gather(*(self._process_guarded(task_id) for task_id in task_ids))
+            semaphore = asyncio.Semaphore(max(1, runtime.upload_concurrency))
+            await asyncio.gather(
+                *(self._process_guarded(task_id, runtime, provider, semaphore) for task_id in task_ids)
+            )
 
-    async def _ensure_tasks(self) -> None:
+    async def _ensure_tasks(self, runtime: RuntimeSettings) -> None:
         async with SessionLocal() as session:
             recordings = list(
                 await session.scalars(
@@ -183,17 +204,30 @@ class UploadManager:
                 session.add(
                     UploadTask(
                         recording_id=recording.id,
-                        remote_path=self.remote_path_for(recording),
+                        remote_path=self.remote_path_for(recording, runtime),
                         status="pending",
                     )
                 )
             await session.commit()
 
-    async def _process_guarded(self, task_id: int) -> None:
-        async with self._semaphore:
-            await self.process_task(task_id)
+    async def _process_guarded(
+        self,
+        task_id: int,
+        runtime: RuntimeSettings,
+        provider: OpenListWebDAVProvider,
+        semaphore: asyncio.Semaphore,
+    ) -> None:
+        async with semaphore:
+            await self.process_task(task_id, runtime, provider)
 
-    async def process_task(self, task_id: int) -> None:
+    async def process_task(
+        self,
+        task_id: int,
+        runtime: RuntimeSettings | None = None,
+        provider: OpenListWebDAVProvider | None = None,
+    ) -> None:
+        runtime = runtime or await self.runtime()
+        provider = provider or OpenListWebDAVProvider(runtime)
         async with SessionLocal() as session:
             task = await session.get(UploadTask, task_id)
             if task is None:
@@ -221,7 +255,7 @@ class UploadManager:
             remote_path = task.remote_path
 
         try:
-            await self.provider.upload(source, remote_path)
+            await provider.upload(source, remote_path)
         except Exception as exc:
             async with SessionLocal() as session:
                 task = await session.get(UploadTask, task_id)
@@ -230,7 +264,7 @@ class UploadManager:
                     return
                 task.retry_count += 1
                 task.last_error = str(exc)[-2000:]
-                if task.retry_count >= settings.upload_retry_max:
+                if task.retry_count >= runtime.upload_retry_max:
                     task.status = "failed"
                     task.next_retry_at = None
                     if recording:
@@ -272,10 +306,11 @@ class UploadManager:
             await session.commit()
         return True
 
-    async def cleanup_uploaded_files(self) -> int:
-        if settings.local_retention_hours < 0:
+    async def cleanup_uploaded_files(self, runtime: RuntimeSettings | None = None) -> int:
+        runtime = runtime or await self.runtime()
+        if runtime.local_retention_hours < 0:
             return 0
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=settings.local_retention_hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=runtime.local_retention_hours)
         async with SessionLocal() as session:
             recordings = list(
                 await session.scalars(
