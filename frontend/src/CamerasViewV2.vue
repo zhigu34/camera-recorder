@@ -106,10 +106,28 @@ function isRecording(cameraId: number) {
   return runtimeState(cameraId) === 'RECORDING'
 }
 
+function latestProbeSucceeded(camera: Camera): boolean | null {
+  if (!camera.last_probe_at) return null
+  const probeAt = new Date(camera.last_probe_at).getTime()
+  if (Number.isNaN(probeAt)) return null
+  if (!camera.last_online_at) return false
+  const onlineAt = new Date(camera.last_online_at).getTime()
+  if (Number.isNaN(onlineAt)) return false
+  return onlineAt >= probeAt
+}
+
 function health(camera: Camera): CameraHealth {
   if (!camera.enabled) return 'disabled'
   const state = runtimeState(camera.id)
   if (['RECORDING', 'STARTING', 'RECONNECTING'].includes(state)) return 'online'
+
+  const probeSucceeded = latestProbeSucceeded(camera)
+  if (probeSucceeded === true) return 'online'
+  if (probeSucceeded === false) return 'offline'
+
+  // Legacy fallback for cameras that pre-date probe timestamps. camera.status is
+  // also used by recording scheduling, so values such as "scheduled" must not
+  // be interpreted as a connectivity failure.
   if (camera.status === 'probe_failed' || camera.status === 'offline') return 'offline'
   if (camera.status === 'online' || camera.status === 'recording') return 'online'
   return 'unknown'
