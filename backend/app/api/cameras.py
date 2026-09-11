@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import decrypt_secret, encrypt_secret
 from app.models.camera import Camera
-from app.schemas.camera import CameraCreate, CameraProbeResult, CameraRead, CameraUpdate
+from app.schemas.camera import (
+    CameraBatchCreate,
+    CameraBatchResult,
+    CameraCreate,
+    CameraProbeResult,
+    CameraRead,
+    CameraUpdate,
+)
 from app.services.camera_config import runtime_config
 from app.services.camera_probe import CameraProbeError, probe_camera
 from app.services.event_log import add_event
@@ -23,6 +30,20 @@ async def _camera_or_404(camera_id: int, db: AsyncSession) -> Camera:
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
     return camera
+
+
+def _new_camera(payload: CameraCreate) -> Camera:
+    return Camera(
+        name=payload.name,
+        ip=payload.ip,
+        rtsp_port=payload.rtsp_port,
+        username=payload.username,
+        password_encrypted=encrypt_secret(payload.password),
+        rtsp_path=payload.rtsp_path,
+        enabled=payload.enabled,
+        auto_record=payload.auto_record,
+        timestamp_mode=payload.timestamp_mode,
+    )
 
 
 def _camera_password(camera: Camera) -> str:
@@ -53,17 +74,7 @@ async def list_cameras(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=CameraRead, status_code=status.HTTP_201_CREATED)
 async def create_camera(payload: CameraCreate, db: AsyncSession = Depends(get_db)):
-    camera = Camera(
-        name=payload.name,
-        ip=payload.ip,
-        rtsp_port=payload.rtsp_port,
-        username=payload.username,
-        password_encrypted=encrypt_secret(payload.password),
-        rtsp_path=payload.rtsp_path,
-        enabled=payload.enabled,
-        auto_record=payload.auto_record,
-        timestamp_mode=payload.timestamp_mode,
-    )
+    camera = _new_camera(payload)
     db.add(camera)
     try:
         await db.flush()
@@ -81,6 +92,64 @@ async def create_camera(payload: CameraCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     await db.refresh(camera)
     return camera
+
+
+@router.post("/batch", response_model=CameraBatchResult, status_code=status.HTTP_201_CREATED)
+async def create_cameras_batch(payload: CameraBatchCreate, db: AsyncSession = Depends(get_db)):
+    names = [item.name for item in payload.cameras]
+    seen: set[str] = set()
+    duplicates: list[str] = []
+    for name in names:
+        if name in seen and name not in duplicates:
+            duplicates.append(name)
+        seen.add(name)
+    if duplicates:
+        raise HTTPException(
+            status_code=422,
+            detail=f"批量数据中存在重复名称: {', '.join(duplicates)}",
+        )
+
+    existing_result = await db.scalars(select(Camera.name).where(Camera.name.in_(names)))
+    existing_names = set(existing_result.all())
+    if existing_names and not payload.skip_existing:
+        ordered = [name for name in names if name in existing_names]
+        raise HTTPException(
+            status_code=409,
+            detail=f"以下摄像头名称已存在: {', '.join(ordered)}",
+        )
+
+    created_ids: list[int] = []
+    skipped_names = [name for name in names if name in existing_names]
+    try:
+        for item in payload.cameras:
+            if item.name in existing_names:
+                continue
+            camera = _new_camera(item)
+            db.add(camera)
+            await db.flush()
+            created_ids.append(camera.id)
+            add_event(
+                db,
+                level="info",
+                category="camera",
+                code="camera.created",
+                message=f"摄像头 {camera.name} 已批量创建",
+                camera_id=camera.id,
+            )
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="批量添加时检测到名称冲突，请刷新摄像头列表后重试",
+        ) from exc
+
+    return CameraBatchResult(
+        created=len(created_ids),
+        skipped=len(skipped_names),
+        created_ids=created_ids,
+        skipped_names=skipped_names,
+    )
 
 
 @router.get("/{camera_id}", response_model=CameraRead)
