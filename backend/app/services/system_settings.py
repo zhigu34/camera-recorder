@@ -19,7 +19,7 @@ class RuntimeSettings:
     upload_enabled: bool = False
     upload_concurrency: int = 2
     upload_retry_max: int = 8
-    webdav_url: str = "http://openlist:5244/dav/115"
+    webdav_url: str = "http://openlist:5244/dav"
     webdav_root: str = "监控录像"
     webdav_username: str = "admin"
     webdav_password: str = ""
