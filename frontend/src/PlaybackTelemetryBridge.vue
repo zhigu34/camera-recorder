@@ -24,10 +24,6 @@ interface Attempt {
   enrichment?: Promise<void>
 }
 
-interface VideoWithFrameCallback extends HTMLVideoElement {
-  requestVideoFrameCallback?: (callback: (now: number, metadata: unknown) => void) => number
-}
-
 const attempts = new WeakMap<HTMLVideoElement, Attempt>()
 const listeners: Array<[string, EventListener]> = []
 const sourcePattern = /\/api\/recordings\/(\d+)\/(stream|proxy-live\.mp4)/
@@ -180,10 +176,10 @@ function reportFirstFrame(video: HTMLVideoElement, attempt: Attempt, signal: str
 
 function armFrameCallback(video: HTMLVideoElement, attempt: Attempt) {
   if (attempt.firstFrameReported || attempt.frameCallbackArmed) return false
-  const frameVideo = video as VideoWithFrameCallback
-  if (typeof frameVideo.requestVideoFrameCallback !== 'function') return false
+  const callback = video.requestVideoFrameCallback
+  if (typeof callback !== 'function') return false
   attempt.frameCallbackArmed = true
-  frameVideo.requestVideoFrameCallback(() => reportFirstFrame(video, attempt, 'video_frame_callback'))
+  callback.call(video, () => reportFirstFrame(video, attempt, 'video_frame_callback'))
   return true
 }
 
