@@ -11,6 +11,7 @@ interface LatencySummary {
 
 interface CompatibilityRow {
   browser: string
+  browser_version: string
   platform: string
   codec: string
   playback_mode: string
@@ -101,6 +102,12 @@ function modeLabel(value: string) {
   return value
 }
 
+function browserLabel(row: CompatibilityRow) {
+  return row.browser_version && row.browser_version !== 'unknown'
+    ? `${row.browser} ${row.browser_version}`
+    : row.browser
+}
+
 function hintsLabel(value: Record<string, number>) {
   const entries = Object.entries(value)
   if (!entries.length) return '-'
@@ -160,7 +167,7 @@ onBeforeUnmount(() => {
         </div>
 
         <el-table :data="metrics.client.compatibility" size="small" empty-text="还没有真实浏览器回放样本">
-          <el-table-column prop="browser" label="浏览器" width="90" />
+          <el-table-column label="浏览器" width="110"><template #default="{ row }">{{ browserLabel(row) }}</template></el-table-column>
           <el-table-column prop="platform" label="平台" width="90" />
           <el-table-column prop="codec" label="编码" width="80" />
           <el-table-column label="模式" width="100"><template #default="{ row }">{{ modeLabel(row.playback_mode) }}</template></el-table-column>
