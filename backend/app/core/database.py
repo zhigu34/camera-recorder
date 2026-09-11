@@ -25,18 +25,13 @@ SessionLocal = async_sessionmaker(
 
 
 async def init_db() -> None:
-    # Import models before create_all so SQLAlchemy sees every table.
-    import app.models  # noqa: F401
-
     if settings.database_url.startswith("sqlite"):
-        # journal_mode persists in the database; run it outside create_all's
-        # transaction to avoid SQLite's journal-mode transaction restrictions.
+        # journal_mode persists in the database. Schema creation/evolution is
+        # handled by Alembic before this function is called.
         async with engine.connect() as connection:
             await connection.execute(text("PRAGMA journal_mode=WAL"))
+            await connection.execute(text("PRAGMA foreign_keys=ON"))
             await connection.commit()
-
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
 
 
 async def close_db() -> None:
