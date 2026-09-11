@@ -3,6 +3,22 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 
+def test_system_status_shape() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/system/status")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["recorders"], list)
+    assert isinstance(body["recording_schedule"], dict)
+    assert isinstance(body["segment_processor"], dict)
+    assert isinstance(body["upload"], dict)
+    assert "enabled" in body["upload"]
+    assert "configured" in body["upload"]
+    assert isinstance(body["alerts"], dict)
+    assert isinstance(body["storage"], dict)
+
+
 def test_health_summary_shape() -> None:
     with TestClient(app) as client:
         response = client.get("/api/health/summary")
