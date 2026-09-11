@@ -51,6 +51,7 @@ async def browse_recordings(
     date: Date,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    await recording_playback_manager.cleanup_cache()
     tz = _deployment_timezone()
     local_start = datetime.combine(date, time.min, tzinfo=tz)
     local_end = datetime.combine(date, time.max, tzinfo=tz)
@@ -145,6 +146,7 @@ async def stream_recording(recording_id: int, db: AsyncSession = Depends(get_db)
         if state["state"] != "ready":
             raise HTTPException(status_code=409, detail="playback proxy is not ready")
         path = recording_playback_manager.proxy_path(recording.id)
+        recording_playback_manager.mark_accessed(recording.id)
 
     if not path.exists():
         raise HTTPException(status_code=410, detail="playback file no longer exists")
