@@ -18,7 +18,7 @@ _POLL_INTERVAL_SECONDS = 10.0
 
 
 class RecordingScheduleManager:
-    """Start/stop auto-record cameras according to their local time windows.
+    """Start/stop auto-record cameras according to their local weekly windows.
 
     Only recorders started by this manager are automatically stopped at a window
     boundary. Manual starts are treated as explicit overrides. Manual stops pause
@@ -82,6 +82,18 @@ class RecordingScheduleManager:
         self._manual_running.discard(camera_id)
         self._manual_paused.discard(camera_id)
 
+    def reset_for_schedule_change(self, camera_id: int) -> None:
+        """Return manual overrides to schedule control without losing managed ownership.
+
+        If this scheduler originally started the recorder, keeping `_managed` lets
+        the immediate reconciliation stop it when the new weekly plan excludes the
+        current time. Manual overrides are intentionally cleared because saving a
+        new schedule is an explicit request to resume schedule control.
+        """
+
+        self._manual_running.discard(camera_id)
+        self._manual_paused.discard(camera_id)
+
     def forget(self, camera_id: int) -> None:
         self.clear_override(camera_id)
         self._camera_status.pop(camera_id, None)
@@ -128,8 +140,6 @@ class RecordingScheduleManager:
             global_auto_start and camera.enabled and camera.auto_record and in_window
         )
 
-        # A disabled camera is never allowed to keep recording, even if it was
-        # manually overridden earlier in this process lifetime.
         if not camera.enabled:
             self.clear_override(camera.id)
             if running:
@@ -138,15 +148,12 @@ class RecordingScheduleManager:
                 running = False
 
         # If a recorder that this scheduler started was manually stopped, do not
-        # immediately start it again on the next 10-second reconciliation. Treat
-        # that as a pause for the remainder of the current window.
+        # immediately start it again on the next reconciliation. Treat that as a
+        # pause for the remainder of the current window.
         if camera.id in self._managed and not running and auto_eligible:
             self._managed.discard(camera.id)
             self._manual_paused.add(camera.id)
 
-        # A manual stop suppresses only the current active auto-record window.
-        # Once the camera leaves the window, the pause is cleared so a later
-        # window can start normally.
         if camera.id in self._manual_paused and not in_window:
             self._manual_paused.discard(camera.id)
 
@@ -163,7 +170,16 @@ class RecordingScheduleManager:
                     camera.status = "probe_required"
                 else:
                     try:
-                        await recorder_manager.start(runtime_config(camera))
+                        # Explicit weekly schedules should segment relative to their
+                        # actual start time instead of 00/10/20 wall-clock boundaries.
+                        # 24/7 auto-record keeps the global alignment setting.
+                        align_override = False if camera.recording_schedule_enabled else None
+                        await recorder_manager.start(
+                            runtime_config(
+                                camera,
+                                align_segments_to_clock=align_override,
+                            )
+                        )
                         self._managed.add(camera.id)
                         camera.status = "recording"
                         running = True
