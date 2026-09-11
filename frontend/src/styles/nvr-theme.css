@@ -106,6 +106,12 @@ button, input, textarea, select { font: inherit; }
 .nvr-workspace-content .muted,
 .nvr-workspace-content .subtitle { color: var(--nvr-muted) !important; }
 
+/* MJPEG is an endless multipart response. Some browsers do not fire the img load
+   event while the stream remains open, so never hide live frames behind load-state
+   opacity. Errors are still handled by the component's img error event. */
+.wall-page .preview-image { opacity: 1 !important; }
+.wall-page .slot-loading { display: none !important; }
+
 /* Legacy management App: keep all business code, remove its duplicate navigation chrome. */
 .legacy-host > .app-shell { min-height: 0 !important; background: transparent !important; }
 .legacy-host > .app-shell > .sidebar { display: none !important; }
