@@ -96,10 +96,67 @@ interface HealthTrends {
   timeline: TrendPoint[]
 }
 
+type StabilityVerdict = 'pass' | 'fail' | 'collecting' | 'ignored'
+
+interface StabilityCamera {
+  camera_id: number
+  name: string
+  ip: string
+  monitored: boolean
+  verdict: StabilityVerdict
+  reasons: string[]
+  sample_coverage: number
+  observed_minutes: number
+  online_rate: number | null
+  recording_completeness: number | null
+  recording_segments: number
+  complete_segments: number
+  ffmpeg_failures: number
+  failure_streaks: number
+  max_consecutive_failures: number
+  outage_count: number
+  total_offline_seconds: number
+  longest_offline_seconds: number
+  current_offline_seconds: number
+  continuous_failure_active: boolean
+}
+
+interface StabilityReport {
+  generated_at: string
+  hours: number
+  criteria: {
+    min_sample_coverage: number
+    min_online_rate: number
+    min_recording_completeness: number
+    max_longest_outage_seconds: number
+    max_failure_streaks: number
+    max_ffmpeg_failures_per_24h: number
+    max_ffmpeg_failures: number
+  }
+  overall: {
+    verdict: Exclude<StabilityVerdict, 'ignored'>
+    monitored_cameras: number
+    passed_cameras: number
+    failed_cameras: number
+    collecting_cameras: number
+    online_rate: number | null
+    recording_completeness: number | null
+    ffmpeg_failures: number
+    failure_streaks: number
+    outage_count: number
+    total_offline_seconds: number
+    longest_offline_seconds: number
+  }
+  cameras: StabilityCamera[]
+}
+
 const snapshot = ref<HealthSnapshot | null>(null)
 const trends = ref<HealthTrends | null>(null)
+const stability = ref<StabilityReport | null>(null)
+const stabilityWindow = ref(24)
 const loading = ref(false)
 const trendLoading = ref(false)
+const stabilityLoading = ref(false)
 const wsConnected = ref(false)
 const reconnectCount = ref(0)
 let socket: WebSocket | null = null
@@ -117,6 +174,10 @@ const monitoredCameraTrends = computed(() =>
   (trends.value?.cameras || []).filter((item) => item.monitored),
 )
 
+const monitoredStabilityCameras = computed(() =>
+  (stability.value?.cameras || []).filter((item) => item.monitored),
+)
+
 function formatDuration(totalSeconds: number) {
   const seconds = Math.max(0, Math.floor(totalSeconds || 0))
   const days = Math.floor(seconds / 86400)
@@ -124,7 +185,8 @@ function formatDuration(totalSeconds: number) {
   const minutes = Math.floor((seconds % 3600) / 60)
   if (days) return `${days}天 ${hours}小时 ${minutes}分`
   if (hours) return `${hours}小时 ${minutes}分`
-  return `${minutes}分 ${seconds % 60}秒`
+  if (minutes) return `${minutes}分 ${seconds % 60}秒`
+  return `${seconds}秒`
 }
 
 function formatBytes(bytes: number) {
@@ -158,6 +220,20 @@ function rateType(value: number | null | undefined) {
   return 'danger'
 }
 
+function verdictType(value: StabilityVerdict) {
+  if (value === 'pass') return 'success'
+  if (value === 'fail') return 'danger'
+  if (value === 'collecting') return 'warning'
+  return 'info'
+}
+
+function verdictLabel(value: StabilityVerdict) {
+  if (value === 'pass') return '通过'
+  if (value === 'fail') return '未通过'
+  if (value === 'collecting') return '采集中'
+  return '未监控'
+}
+
 function stateTagType(state: string, abnormal: boolean) {
   if (abnormal) return 'danger'
   if (state === 'RECORDING') return 'success'
@@ -187,6 +263,18 @@ function sortCompleteness(a: CameraTrend, b: CameraTrend) {
   return (a.recording_completeness ?? -1) - (b.recording_completeness ?? -1)
 }
 
+function sortStabilityCoverage(a: StabilityCamera, b: StabilityCamera) {
+  return a.sample_coverage - b.sample_coverage
+}
+
+function sortStabilityOnline(a: StabilityCamera, b: StabilityCamera) {
+  return (a.online_rate ?? -1) - (b.online_rate ?? -1)
+}
+
+function sortStabilityCompleteness(a: StabilityCamera, b: StabilityCamera) {
+  return (a.recording_completeness ?? -1) - (b.recording_completeness ?? -1)
+}
+
 async function loadSnapshot() {
   loading.value = true
   try {
@@ -213,6 +301,26 @@ async function loadTrends(showError = true) {
   } finally {
     trendLoading.value = false
   }
+}
+
+async function loadStability(showError = true) {
+  stabilityLoading.value = true
+  try {
+    const { data } = await axios.get<StabilityReport>('/api/health/stability', {
+      params: { hours: stabilityWindow.value },
+    })
+    stability.value = data
+  } catch (error) {
+    if (showError) {
+      ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '稳定性验收数据加载失败')
+    }
+  } finally {
+    stabilityLoading.value = false
+  }
+}
+
+function onStabilityWindowChange() {
+  void loadStability()
 }
 
 function scheduleReconnect() {
@@ -266,9 +374,12 @@ function goBack() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadSnapshot(), loadTrends()])
+  await Promise.all([loadSnapshot(), loadTrends(), loadStability()])
   connectWebSocket()
-  trendTimer = window.setInterval(() => void loadTrends(false), 60_000)
+  trendTimer = window.setInterval(() => {
+    void loadTrends(false)
+    void loadStability(false)
+  }, 60_000)
 })
 
 onBeforeUnmount(() => {
@@ -293,9 +404,10 @@ onBeforeUnmount(() => {
             {{ wsConnected ? '实时连接' : '正在重连' }}
           </el-tag>
         </div>
-        <p>V0.7 · 实时状态 + 24 小时在线率 / 录像完整率趋势</p>
+        <p>V0.7 · 实时状态 + 24h 趋势 + 24h/72h 稳定性压测验收</p>
       </div>
       <div class="head-actions">
+        <el-button @click="loadStability()" :loading="stabilityLoading">刷新验收</el-button>
         <el-button @click="loadTrends()" :loading="trendLoading">刷新趋势</el-button>
         <el-button @click="loadSnapshot">立即刷新</el-button>
         <el-button @click="goBack">返回主界面</el-button>
@@ -344,6 +456,64 @@ onBeforeUnmount(() => {
           <el-card shadow="never"><div class="metric">{{ trends.overall.samples }}</div><div class="metric-label">24h 健康采样点</div></el-card>
         </el-col>
       </el-row>
+
+      <el-card v-if="stability" class="section-gap" shadow="never" v-loading="stabilityLoading">
+        <template #header>
+          <div class="card-head">
+            <div class="title-row compact">
+              <strong>稳定性压测验收</strong>
+              <el-tag size="large" :type="verdictType(stability.overall.verdict)">
+                {{ verdictLabel(stability.overall.verdict) }}
+              </el-tag>
+            </div>
+            <el-radio-group v-model="stabilityWindow" size="small" @change="onStabilityWindowChange">
+              <el-radio-button :value="24">24 小时</el-radio-button>
+              <el-radio-button :value="72">72 小时</el-radio-button>
+            </el-radio-group>
+          </div>
+        </template>
+
+        <div class="acceptance-grid">
+          <div><span>通过摄像头</span><strong>{{ stability.overall.passed_cameras }} / {{ stability.overall.monitored_cameras }}</strong></div>
+          <div><span>FFmpeg 异常</span><strong :class="{ danger: stability.overall.ffmpeg_failures > 0 }">{{ stability.overall.ffmpeg_failures }}</strong></div>
+          <div><span>连续失败事件</span><strong :class="{ danger: stability.overall.failure_streaks > 0 }">{{ stability.overall.failure_streaks }}</strong></div>
+          <div><span>断流次数</span><strong>{{ stability.overall.outage_count }}</strong></div>
+          <div><span>最长单次断流</span><strong :class="{ danger: stability.overall.longest_offline_seconds > stability.criteria.max_longest_outage_seconds }">{{ formatDuration(stability.overall.longest_offline_seconds) }}</strong></div>
+          <div><span>累计断流</span><strong>{{ formatDuration(stability.overall.total_offline_seconds) }}</strong></div>
+        </div>
+
+        <div class="criteria-note">
+          验收线：采样覆盖率 ≥ {{ stability.criteria.min_sample_coverage }}%，在线率 ≥ {{ stability.criteria.min_online_rate }}%，录像完整率 ≥ {{ stability.criteria.min_recording_completeness }}%，最长单次断流 ≤ {{ stability.criteria.max_longest_outage_seconds }} 秒，连续失败事件 = 0，FFmpeg 异常 ≤ {{ stability.criteria.max_ffmpeg_failures }} 次。
+        </div>
+
+        <el-table :data="monitoredStabilityCameras" stripe empty-text="暂无自动录像摄像头" class="acceptance-table">
+          <el-table-column prop="name" label="摄像头" min-width="150" fixed="left" />
+          <el-table-column label="结果" width="95">
+            <template #default="{ row }"><el-tag :type="verdictType(row.verdict)">{{ verdictLabel(row.verdict) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="采样覆盖" width="110" sortable :sort-method="sortStabilityCoverage">
+            <template #default="{ row }">{{ formatRate(row.sample_coverage) }}</template>
+          </el-table-column>
+          <el-table-column label="在线率" width="110" sortable :sort-method="sortStabilityOnline">
+            <template #default="{ row }"><el-tag :type="rateType(row.online_rate)">{{ formatRate(row.online_rate) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="录像完整率" width="125" sortable :sort-method="sortStabilityCompleteness">
+            <template #default="{ row }"><el-tag :type="rateType(row.recording_completeness)">{{ formatRate(row.recording_completeness) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column prop="ffmpeg_failures" label="FFmpeg异常" width="105" sortable />
+          <el-table-column prop="max_consecutive_failures" label="最大连续失败" width="115" sortable />
+          <el-table-column prop="outage_count" label="断流次数" width="95" sortable />
+          <el-table-column label="最长断流" width="115" sortable :sort-method="(a: StabilityCamera, b: StabilityCamera) => a.longest_offline_seconds - b.longest_offline_seconds">
+            <template #default="{ row }">{{ formatDuration(row.longest_offline_seconds) }}</template>
+          </el-table-column>
+          <el-table-column label="当前离线" width="115">
+            <template #default="{ row }"><span :class="{ danger: row.current_offline_seconds > 0 }">{{ row.current_offline_seconds > 0 ? formatDuration(row.current_offline_seconds) : '-' }}</span></template>
+          </el-table-column>
+          <el-table-column label="原因" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.reasons.length ? row.reasons.join('；') : '-' }}</template>
+          </el-table-column>
+        </el-table>
+      </el-card>
 
       <el-row :gutter="14" class="section-gap">
         <el-col :xs="24" :md="12">
@@ -461,6 +631,7 @@ onBeforeUnmount(() => {
       <div class="snapshot-time">
         实时快照：{{ formatStartedAt(snapshot.generated_at) }}
         <template v-if="trends"> · 趋势统计：{{ formatStartedAt(trends.generated_at) }}</template>
+        <template v-if="stability"> · 验收统计：{{ formatStartedAt(stability.generated_at) }}</template>
       </div>
     </template>
   </div>
@@ -475,6 +646,7 @@ onBeforeUnmount(() => {
 .health-page { max-width: 1500px; margin: 0 auto; padding: 28px 24px 60px; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 18px; }
 .title-row { display: flex; align-items: center; gap: 12px; }
+.title-row.compact { gap: 10px; }
 h2 { margin: 0; }
 p { margin: 8px 0 0; color: #909399; }
 .head-actions { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -488,6 +660,12 @@ p { margin: 8px 0 0; color: #909399; }
 .stats-grid div { display: flex; flex-direction: column; gap: 7px; }
 .stats-grid span { color: #909399; font-size: 12px; }
 .stats-grid strong { font-size: 24px; }
+.acceptance-grid { display: grid; grid-template-columns: repeat(6, minmax(120px, 1fr)); gap: 14px; }
+.acceptance-grid div { border: 1px solid #ebeef5; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 8px; }
+.acceptance-grid span { color: #909399; font-size: 12px; }
+.acceptance-grid strong { font-size: 20px; }
+.criteria-note { margin-top: 14px; padding: 10px 12px; background: #f5f7fa; border-radius: 6px; color: #606266; font-size: 12px; line-height: 1.7; }
+.acceptance-table { margin-top: 14px; }
 .disk-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 18px; margin-top: 18px; color: #606266; font-size: 13px; }
 .trend-strip { display: flex; align-items: flex-end; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; min-height: 155px; }
 .trend-column { flex: 1 0 42px; min-width: 42px; display: flex; flex-direction: column; align-items: center; gap: 7px; }
@@ -495,8 +673,13 @@ p { margin: 8px 0 0; color: #909399; }
 .trend-well { width: 22px; height: 112px; background: #f0f2f5; border-radius: 4px; overflow: hidden; display: flex; align-items: flex-end; }
 .trend-fill { width: 100%; min-height: 2px; background: #67c23a; transition: height 0.2s ease; }
 .snapshot-time { text-align: right; color: #909399; font-size: 12px; margin-top: 12px; }
+@media (max-width: 1180px) {
+  .acceptance-grid { grid-template-columns: repeat(3, 1fr); }
+}
 @media (max-width: 760px) {
   .page-head { flex-direction: column; }
+  .card-head { align-items: flex-start; flex-direction: column; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .acceptance-grid { grid-template-columns: repeat(2, 1fr); }
 }
 </style>
