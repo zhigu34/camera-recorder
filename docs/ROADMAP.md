@@ -1,5 +1,9 @@
 # 版本路线
 
+> 当前开发版本：V0.7 稳定性与实时状态版。
+>
+> 原路线中的部分能力已经提前完成，包括 OpenList/115 上传、邮件掉线告警、SQLite 系统设置、批量添加摄像头和实时预览。
+
 ## V0.1 技术验证版
 
 目标：证明核心录像链路稳定。
@@ -26,9 +30,33 @@
 - 自动重连 / 指数退避
 - 独立日志
 - SegmentProcessor 队列
-- WebSocket 状态推送
 
 验收：10 路同时录像 24 小时；任意一路断线不影响其他路，恢复后自动继续录像。
+
+## V0.7 稳定性与实时状态版（当前）
+
+目标：让系统能够直接回答“现在是否健康”和“过去 24 小时是否稳定”，并为 24h / 72h 多路压测提供可观测性。
+
+### 已完成
+
+- `GET /api/health/summary` 健康快照
+- `/ws/status` WebSocket 每 2 秒实时推送
+- 系统健康页面
+- 服务运行时间
+- 当前录像 / 重连 / 异常摄像头统计
+- 每路 Recorder 重连、时间戳和网络警告统计
+- 最近 24h 录像片段、异常片段和失败片段统计
+- 上传队列状态汇总
+- 磁盘使用率和健康状态
+
+### 下一步
+
+- 10 路 24h / 72h 稳定性压测
+- 24h 健康趋势持久化与图表
+- 摄像头在线率 / 录像完整率
+- FFmpeg 重启率和连续失败识别
+- WebSocket 推送扩展到主 Dashboard、上传和事件中心
+- 磁盘紧急清理策略与清理审计
 
 ## V1.0 正式可用版
 
@@ -42,7 +70,7 @@
 - 磁盘统计 / 告警
 - 启动恢复
 - Graceful Shutdown
-- macOS launchd / Linux systemd
+- Linux systemd / Docker Compose 部署完善
 
 ## V1.1 稳定性增强
 
@@ -56,15 +84,21 @@
 
 ## V1.2 115 云端归档
 
+当前核心能力已提前完成：
+
 - UploadManager
 - UploadTask
-- 115 Provider
+- OpenList WebDAV Provider
 - 自动上传 / 失败重试
 - 上传幂等
-- 本地保留 24/48h
+- 本地保留时间
 - 上传成功后自动清理
 
+后续继续补充上传长期失败告警和更完整的归档统计。
+
 ## V1.3 录像浏览
+
+下一阶段重点功能。
 
 - 日期浏览
 - 摄像头时间线
@@ -74,16 +108,19 @@
 
 ## V1.4 告警
 
-- 摄像头离线
+当前已完成摄像头离线邮件告警和恢复通知，后续补齐：
+
 - 连续录像失败
 - 磁盘不足
 - 上传长期失败
-- Webhook / 企业微信 / Telegram / 邮件
+- Webhook / 企业微信 / Telegram
 - 告警去重、恢复通知、冷却
 
 ## V2.0 NVR Lite
 
-- 实时预览
+实时预览已经提前实现，后续重点：
+
+- 1 / 4 / 9 宫格实时预览
 - 完整时间轴
 - 多用户 / RBAC
 - 摄像头分组
@@ -92,25 +129,13 @@
 - Prometheus Metrics
 - 远程管理
 
-## 开发顺序
+## 当前开发顺序
 
-1. Database / Camera
-2. RTSP Probe
-3. FFmpegCommandBuilder
-4. CameraWorker
-5. timestamp reconstruct
-6. continuous segment
-7. SegmentProcessor
-8. Remux
-9. Health Check
-10. RecorderManager
-11. Auto Reconnect
-12. WebSocket
-13. Frontend Camera Management
-14. Dashboard
-15. Recording Management
-16. StorageManager
-17. Event Center
-18. 115 Upload
-19. Cleanup
-20. Timeline / Playback
+1. V0.7 健康快照与 WebSocket
+2. 10 路 24h / 72h 稳定性验证
+3. 健康趋势 / 在线率 / 完整率
+4. 录像时间线与 Web 回放
+5. 磁盘紧急清理
+6. 告警补齐
+7. 前端整体路由 / Tab / 导航架构升级
+8. 多画面实时预览
