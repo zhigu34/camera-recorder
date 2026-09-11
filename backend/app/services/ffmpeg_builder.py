@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.services.camera_probe import build_rtsp_url
+from app.services.system_settings import RuntimeSettings
 
 
 @dataclass(slots=True)
@@ -47,7 +48,11 @@ def _audio_setts(camera: CameraRuntimeConfig) -> str | None:
     )
 
 
-def build_record_command(camera: CameraRuntimeConfig, output_dir: Path) -> list[str]:
+def build_record_command(
+    camera: CameraRuntimeConfig,
+    output_dir: Path,
+    runtime: RuntimeSettings,
+) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     rtsp_url = build_rtsp_url(
         camera.ip,
@@ -66,7 +71,7 @@ def build_record_command(camera: CameraRuntimeConfig, output_dir: Path) -> list[
         "-rtsp_transport",
         "tcp",
         "-timeout",
-        str(settings.rtsp_timeout_us),
+        str(runtime.rtsp_timeout_us),
     ]
 
     if camera.timestamp_mode == "wallclock":
@@ -97,14 +102,14 @@ def build_record_command(camera: CameraRuntimeConfig, output_dir: Path) -> list[
         "-segment_format",
         "matroska",
         "-segment_time",
-        str(settings.segment_duration_seconds),
+        str(runtime.segment_duration_seconds),
         "-reset_timestamps",
         "1",
         "-strftime",
         "1",
     ]
 
-    if settings.align_segments_to_clock:
+    if runtime.align_segments_to_clock:
         command += ["-segment_atclocktime", "1"]
 
     command += [str(output_dir / "%Y-%m-%d_%H-%M-%S.mkv")]
