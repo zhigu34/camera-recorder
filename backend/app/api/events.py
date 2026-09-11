@@ -66,6 +66,11 @@ async def events_websocket(websocket: WebSocket) -> None:
                 await websocket.send_json({"type": "event.created", "data": payload})
                 last_id = event.id
 
-            await asyncio.sleep(1.0)
+            try:
+                message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+            except TimeoutError:
+                continue
+            if message.get("type") == "websocket.disconnect":
+                return
     except (WebSocketDisconnect, RuntimeError):
         return
