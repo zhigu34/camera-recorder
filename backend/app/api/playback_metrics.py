@@ -7,6 +7,6 @@ router = APIRouter(prefix="/api/playback", tags=["playback"])
 
 @router.get("/metrics")
 async def playback_metrics() -> dict:
-    """Return in-memory playback warmup and first-byte quality metrics."""
+    """Return in-memory prefetch probe and backend playback response metrics."""
 
     return playback_prefetch_manager.snapshot()
