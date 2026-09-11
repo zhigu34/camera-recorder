@@ -8,8 +8,17 @@ PreviewStream = Literal["auto", "main", "sub"]
 
 
 class RecordingWindow(BaseModel):
+    days: list[int] = Field(default_factory=lambda: list(range(7)), min_length=1, max_length=7)
     start: str
     end: str
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, value: list[int]) -> list[int]:
+        normalized = sorted(set(value))
+        if not normalized or any(day < 0 or day > 6 for day in normalized):
+            raise ValueError("days must contain weekday numbers from 0 to 6")
+        return normalized
 
     @field_validator("start", "end")
     @classmethod
@@ -42,7 +51,7 @@ class CameraBase(BaseModel):
     enabled: bool = True
     auto_record: bool = False
     recording_schedule_enabled: bool = False
-    recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=16)
+    recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=32)
     timestamp_mode: TimestampMode = "reconstruct"
 
     @model_validator(mode="after")
@@ -68,6 +77,32 @@ class CameraBatchResult(BaseModel):
     skipped_names: list[str] = Field(default_factory=list)
 
 
+class RecordingScheduleBatchApply(BaseModel):
+    camera_ids: list[int] = Field(min_length=1, max_length=200)
+    auto_record: bool = True
+    recording_schedule_enabled: bool = True
+    recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=32)
+
+    @field_validator("camera_ids")
+    @classmethod
+    def validate_camera_ids(cls, value: list[int]) -> list[int]:
+        normalized = list(dict.fromkeys(value))
+        if any(camera_id <= 0 for camera_id in normalized):
+            raise ValueError("camera_ids must contain positive integers")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.recording_schedule_enabled and not self.recording_schedule:
+            raise ValueError("recording schedule requires at least one time window")
+        return self
+
+
+class RecordingScheduleBatchResult(BaseModel):
+    updated: int
+    camera_ids: list[int]
+
+
 class CameraUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=128)
     ip: str | None = Field(default=None, min_length=1, max_length=255)
@@ -79,7 +114,7 @@ class CameraUpdate(BaseModel):
     enabled: bool | None = None
     auto_record: bool | None = None
     recording_schedule_enabled: bool | None = None
-    recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=16)
+    recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=32)
     timestamp_mode: TimestampMode | None = None
 
 
