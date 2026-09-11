@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.api.cameras import router as cameras_router
+from app.api.events import router as events_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
 from app.api.uploads import router as uploads_router
@@ -17,6 +18,7 @@ from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import segment_processor
+from app.services.storage_manager import storage_snapshot
 from app.services.upload_manager import upload_manager
 
 
@@ -83,6 +85,7 @@ app.include_router(cameras_router)
 app.include_router(recordings_router)
 app.include_router(recorder_router)
 app.include_router(uploads_router)
+app.include_router(events_router)
 
 
 @app.get("/health")
@@ -103,4 +106,10 @@ async def system_status() -> dict:
             "active": upload_manager.active,
             "provider": "openlist_webdav",
         },
+        "storage": storage_snapshot(),
     }
+
+
+@app.get("/api/system/storage")
+async def system_storage() -> dict:
+    return storage_snapshot()
