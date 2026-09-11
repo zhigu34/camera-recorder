@@ -46,8 +46,10 @@ def _as_utc(value: datetime) -> datetime:
 
 def _bucket_start(value: datetime, minutes: int) -> datetime:
     value = _as_utc(value)
-    minute = value.minute - (value.minute % minutes)
-    return value.replace(minute=minute, second=0, microsecond=0)
+    bucket_seconds = minutes * 60
+    epoch = int(value.timestamp())
+    bucket_epoch = epoch - (epoch % bucket_seconds)
+    return datetime.fromtimestamp(bucket_epoch, tz=timezone.utc)
 
 
 async def health_snapshot() -> dict[str, Any]:
@@ -246,7 +248,11 @@ async def health_trends(*, hours: int = 24, bucket_minutes: int = 60) -> dict[st
     monitored_cameras = 0
 
     for camera in cameras:
-        camera_samples = [sample for sample in samples_by_camera.get(camera.id, []) if sample.expected_recording]
+        camera_samples = [
+            sample
+            for sample in samples_by_camera.get(camera.id, [])
+            if sample.expected_recording
+        ]
         expected_samples = len(camera_samples)
         online_samples = sum(1 for sample in camera_samples if sample.online)
         segments, complete_segments = recordings_by_camera.get(camera.id, (0, 0))
