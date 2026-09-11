@@ -21,13 +21,16 @@ def _compact(value: str | None) -> str:
 
 
 def _brand(manufacturer: str | None) -> str:
-    value = _compact(manufacturer)
+    raw = (manufacturer or "").strip().upper()
+    if "海康" in raw:
+        return "hikvision"
+    if "大华" in raw:
+        return "dahua"
+
+    value = _compact(raw)
     aliases = {
         "HIKVISION": "hikvision",
-        "海康": "hikvision",
-        "海康威视": "hikvision",
         "DAHUA": "dahua",
-        "大华": "dahua",
         "REOLINK": "reolink",
         "UBIQUITI": "unifi",
         "UNIFI": "unifi",
@@ -35,7 +38,7 @@ def _brand(manufacturer: str | None) -> str:
         "TAPO": "tplink",
     }
     for alias, normalized in aliases.items():
-        if _compact(alias) in value:
+        if alias in value:
             return normalized
     return value.lower()
 
