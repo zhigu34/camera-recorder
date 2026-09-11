@@ -33,9 +33,10 @@ Camera Recorder 一键部署脚本
 
 可选环境变量:
   DEPLOY_AUTO_PULL=0       缺少基础镜像时不自动 docker pull（默认 1）
-  FFMPEG_DOWNLOAD_BASE    覆盖 FFmpeg 下载地址
-  GITHUB_PROXY_PROMPT=0   GitHub 下载时不询问代理
-  GITHUB_DOWNLOAD_PROXY   直接指定本次 GitHub 下载代理
+  DEPLOY_BUILD_VERBOSE=1   显示完整 Docker 构建输出（默认仅失败时显示错误摘要）
+  FFMPEG_DOWNLOAD_BASE     覆盖 FFmpeg 下载地址
+  GITHUB_PROXY_PROMPT=0    GitHub 下载时不询问代理
+  GITHUB_DOWNLOAD_PROXY    直接指定本次 GitHub 下载代理
 EOF
 }
 
@@ -234,6 +235,25 @@ http_ok() {
   fi
 }
 
+show_build_errors() {
+  local log_file="$1" errors
+  errors="$(grep -Ein \
+    '(^|[^[:alpha:]])(error|fatal|failed|failure|timeout|timed out|exit code|non-zero|unable to|could not|connection refused|network is unreachable)([^[:alpha:]]|$)' \
+    "$log_file" 2>/dev/null | tail -n 80 || true)"
+
+  if [ -n "$errors" ]; then
+    printf '\n' >&2
+    warn "构建错误摘要："
+    printf '%s\n' "$errors" >&2
+    printf '\n' >&2
+  else
+    printf '\n' >&2
+    warn "未匹配到标准错误行，显示构建日志最后 60 行："
+    tail -n 60 "$log_file" >&2 2>/dev/null || true
+    printf '\n' >&2
+  fi
+}
+
 show_docker_networks() {
   warn "当前 Docker 网络与子网："
   docker network ls --format '  {{.ID}}  {{.Driver}}  {{.Name}}' >&2 || true
@@ -400,15 +420,23 @@ if [ "$NO_BUILD" = "0" ]; then
   fi
   BUILD_CMD+=(backend frontend)
 
-  info "开始构建 backend/frontend..."
+  mkdir -p logs
+  : > "$BUILD_LOG"
+  info "开始构建 backend/frontend（默认静默，完整日志: $BUILD_LOG）..."
   set +e
-  "${BUILD_CMD[@]}" 2>&1 | tee "$BUILD_LOG"
-  BUILD_RC=${PIPESTATUS[0]}
+  if [ "${DEPLOY_BUILD_VERBOSE:-0}" = "1" ]; then
+    "${BUILD_CMD[@]}" 2>&1 | tee "$BUILD_LOG"
+    BUILD_RC=${PIPESTATUS[0]}
+  else
+    "${BUILD_CMD[@]}" >"$BUILD_LOG" 2>&1
+    BUILD_RC=$?
+  fi
   set -e
   if [ "$BUILD_RC" -ne 0 ]; then
     grep -q "auth.docker.io" "$BUILD_LOG" 2>/dev/null && warn "检测到 Docker Hub 网络错误"
     grep -Eq "mirrors\.tuna|npmmirror|pypi" "$BUILD_LOG" 2>/dev/null && warn "构建失败发生在依赖源阶段"
-    fail "镜像构建失败，日志: $BUILD_LOG"
+    show_build_errors "$BUILD_LOG"
+    fail "镜像构建失败，完整日志: $BUILD_LOG"
   fi
   ok "backend/frontend 镜像构建完成"
 else
