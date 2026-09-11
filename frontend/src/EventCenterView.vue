@@ -21,6 +21,8 @@ interface EventItem {
   created_at: string
 }
 
+type SocketState = 'connecting' | 'connected' | 'disconnected'
+
 const emit = defineEmits<{
   (event: 'open-cameras'): void
   (event: 'open-recordings'): void
@@ -37,7 +39,11 @@ const categoryFilter = ref('all')
 const cameraFilter = ref<number | 'all'>('all')
 const detailVisible = ref(false)
 const selectedEvent = ref<EventItem | null>(null)
-let timer: number | null = null
+const socketState = ref<SocketState>('disconnected')
+let eventCursor: number | null = null
+let reconnectTimer: number | null = null
+let socket: WebSocket | null = null
+let mounted = false
 
 const categories = computed(() => Array.from(new Set(events.value.map((item) => item.category).filter(Boolean))).sort())
 const recent24h = computed(() => {
@@ -50,6 +56,7 @@ const recent24h = computed(() => {
 const warningCount = computed(() => events.value.filter((item) => ['warning', 'warn'].includes(item.level.toLowerCase())).length)
 const errorCount = computed(() => events.value.filter((item) => ['error', 'critical', 'fatal'].includes(item.level.toLowerCase())).length)
 const affectedCameras = computed(() => new Set(events.value.map((item) => item.camera_id).filter((id): id is number => typeof id === 'number')).size)
+const liveLabel = computed(() => socketState.value === 'connected' ? 'WebSocket 实时事件流' : socketState.value === 'connecting' ? '实时事件流连接中' : '实时事件流重连中')
 
 const filteredEvents = computed(() => {
   const needle = keyword.value.trim().toLowerCase()
@@ -136,6 +143,66 @@ function relatedAction(item: EventItem) {
   return { label: '查看系统健康', action: () => emit('open-health') }
 }
 
+function wsUrl() {
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const cursor = eventCursor === null ? '' : `?after_id=${eventCursor}`
+  return `${scheme}//${window.location.host}/ws/events${cursor}`
+}
+
+function mergeEvent(item: EventItem) {
+  if (events.value.some((existing) => existing.id === item.id)) return
+  eventCursor = eventCursor === null ? item.id : Math.max(eventCursor, item.id)
+  events.value = [item, ...events.value].sort((a, b) => b.id - a.id).slice(0, 500)
+}
+
+function closeSocket() {
+  if (!socket) return
+  const current = socket
+  socket = null
+  current.onopen = null
+  current.onmessage = null
+  current.onerror = null
+  current.onclose = null
+  try { current.close() } catch { /* already closed */ }
+}
+
+function scheduleReconnect() {
+  if (!mounted || reconnectTimer !== null) return
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null
+    connectEventsSocket()
+  }, 2000)
+}
+
+function connectEventsSocket() {
+  closeSocket()
+  if (!mounted) return
+  socketState.value = 'connecting'
+  const ws = new WebSocket(wsUrl())
+  socket = ws
+  ws.onopen = () => {
+    if (socket === ws) socketState.value = 'connected'
+  }
+  ws.onmessage = (event: MessageEvent) => {
+    if (socket !== ws || typeof event.data !== 'string') return
+    try {
+      const message = JSON.parse(event.data) as { type?: string; data?: EventItem }
+      if (message.type === 'event.created' && message.data) mergeEvent(message.data)
+    } catch {
+      // Ignore unknown event frames.
+    }
+  }
+  ws.onerror = () => {
+    if (socket === ws) socketState.value = 'disconnected'
+  }
+  ws.onclose = () => {
+    if (socket !== ws) return
+    socket = null
+    socketState.value = 'disconnected'
+    scheduleReconnect()
+  }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -145,6 +212,7 @@ async function load() {
     ])
     events.value = eventRes.data
     cameras.value = cameraRes.data
+    eventCursor = eventRes.data.reduce((maxId, item) => Math.max(maxId, item.id), 0)
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '事件加载失败')
   } finally {
@@ -152,21 +220,31 @@ async function load() {
   }
 }
 
+async function reload() {
+  await load()
+  connectEventsSocket()
+}
+
 onMounted(() => {
-  void load()
-  timer = window.setInterval(() => void load(), 15000)
+  mounted = true
+  void (async () => {
+    await load()
+    connectEventsSocket()
+  })()
 })
 
 onBeforeUnmount(() => {
-  if (timer !== null) window.clearInterval(timer)
+  mounted = false
+  closeSocket()
+  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
 })
 </script>
 
 <template>
   <div class="events-page" v-loading="loading">
     <div class="actions-row">
-      <div class="live-note"><span class="live-dot"></span>最近 500 条事件 · 每 15 秒自动刷新</div>
-      <el-button :icon="Refresh" @click="load">刷新</el-button>
+      <div class="live-note"><span class="live-dot" :class="{ offline: socketState !== 'connected' }"></span>最近 500 条事件 · {{ liveLabel }}</div>
+      <el-button :icon="Refresh" @click="reload">刷新</el-button>
     </div>
 
     <div class="metrics-grid">
@@ -251,7 +329,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .events-page{padding:18px 20px 28px;color:var(--nvr-text)}
-.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.live-note{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:12px}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-green);box-shadow:0 0 0 4px rgba(46,204,138,.08)}
+.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.live-note{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:12px}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-green);box-shadow:0 0 0 4px rgba(46,204,138,.08)}.live-dot.offline{background:var(--nvr-yellow);box-shadow:0 0 0 4px rgba(240,180,65,.08)}
 .metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.metric-card{appearance:none;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 16px;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px;cursor:pointer;text-align:left}.metric-card:hover,.metric-card.active{border-color:rgba(76,141,255,.45);background:var(--nvr-surface-2)}.metric-card span{font-size:11px;color:var(--nvr-muted)}.metric-card strong{font-size:24px;font-weight:650;line-height:1}.metric-card small{font-size:10px;color:#647387}.metric-card.warning strong{color:var(--nvr-yellow)}.metric-card.danger strong{color:var(--nvr-red)}
 .filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:10px;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.search-input{min-width:280px;flex:1}.filter-select{width:126px}.camera-select{width:170px}.result-count{margin-left:auto;color:var(--nvr-muted);font-size:11px;white-space:nowrap}
 .table-panel{overflow:hidden;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.relation{color:#9db8df;font-size:11px}.muted{color:var(--nvr-muted)}.open-arrow{color:#647387;font-size:20px}.table-panel :deep(.el-table__row){cursor:pointer}
