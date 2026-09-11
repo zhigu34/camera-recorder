@@ -1,0 +1,51 @@
+name: camera-recorder
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: camera-recorder-backend
+    init: true
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      CAMREC_APP_NAME: ${CAMREC_APP_NAME:-Camera Recorder}
+      CAMREC_SECRET_KEY: ${CAMREC_SECRET_KEY:-camera-recorder-local-change-me}
+      CAMREC_DATABASE_URL: sqlite+aiosqlite:////app/data/camera.db
+      CAMREC_RECORDINGS_DIR: /app/recordings
+      CAMREC_STAGING_DIR: /app/staging
+      CAMREC_FAILED_DIR: /app/failed
+      CAMREC_LOGS_DIR: /app/logs
+      CAMREC_SEGMENT_DURATION_SECONDS: ${CAMREC_SEGMENT_DURATION_SECONDS:-600}
+      CAMREC_REMUX_CONCURRENCY: ${CAMREC_REMUX_CONCURRENCY:-2}
+      CAMREC_RTSP_TIMEOUT_US: ${CAMREC_RTSP_TIMEOUT_US:-5000000}
+      CAMREC_AUTO_START_ENABLED: ${CAMREC_AUTO_START_ENABLED:-true}
+      CAMREC_ALIGN_SEGMENTS_TO_CLOCK: ${CAMREC_ALIGN_SEGMENTS_TO_CLOCK:-true}
+    volumes:
+      - ./data:/app/data
+      - ./recordings:/app/recordings
+      - ./staging:/app/staging
+      - ./failed:/app/failed
+      - ./logs:/app/logs
+    ports:
+      - "${CAMREC_API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: camera-recorder-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${CAMREC_WEB_PORT:-8080}:80"
+
