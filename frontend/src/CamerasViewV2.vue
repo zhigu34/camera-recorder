@@ -34,19 +34,11 @@ interface Camera {
   fps_den?: number | null
   audio_codec?: string | null
   status: string
+  connectivity_status: string
+  recorder_state: string
+  schedule_state: string
   last_probe_at?: string | null
   last_online_at?: string | null
-}
-
-interface RecorderRuntime {
-  camera_id: number
-  state: string
-  pid?: number | null
-  last_error?: string | null
-}
-
-interface SystemStatus {
-  recorders?: RecorderRuntime[]
 }
 
 type FilterKey = 'all' | 'online' | 'issue' | 'recording'
@@ -58,7 +50,6 @@ const emit = defineEmits<{
 }>()
 
 const cameras = ref<Camera[]>([])
-const systemStatus = ref<SystemStatus | null>(null)
 const loading = ref(false)
 const query = ref('')
 const filter = ref<FilterKey>('all')
@@ -94,42 +85,22 @@ function apiError(error: unknown, fallback: string) {
   return fallback
 }
 
-function runtime(cameraId: number) {
-  return systemStatus.value?.recorders?.find((item) => item.camera_id === cameraId)
+function cameraById(cameraId: number) {
+  return cameras.value.find((item) => item.id === cameraId)
 }
 
 function runtimeState(cameraId: number) {
-  return runtime(cameraId)?.state || 'STOPPED'
+  return cameraById(cameraId)?.recorder_state || 'STOPPED'
 }
 
 function isRecording(cameraId: number) {
   return runtimeState(cameraId) === 'RECORDING'
 }
 
-function latestProbeSucceeded(camera: Camera): boolean | null {
-  if (!camera.last_probe_at) return null
-  const probeAt = new Date(camera.last_probe_at).getTime()
-  if (Number.isNaN(probeAt)) return null
-  if (!camera.last_online_at) return false
-  const onlineAt = new Date(camera.last_online_at).getTime()
-  if (Number.isNaN(onlineAt)) return false
-  return onlineAt >= probeAt
-}
-
 function health(camera: Camera): CameraHealth {
   if (!camera.enabled) return 'disabled'
-  const state = runtimeState(camera.id)
-  if (['RECORDING', 'STARTING', 'RECONNECTING'].includes(state)) return 'online'
-
-  const probeSucceeded = latestProbeSucceeded(camera)
-  if (probeSucceeded === true) return 'online'
-  if (probeSucceeded === false) return 'offline'
-
-  // Legacy fallback for cameras that pre-date probe timestamps. camera.status is
-  // also used by recording scheduling, so values such as "scheduled" must not
-  // be interpreted as a connectivity failure.
-  if (camera.status === 'probe_failed' || camera.status === 'offline') return 'offline'
-  if (camera.status === 'online' || camera.status === 'recording') return 'online'
+  if (camera.connectivity_status === 'online') return 'online'
+  if (camera.connectivity_status === 'offline') return 'offline'
   return 'unknown'
 }
 
@@ -142,10 +113,11 @@ function healthLabel(camera: Camera) {
 }
 
 function runtimeLabel(camera: Camera) {
-  const state = runtimeState(camera.id)
+  const state = camera.recorder_state || 'STOPPED'
   if (state === 'RECORDING') return '录像中'
   if (state === 'STARTING') return '启动中'
   if (state === 'RECONNECTING') return '重连中'
+  if (state === 'STOPPING') return '停止中'
   return '未录像'
 }
 
@@ -164,10 +136,23 @@ function videoSummary(camera: Camera) {
   return parts.length ? parts.join(' · ') : '尚未获取视频参数'
 }
 
-function scheduleLabel(camera: Camera) {
+function schedulePolicyLabel(camera: Camera) {
   if (!camera.auto_record) return '手动录像'
   if (camera.recording_schedule_enabled) return '按计划录像'
   return '自动录像'
+}
+
+function scheduleStateLabel(camera: Camera) {
+  const state = camera.schedule_state
+  if (state === 'manual_override') return '手动接管'
+  if (state === 'manual_paused') return '手动暂停'
+  if (state === 'in_window') return '计划时段内'
+  if (state === 'scheduled') return '等待计划'
+  if (state === 'automatic') return '全天自动'
+  if (state === 'global_disabled') return '全局自动关闭'
+  if (state === 'probe_required') return '需要检测'
+  if (state === 'error') return '计划异常'
+  return '未启用'
 }
 
 function formatTime(value?: string | null) {
@@ -204,12 +189,8 @@ const previewSrc = computed(() => selectedCamera.value
 async function loadData(showLoading = true) {
   if (showLoading) loading.value = true
   try {
-    const [cameraRes, statusRes] = await Promise.all([
-      axios.get<Camera[]>('/api/cameras'),
-      axios.get<SystemStatus>('/api/system/status'),
-    ])
-    cameras.value = cameraRes.data
-    systemStatus.value = statusRes.data
+    const { data } = await axios.get<Camera[]>('/api/cameras')
+    cameras.value = data
     if (selectedCamera.value) {
       selectedCamera.value = cameras.value.find((item) => item.id === selectedCamera.value?.id) || null
       if (!selectedCamera.value) drawerVisible.value = false
@@ -417,7 +398,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="camera-signals">
-          <div><span>录像策略</span><b>{{ scheduleLabel(camera) }}</b></div>
+          <div><span>计划状态</span><b>{{ scheduleStateLabel(camera) }}</b></div>
           <div><span>子码流</span><b>{{ camera.sub_rtsp_path ? '已配置' : '未配置' }}</b></div>
           <div><span>时间戳</span><b>{{ camera.timestamp_mode }}</b></div>
         </div>
@@ -518,7 +499,7 @@ onBeforeUnmount(() => {
             <div><dt>分辨率</dt><dd>{{ selectedCamera.width && selectedCamera.height ? `${selectedCamera.width}×${selectedCamera.height}` : '-' }}</dd></div>
             <div><dt>帧率</dt><dd>{{ fps(selectedCamera) ? `${fps(selectedCamera)} FPS` : '-' }}</dd></div>
             <div><dt>音频</dt><dd>{{ selectedCamera.audio_codec?.toUpperCase() || '-' }}</dd></div>
-            <div><dt>录像策略</dt><dd>{{ scheduleLabel(selectedCamera) }}</dd></div>
+            <div><dt>录像策略</dt><dd>{{ schedulePolicyLabel(selectedCamera) }}</dd></div>
             <div><dt>时间戳模式</dt><dd>{{ selectedCamera.timestamp_mode }}</dd></div>
           </dl>
         </div>
@@ -526,8 +507,9 @@ onBeforeUnmount(() => {
         <div class="detail-section">
           <div class="detail-heading"><strong>状态</strong></div>
           <dl class="detail-grid">
-            <div><dt>运行状态</dt><dd>{{ runtimeState(selectedCamera.id) }}</dd></div>
-            <div><dt>摄像头状态</dt><dd>{{ selectedCamera.status || '-' }}</dd></div>
+            <div><dt>连接状态</dt><dd>{{ healthLabel(selectedCamera) }}</dd></div>
+            <div><dt>录像状态</dt><dd>{{ runtimeLabel(selectedCamera) }}</dd></div>
+            <div><dt>计划状态</dt><dd>{{ scheduleStateLabel(selectedCamera) }}</dd></div>
             <div><dt>最近检测</dt><dd>{{ formatTime(selectedCamera.last_probe_at) }}</dd></div>
             <div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div>
           </dl>
