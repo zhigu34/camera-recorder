@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
@@ -44,6 +44,9 @@ const form = reactive({
   clear_webdav_password: false,
   local_retention_hours: 48,
 })
+
+const retentionLabel = computed(() => form.local_retention_hours < 0 ? '永久保留' : `${form.local_retention_hours} 小时`)
+const rtspTimeoutSeconds = computed(() => `${(form.rtsp_timeout_us / 1_000_000).toFixed(1)} 秒`)
 
 function apply(data: SystemSettings) {
   Object.assign(form, data, {
@@ -96,106 +99,180 @@ async function save() {
   }
 }
 
-function back() {
-  window.location.href = '/'
-}
-
 onMounted(load)
 </script>
 
 <template>
-  <div class="page" v-loading="loading">
-    <div class="topbar">
+  <section class="settings-workspace" v-loading="loading">
+    <div class="settings-intro">
       <div>
-        <h2>系统设置</h2>
-        <div class="hint">运行时配置保存到 SQLite；.env 只保留部署参数和密钥。</div>
+        <strong>运行时配置</strong>
+        <span>配置写入 SQLite；部署参数和密钥仍由 .env 管理。</span>
       </div>
-      <el-button @click="back">返回主界面</el-button>
+      <el-button :loading="loading" @click="load">重新加载</el-button>
     </div>
 
-    <el-card>
-      <el-form label-width="190px" class="settings-form">
-        <el-divider content-position="left">基础</el-divider>
-        <el-form-item label="系统名称"><el-input v-model="form.app_name" /></el-form-item>
-        <el-form-item label="启动时自动恢复录像"><el-switch v-model="form.auto_start_enabled" /></el-form-item>
+    <div class="settings-status-strip">
+      <article>
+        <span>自动录像恢复</span>
+        <strong :class="form.auto_start_enabled ? 'state-ok' : 'state-muted'">{{ form.auto_start_enabled ? '已启用' : '已关闭' }}</strong>
+        <em>服务启动后的录像恢复策略</em>
+      </article>
+      <article>
+        <span>OpenList 归档</span>
+        <strong :class="form.upload_enabled ? 'state-ok' : 'state-muted'">{{ form.upload_enabled ? '自动上传' : '已关闭' }}</strong>
+        <em>{{ form.webdav_password_set ? '凭据已保存' : '未保存密码' }}</em>
+      </article>
+      <article>
+        <span>本地录像保留</span>
+        <strong>{{ retentionLabel }}</strong>
+        <em>归档成功后的本地保留策略</em>
+      </article>
+      <article>
+        <span>磁盘保护</span>
+        <strong>{{ form.storage_warning_percent }}% / {{ form.storage_critical_percent }}%</strong>
+        <em>告警 / 严重告警阈值</em>
+      </article>
+    </div>
 
-        <el-divider content-position="left">录像</el-divider>
-        <el-form-item label="切片时长">
-          <el-input-number v-model="form.segment_duration_seconds" :min="30" :max="86400" :step="60" />
-          <span class="unit">秒</span>
-          <span class="hint">修改后重启对应摄像头连接生效</span>
-        </el-form-item>
-        <el-form-item label="按整点对齐切片"><el-switch v-model="form.align_segments_to_clock" /></el-form-item>
-        <el-form-item label="RTSP 超时">
-          <el-input-number v-model="form.rtsp_timeout_us" :min="500000" :max="120000000" :step="500000" />
-          <span class="unit">微秒</span>
-        </el-form-item>
-        <el-form-item label="Remux 并发数"><el-input-number v-model="form.remux_concurrency" :min="1" :max="16" /></el-form-item>
-
-        <el-divider content-position="left">磁盘</el-divider>
-        <el-form-item label="磁盘告警阈值">
-          <el-input-number v-model="form.storage_warning_percent" :min="1" :max="99" />
-          <span class="unit">%</span>
-        </el-form-item>
-        <el-form-item label="磁盘严重告警阈值">
-          <el-input-number v-model="form.storage_critical_percent" :min="1" :max="100" />
-          <span class="unit">%</span>
-        </el-form-item>
-
-        <el-divider content-position="left">OpenList / 网盘归档</el-divider>
-        <el-alert class="upload-hint" type="info" :closable="false" show-icon>
-          OpenList 作为统一 WebDAV 入口，后端可以挂载任意 OpenList 支持的网盘或对象存储；这里不绑定具体网盘品牌。
-        </el-alert>
-        <el-form-item label="自动上传"><el-switch v-model="form.upload_enabled" /></el-form-item>
-        <el-form-item label="上传并发数"><el-input-number v-model="form.upload_concurrency" :min="1" :max="16" /></el-form-item>
-        <el-form-item label="最大重试次数"><el-input-number v-model="form.upload_retry_max" :min="1" :max="100" /></el-form-item>
-        <el-form-item label="本地保留时间">
-          <el-input-number v-model="form.local_retention_hours" :min="-1" :max="87600" />
-          <span class="unit">小时</span>
-          <span class="hint">-1 表示永不自动删除</span>
-        </el-form-item>
-        <el-form-item label="OpenList WebDAV 地址">
-          <el-input v-model="form.webdav_url" placeholder="http://openlist:5244/dav" />
-          <span class="hint block-hint">可填 OpenList WebDAV 根地址，也可直接指向某个挂载目录，例如 /dav/aliyun。</span>
-        </el-form-item>
-        <el-form-item label="远端归档目录">
-          <el-input v-model="form.webdav_root" placeholder="监控录像" />
-          <span class="hint block-hint">使用 WebDAV 根地址时，可写成“网盘挂载名/监控录像”；直接指向挂载目录时只需写“监控录像”。</span>
-        </el-form-item>
-        <el-form-item label="WebDAV 用户名"><el-input v-model="form.webdav_username" /></el-form-item>
-        <el-form-item label="WebDAV 密码">
-          <el-input
-            v-model="form.webdav_password"
-            type="password"
-            show-password
-            autocomplete="new-password"
-            :placeholder="form.webdav_password_set ? '已加密保存；留空保持不变' : '请输入 WebDAV 密码'"
-          />
-          <div class="password-actions" v-if="form.webdav_password_set">
-            <el-tag type="success" size="small">已加密保存</el-tag>
-            <el-checkbox v-model="form.clear_webdav_password">清除已保存密码</el-checkbox>
+    <el-form label-position="top" class="settings-grid">
+      <article class="settings-panel">
+        <div class="settings-panel-head">
+          <div><strong>基础设置</strong><span>控制系统标识与启动行为</span></div>
+          <el-tag size="small" effect="plain">SYSTEM</el-tag>
+        </div>
+        <div class="settings-fields">
+          <el-form-item label="系统名称">
+            <el-input v-model="form.app_name" />
+          </el-form-item>
+          <div class="switch-setting">
+            <div><strong>启动时自动恢复录像</strong><span>服务启动后按摄像头配置和录制计划恢复 Recorder。</span></div>
+            <el-switch v-model="form.auto_start_enabled" />
           </div>
-        </el-form-item>
+        </div>
+      </article>
 
-        <el-form-item>
-          <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
-          <el-button @click="load">重新加载</el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-  </div>
+      <article class="settings-panel">
+        <div class="settings-panel-head">
+          <div><strong>录像与媒体处理</strong><span>影响切片、RTSP 和 Remux 工作负载</span></div>
+          <el-tag size="small" type="warning" effect="plain">RECORDER</el-tag>
+        </div>
+        <div class="settings-fields settings-fields-grid">
+          <el-form-item label="切片时长">
+            <div class="number-field">
+              <el-input-number v-model="form.segment_duration_seconds" :min="30" :max="86400" :step="60" />
+              <span>秒</span>
+            </div>
+            <small>修改后重启对应摄像头连接生效。</small>
+          </el-form-item>
+          <el-form-item label="RTSP 超时">
+            <div class="number-field">
+              <el-input-number v-model="form.rtsp_timeout_us" :min="500000" :max="120000000" :step="500000" />
+              <span>微秒</span>
+            </div>
+            <small>当前约 {{ rtspTimeoutSeconds }}。</small>
+          </el-form-item>
+          <el-form-item label="Remux 并发数">
+            <el-input-number v-model="form.remux_concurrency" :min="1" :max="16" />
+            <small>并发越高，录像整理速度越快，但会增加 CPU / I/O 压力。</small>
+          </el-form-item>
+          <div class="switch-setting compact-switch">
+            <div><strong>按整点对齐切片</strong><span>便于按时间检索和跨日连续回放。</span></div>
+            <el-switch v-model="form.align_segments_to_clock" />
+          </div>
+        </div>
+      </article>
+
+      <article class="settings-panel">
+        <div class="settings-panel-head">
+          <div><strong>磁盘保护</strong><span>定义本地录像盘的容量风险边界</span></div>
+          <el-tag size="small" type="danger" effect="plain">STORAGE</el-tag>
+        </div>
+        <div class="storage-thresholds">
+          <el-form-item label="告警阈值">
+            <div class="number-field">
+              <el-input-number v-model="form.storage_warning_percent" :min="1" :max="99" />
+              <span>%</span>
+            </div>
+            <small>达到该占用率后进入 warning。</small>
+          </el-form-item>
+          <el-form-item label="严重告警阈值">
+            <div class="number-field">
+              <el-input-number v-model="form.storage_critical_percent" :min="1" :max="100" />
+              <span>%</span>
+            </div>
+            <small>达到该占用率后进入 critical。</small>
+          </el-form-item>
+        </div>
+        <div class="threshold-rail" aria-hidden="true">
+          <span class="warning-mark" :style="{ left: `${form.storage_warning_percent}%` }"></span>
+          <span class="critical-mark" :style="{ left: `${form.storage_critical_percent}%` }"></span>
+        </div>
+        <div class="threshold-legend"><span>0%</span><span class="warning-text">告警 {{ form.storage_warning_percent }}%</span><span class="critical-text">严重 {{ form.storage_critical_percent }}%</span><span>100%</span></div>
+      </article>
+
+      <article class="settings-panel archive-panel">
+        <div class="settings-panel-head">
+          <div><strong>OpenList / WebDAV 归档</strong><span>统一远端存储入口，不绑定具体网盘品牌</span></div>
+          <el-tag size="small" type="success" effect="plain">ARCHIVE</el-tag>
+        </div>
+
+        <div class="archive-banner">
+          <div><strong>{{ form.upload_enabled ? '自动归档已启用' : '自动归档当前关闭' }}</strong><span>后端只依赖标准 WebDAV；OpenList 可挂载任意可写存储。</span></div>
+          <el-switch v-model="form.upload_enabled" size="large" />
+        </div>
+
+        <div class="settings-fields settings-fields-grid archive-grid">
+          <el-form-item label="上传并发数">
+            <el-input-number v-model="form.upload_concurrency" :min="1" :max="16" />
+            <small>控制同时执行的远端上传任务数。</small>
+          </el-form-item>
+          <el-form-item label="最大重试次数">
+            <el-input-number v-model="form.upload_retry_max" :min="1" :max="100" />
+            <small>网络或 WebDAV 临时故障时的最大重试次数。</small>
+          </el-form-item>
+          <el-form-item label="本地保留时间">
+            <div class="number-field">
+              <el-input-number v-model="form.local_retention_hours" :min="-1" :max="87600" />
+              <span>小时</span>
+            </div>
+            <small>-1 表示永不自动删除本地录像。</small>
+          </el-form-item>
+          <div class="archive-spacer"></div>
+          <el-form-item label="OpenList WebDAV 地址" class="wide-field">
+            <el-input v-model="form.webdav_url" placeholder="http://openlist:5244/dav" />
+            <small>可填 WebDAV 根地址，也可直接指向某个挂载目录，例如 /dav/archive。</small>
+          </el-form-item>
+          <el-form-item label="远端归档目录" class="wide-field">
+            <el-input v-model="form.webdav_root" placeholder="监控录像" />
+            <small>使用 WebDAV 根地址时可写“挂载名/监控录像”；已指向挂载目录时只需写“监控录像”。</small>
+          </el-form-item>
+          <el-form-item label="WebDAV 用户名">
+            <el-input v-model="form.webdav_username" autocomplete="username" />
+          </el-form-item>
+          <el-form-item label="WebDAV 密码">
+            <el-input
+              v-model="form.webdav_password"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              :placeholder="form.webdav_password_set ? '已加密保存；留空保持不变' : '请输入 WebDAV 密码'"
+            />
+            <div v-if="form.webdav_password_set" class="password-actions">
+              <el-tag type="success" size="small">已加密保存</el-tag>
+              <el-checkbox v-model="form.clear_webdav_password">清除已保存密码</el-checkbox>
+            </div>
+          </el-form-item>
+        </div>
+      </article>
+    </el-form>
+
+    <div class="settings-savebar">
+      <div><strong>保存运行时配置</strong><span>部分 Recorder 参数需要重启对应摄像头连接后才完全生效。</span></div>
+      <div class="settings-save-actions">
+        <el-button :disabled="saving" @click="load">放弃修改</el-button>
+        <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
+      </div>
+    </div>
+  </section>
 </template>
-
-<style scoped>
-:global(body) { margin: 0; background: #f5f7fa; font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-.page { max-width: 980px; margin: 0 auto; padding: 28px; }
-.topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
-h2 { margin: 0 0 6px; }
-.settings-form { max-width: 820px; }
-.hint { color: #909399; font-size: 12px; margin-left: 12px; }
-.topbar .hint { margin-left: 0; }
-.block-hint { display: block; width: 100%; margin: 7px 0 0; line-height: 1.6; }
-.upload-hint { margin-bottom: 18px; }
-.unit { margin-left: 8px; color: #606266; }
-.password-actions { width: 100%; display: flex; gap: 14px; align-items: center; margin-top: 8px; }
-</style>
