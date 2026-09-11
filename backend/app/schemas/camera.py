@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
+PreviewStream = Literal["auto", "main", "sub"]
 
 
 class CameraBase(BaseModel):
@@ -12,6 +13,7 @@ class CameraBase(BaseModel):
     rtsp_port: int = Field(default=554, ge=1, le=65535)
     username: str = Field(default="admin", max_length=128)
     rtsp_path: str = Field(default="/ch1/main", min_length=1, max_length=255)
+    sub_rtsp_path: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool = True
     auto_record: bool = False
     timestamp_mode: TimestampMode = "reconstruct"
@@ -40,6 +42,7 @@ class CameraUpdate(BaseModel):
     username: str | None = Field(default=None, max_length=128)
     password: str | None = Field(default=None, min_length=1, max_length=512)
     rtsp_path: str | None = Field(default=None, min_length=1, max_length=255)
+    sub_rtsp_path: str | None = Field(default=None, min_length=1, max_length=255)
     enabled: bool | None = None
     auto_record: bool | None = None
     timestamp_mode: TimestampMode | None = None
