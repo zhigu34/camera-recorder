@@ -1,0 +1,128 @@
+:root {
+  color-scheme: dark;
+  --nvr-bg: #0b0f14;
+  --nvr-sidebar: #10151c;
+  --nvr-surface: #141a22;
+  --nvr-surface-2: #181f29;
+  --nvr-hover: #1c2531;
+  --nvr-border: rgba(255, 255, 255, 0.075);
+  --nvr-border-strong: rgba(255, 255, 255, 0.13);
+  --nvr-text: #e6edf3;
+  --nvr-muted: #8b98a7;
+  --nvr-blue: #4c8dff;
+  --nvr-green: #2ecc8a;
+  --nvr-yellow: #f5b942;
+  --nvr-red: #f05d5e;
+  --nvr-purple: #9b7bff;
+  --nvr-sidebar-width: 228px;
+  --nvr-sidebar-collapsed: 68px;
+  --el-color-primary: #4c8dff;
+  --el-color-success: #2ecc8a;
+  --el-color-warning: #f5b942;
+  --el-color-danger: #f05d5e;
+  --el-bg-color: #141a22;
+  --el-bg-color-page: #0b0f14;
+  --el-bg-color-overlay: #181f29;
+  --el-fill-color-blank: #141a22;
+  --el-fill-color-light: #181f29;
+  --el-fill-color-lighter: #1b232e;
+  --el-fill-color-dark: #10151c;
+  --el-fill-color-darker: #0b0f14;
+  --el-border-color: rgba(255, 255, 255, 0.08);
+  --el-border-color-light: rgba(255, 255, 255, 0.065);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.05);
+  --el-text-color-primary: #e6edf3;
+  --el-text-color-regular: #c4ced8;
+  --el-text-color-secondary: #8b98a7;
+  --el-text-color-placeholder: #637083;
+  --el-mask-color: rgba(0, 0, 0, 0.68);
+  --el-box-shadow-light: 0 8px 28px rgba(0, 0, 0, 0.25);
+}
+
+* { box-sizing: border-box; }
+html, body, #app { width: 100%; min-width: 0; min-height: 100%; margin: 0; }
+html { background: var(--nvr-bg); }
+body {
+  margin: 0;
+  background: var(--nvr-bg) !important;
+  color: var(--nvr-text);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; }
+
+/* Unified Element Plus surface language */
+.el-card {
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 10px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: none !important;
+}
+.el-card__header { border-bottom-color: var(--nvr-border) !important; }
+.el-table,
+.el-table tr,
+.el-table th.el-table__cell,
+.el-table td.el-table__cell { background: transparent !important; }
+.el-table { --el-table-border-color: var(--nvr-border); --el-table-row-hover-bg-color: var(--nvr-hover); }
+.el-table th.el-table__cell { color: var(--nvr-muted); font-weight: 600; background: #111820 !important; }
+.el-table td.el-table__cell { border-bottom-color: var(--nvr-border) !important; }
+.el-table::before, .el-table__inner-wrapper::before { background-color: var(--nvr-border) !important; }
+.el-dialog {
+  border: 1px solid var(--nvr-border-strong);
+  border-radius: 12px !important;
+  background: var(--nvr-surface-2) !important;
+  box-shadow: 0 20px 80px rgba(0, 0, 0, 0.48) !important;
+}
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner,
+.el-date-editor.el-input__wrapper,
+.el-date-editor.el-input,
+.el-input-number {
+  background: #10161e !important;
+  box-shadow: 0 0 0 1px var(--nvr-border) inset !important;
+}
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--nvr-blue) inset !important; }
+.el-button { border-radius: 7px !important; font-weight: 520; }
+.el-button:not(.is-link) { border-color: var(--nvr-border-strong); }
+.el-tag { border-radius: 5px !important; }
+.el-alert { border-radius: 8px !important; border: 1px solid var(--nvr-border); }
+.el-dropdown__popper, .el-select__popper, .el-picker__popper { border-color: var(--nvr-border-strong) !important; }
+.el-loading-mask { background: rgba(11, 15, 20, 0.78) !important; backdrop-filter: blur(2px); }
+
+/* Existing pages become content panels inside the new shell. */
+.nvr-workspace-content .page-shell {
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 22px !important;
+  background: transparent !important;
+}
+.nvr-workspace-content .page-head h2,
+.nvr-workspace-content h1,
+.nvr-workspace-content h2,
+.nvr-workspace-content h3 { color: var(--nvr-text); }
+.nvr-workspace-content .page-head p,
+.nvr-workspace-content .muted,
+.nvr-workspace-content .subtitle { color: var(--nvr-muted) !important; }
+
+/* Legacy management App: keep all business code, remove its duplicate navigation chrome. */
+.legacy-host > .app-shell { min-height: 0 !important; background: transparent !important; }
+.legacy-host > .app-shell > .sidebar { display: none !important; }
+.legacy-host > .app-shell > .el-container { min-width: 0; width: 100%; }
+.legacy-host .header {
+  height: auto !important;
+  min-height: 68px;
+  padding: 16px 22px !important;
+  background: transparent !important;
+  border-bottom: 1px solid var(--nvr-border) !important;
+}
+.legacy-host .header strong { color: var(--nvr-text); font-size: 18px; }
+.legacy-host .el-main { padding: 22px !important; background: transparent !important; }
+.legacy-host .section-card { margin-top: 16px; }
+
+@media (max-width: 900px) {
+  :root { --nvr-sidebar-width: 208px; }
+  .nvr-workspace-content .page-shell { padding: 14px !important; }
+  .legacy-host .el-main { padding: 14px !important; }
+}
