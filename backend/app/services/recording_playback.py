@@ -27,10 +27,6 @@ class RecordingPlaybackManager:
             return {"state": "direct", "direct": True, "error": None}
         proxy = self.proxy_path(recording_id)
         if proxy.exists() and proxy.stat().st_size > 0:
-            try:
-                proxy.touch()
-            except OSError:
-                pass
             return {"state": "ready", "direct": False, "error": None}
         task = self._tasks.get(recording_id)
         if task and not task.done():
@@ -39,14 +35,30 @@ class RecordingPlaybackManager:
             return {"state": "error", "direct": False, "error": self._errors[recording_id]}
         return {"state": "needed", "direct": False, "error": None}
 
+    async def cleanup_cache(self) -> None:
+        await asyncio.to_thread(self._cleanup_old_sync)
+
+    def mark_accessed(self, recording_id: int) -> None:
+        proxy = self.proxy_path(recording_id)
+        if not proxy.exists():
+            return
+        try:
+            proxy.touch()
+        except OSError:
+            pass
+
     async def start(self, recording_id: int, source: Path, video_codec: str | None) -> dict[str, Any]:
         state = self.status(recording_id, video_codec)
-        if state["state"] in {"direct", "ready", "generating"}:
+        if state["state"] == "direct":
+            if not source.exists():
+                raise FileNotFoundError(str(source))
+            return state
+        if state["state"] in {"ready", "generating"}:
             return state
         if not source.exists():
             raise FileNotFoundError(str(source))
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(self._cleanup_old_sync)
+        await self.cleanup_cache()
         self._errors.pop(recording_id, None)
         task = asyncio.create_task(
             self._generate(recording_id, source),
