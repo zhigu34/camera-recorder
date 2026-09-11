@@ -65,11 +65,6 @@ const startupSuccessRate = computed(() => {
   if (!attempts || !metrics.value) return null
   return metrics.value.client.events.first_frame.count / attempts * 100
 })
-const directHitRate = computed(() => {
-  const prefetch = metrics.value?.prefetch
-  if (!prefetch || !prefetch.success) return null
-  return prefetch.direct_hits / prefetch.success * 100
-})
 
 function formatMs(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
@@ -155,7 +150,7 @@ onBeforeUnmount(() => {
           <el-col :xs="12" :sm="8" :md="4"><div class="metric-box"><strong>{{ formatMs(metrics.client.events.first_frame.avg_ms) }}</strong><span>真实首帧平均</span></div></el-col>
           <el-col :xs="12" :sm="8" :md="4"><div class="metric-box"><strong>{{ formatMs(metrics.client.events.first_frame.p95_ms) }}</strong><span>真实首帧 P95</span></div></el-col>
           <el-col :xs="12" :sm="8" :md="4"><div class="metric-box"><strong>{{ metrics.client.events.startup_error.count }}</strong><span>启动解码错误</span></div></el-col>
-          <el-col :xs="12" :sm="8" :md="4"><div class="metric-box"><strong>{{ formatRate(directHitRate) }}</strong><span>云端预热命中</span></div></el-col>
+          <el-col :xs="12" :sm="8" :md="4"><div class="metric-box"><strong>{{ metrics.prefetch.direct_hits }}</strong><span>云端预热命中</span></div></el-col>
         </el-row>
 
         <div class="backend-strip">
