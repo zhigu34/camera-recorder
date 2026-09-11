@@ -120,3 +120,10 @@ def test_missing_recording_playback_is_404():
         response = client.get("/api/recordings/99999999/playback")
 
     assert response.status_code == 404
+
+
+def test_missing_recording_live_proxy_is_404():
+    with TestClient(app) as client:
+        response = client.get("/api/recordings/99999999/proxy-live.mp4")
+
+    assert response.status_code == 404
