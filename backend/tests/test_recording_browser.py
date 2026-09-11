@@ -1,6 +1,17 @@
+import sqlite3
+import uuid
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from app.core.config import settings
 from app.main import app
+
+
+def _sqlite_path() -> Path:
+    prefix = "sqlite+aiosqlite:///"
+    assert settings.database_url.startswith(prefix)
+    return Path(settings.database_url.removeprefix(prefix))
 
 
 def test_recording_browser_empty_day_shape(monkeypatch):
@@ -18,6 +29,80 @@ def test_recording_browser_empty_day_shape(monkeypatch):
     assert body["timezone"] == "Asia/Shanghai"
     assert body["count"] == 0
     assert body["items"] == []
+
+
+def test_recording_browser_includes_evening_local_timestamp(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    camera_name = f"pytest-browser-{uuid.uuid4().hex[:10]}"
+    mp4_path = f"/tmp/{camera_name}_2026-09-11_18-30-00.mp4"
+
+    with TestClient(app) as client:
+        camera_response = client.post(
+            "/api/cameras",
+            json={
+                "name": camera_name,
+                "ip": "192.0.2.90",
+                "username": "admin",
+                "password": "test-secret",
+                "rtsp_path": "/ch1/main",
+                "timestamp_mode": "native",
+            },
+        )
+        assert camera_response.status_code == 201
+        camera_id = camera_response.json()["id"]
+
+        connection = sqlite3.connect(_sqlite_path())
+        try:
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute(
+                """
+                INSERT INTO recordings (
+                    camera_id, started_at, ended_at, duration, mp4_path, file_size,
+                    video_codec, audio_codec, width, height, fps,
+                    status, health_status, ffprobe_ok, has_video, has_audio,
+                    warning_count, timestamp_warning_count, network_warning_count,
+                    upload_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    camera_id,
+                    "2026-09-11 18:30:00.000000",
+                    "2026-09-11 18:40:00.000000",
+                    600.0,
+                    mp4_path,
+                    1024,
+                    "hevc",
+                    "aac",
+                    1920,
+                    1080,
+                    15.0,
+                    "ready",
+                    "healthy",
+                    1,
+                    1,
+                    1,
+                    0,
+                    0,
+                    0,
+                    "pending",
+                ),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        response = client.get(
+            "/api/recordings/browser",
+            params={"camera_id": camera_id, "date": "2026-09-11"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["count"] == 1
+        assert body["items"][0]["started_at"] == "2026-09-11T18:30:00+08:00"
+        assert body["items"][0]["video_codec"] == "hevc"
+
+        delete_response = client.delete(f"/api/cameras/{camera_id}")
+        assert delete_response.status_code == 204
 
 
 def test_recording_browser_rejects_invalid_date():
