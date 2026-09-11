@@ -62,14 +62,6 @@ const cameraCount = ref(0)
 const statusError = ref(false)
 let statusTimer: number | null = null
 
-function loadSavedTabs(): string[] {
-  try {
-    const value = JSON.parse(localStorage.getItem('nvr-open-tabs') || '[]')
-    return Array.isArray(value) ? value.filter((key) => typeof key === 'string' && entryMap.has(key)) : []
-  } catch { return [] }
-}
-const openTabKeys = ref<string[]>(Array.from(new Set(['dashboard', ...loadSavedTabs()])))
-const openTabs = computed(() => openTabKeys.value.map((key) => entryMap.get(key)).filter(Boolean) as NavEntry[])
 const activeEntry = computed(() => entryMap.get(activeKey.value) || entryMap.get('dashboard')!)
 const coreEntries = computed(() => navEntries.filter((item) => item.group === 'core'))
 const opsEntries = computed(() => navEntries.filter((item) => item.group === 'ops'))
@@ -81,7 +73,6 @@ const systemHealthy = computed(() => Boolean(
   shellStatus.value && !statusError.value && shellStatus.value.ffmpeg?.setts_available !== false && storageState.value !== 'critical',
 ))
 
-function persistTabs() { localStorage.setItem('nvr-open-tabs', JSON.stringify(openTabKeys.value)) }
 function locationKey() {
   const path = window.location.pathname
   if (path === '/') {
@@ -105,7 +96,6 @@ async function activateLegacySection(section: string) {
   })
 }
 async function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'none' = 'push') {
-  if (!openTabKeys.value.includes(entry.key)) { openTabKeys.value.push(entry.key); persistTabs() }
   activeKey.value = entry.key
   renderKey.value = entry.key
   const url = urlFor(entry)
@@ -113,15 +103,9 @@ async function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'non
   else if (historyMode === 'replace') window.history.replaceState({}, '', url)
   if (entry.kind === 'legacy') await activateLegacySection(entry.target)
 }
-function navigate(key: string) { const entry = entryMap.get(key); if (entry) void showEntry(entry) }
-function closeTab(key: string, event?: MouseEvent) {
-  event?.stopPropagation()
-  if (key === 'dashboard') return
-  const index = openTabKeys.value.indexOf(key)
-  if (index < 0) return
-  const wasActive = activeKey.value === key
-  openTabKeys.value.splice(index, 1); persistTabs()
-  if (wasActive) void showEntry(entryMap.get(openTabKeys.value[Math.max(0, index - 1)] || 'dashboard') || entryMap.get('dashboard')!)
+function navigate(key: string) {
+  const entry = entryMap.get(key)
+  if (entry) void showEntry(entry)
 }
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -132,10 +116,16 @@ async function loadShellStatus() {
     const [statusRes, cameraRes] = await Promise.all([
       axios.get<ShellStatus>('/api/system/status'), axios.get<Array<{ id: number }>>('/api/cameras'),
     ])
-    shellStatus.value = statusRes.data; cameraCount.value = cameraRes.data.length; statusError.value = false
-  } catch { statusError.value = true }
+    shellStatus.value = statusRes.data
+    cameraCount.value = cameraRes.data.length
+    statusError.value = false
+  } catch {
+    statusError.value = true
+  }
 }
-function handlePopState() { void showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'none') }
+function handlePopState() {
+  void showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'none')
+}
 
 onMounted(() => {
   void showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'replace')
@@ -187,12 +177,6 @@ onBeforeUnmount(() => {
         <div class="system-pill" :class="{ healthy: systemHealthy, danger: !systemHealthy }"><CircleCheckFilled v-if="systemHealthy" /><WarningFilled v-else /><span>{{ statusError ? '状态不可用' : systemHealthy ? '系统正常' : '需要关注' }}</span></div>
       </header>
 
-      <div class="nvr-tabs">
-        <button v-for="tab in openTabs" :key="tab.key" class="workspace-tab" :class="{ active: activeKey === tab.key }" @click="navigate(tab.key)">
-          <component :is="tab.icon" class="tab-icon" /><span>{{ tab.label }}</span><span v-if="tab.key !== 'dashboard'" class="tab-close" @click="closeTab(tab.key, $event)">×</span>
-        </button>
-      </div>
-
       <main class="nvr-workspace-content">
         <DashboardView v-if="renderKey === 'dashboard'" />
         <CamerasViewV2 v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
@@ -223,8 +207,7 @@ onBeforeUnmount(() => {
 .nvr-sidebar{position:sticky;top:0;height:100vh;z-index:30;display:flex;flex-direction:column;min-width:0;background:var(--nvr-sidebar);border-right:1px solid var(--nvr-border)}
 .brand-row{height:68px;display:flex;align-items:center;gap:11px;padding:0 16px;border-bottom:1px solid var(--nvr-border);overflow:hidden}.brand-mark{flex:0 0 36px;width:36px;height:36px;display:grid;place-items:center;color:white;border-radius:10px;background:linear-gradient(145deg,#397cf0,#6c9fff);box-shadow:0 6px 20px rgba(76,141,255,.22)}.brand-mark :deep(svg){width:19px}.brand-copy{min-width:0;display:flex;flex-direction:column;line-height:1.2;white-space:nowrap}.brand-copy strong{font-size:14px}.brand-copy span{margin-top:4px;color:var(--nvr-muted);font-size:10px;letter-spacing:.12em;text-transform:uppercase}
 .nav-scroll{flex:1;overflow:auto;padding:14px 10px}.nav-group+.nav-group{margin-top:22px}.nav-caption{padding:0 10px 7px;color:#607085;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}.nav-item,.collapse-button,.top-collapse{appearance:none;border:0;color:#9aa7b7;background:transparent;cursor:pointer}.nav-item{position:relative;width:100%;height:42px;display:flex;align-items:center;gap:11px;padding:0 11px;margin:2px 0;border-radius:8px;font-size:13px;text-align:left;white-space:nowrap;overflow:hidden;transition:.15s}.nav-item:hover{color:#d9e2ec;background:rgba(255,255,255,.045)}.nav-item.active{color:#f2f6fa;background:rgba(76,141,255,.13)}.nav-item.active:before{content:'';position:absolute;left:0;width:2px;height:20px;border-radius:0 2px 2px 0;background:var(--nvr-blue)}.nav-icon{flex:0 0 18px;width:18px;height:18px}.sidebar-collapsed .nav-item{justify-content:center;padding:0}.sidebar-bottom{padding:10px;border-top:1px solid var(--nvr-border)}.collapse-button{width:100%;height:36px;display:flex;align-items:center;justify-content:center;gap:8px;color:#66758a;font-size:12px}.collapse-button:hover{color:var(--nvr-text)}.collapse-button :deep(svg){width:16px}
-.nvr-workspace{min-width:0;min-height:100vh;display:grid;grid-template-rows:68px 42px minmax(0,1fr) 30px}.nvr-topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;background:rgba(11,15,20,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--nvr-border)}.topbar-title{display:flex;align-items:center;gap:10px;min-width:0}.topbar-title>div{display:flex;flex-direction:column;min-width:0}.topbar-title strong{font-size:15px;font-weight:650}.topbar-title span{margin-top:3px;color:#66758a;font-size:10px}.top-collapse{width:32px;height:32px;display:grid;place-items:center;border-radius:7px}.top-collapse:hover{color:var(--nvr-text);background:rgba(255,255,255,.05)}.top-collapse :deep(svg){width:16px}.system-pill{display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--nvr-border);border-radius:999px;font-size:11px;background:rgba(255,255,255,.025)}.system-pill :deep(svg){width:13px}.system-pill.healthy{color:var(--nvr-green)}.system-pill.danger{color:var(--nvr-red)}
-.nvr-tabs{position:sticky;top:68px;z-index:18;display:flex;align-items:end;gap:2px;min-width:0;padding:5px 12px 0;overflow-x:auto;overflow-y:hidden;background:#0d1218;border-bottom:1px solid var(--nvr-border);scrollbar-width:none}.nvr-tabs::-webkit-scrollbar{display:none}.workspace-tab{flex:0 0 auto;height:36px;display:flex;align-items:center;gap:7px;padding:0 10px;color:#7e8b9b;border:1px solid transparent;border-bottom:0;border-radius:7px 7px 0 0;background:transparent;cursor:pointer;font-size:12px}.workspace-tab:hover{color:#cdd6e0;background:rgba(255,255,255,.025)}.workspace-tab.active{color:var(--nvr-text);background:var(--nvr-bg);border-color:var(--nvr-border)}.tab-icon{width:13px}.tab-close{width:16px;height:16px;display:grid;place-items:center;margin-left:2px;border-radius:4px;color:#66758a;font-size:15px;line-height:1}.tab-close:hover{color:white;background:rgba(255,255,255,.09)}
+.nvr-workspace{min-width:0;min-height:100vh;display:grid;grid-template-rows:68px minmax(0,1fr) 30px}.nvr-topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 20px;background:rgba(11,15,20,.88);backdrop-filter:blur(16px);border-bottom:1px solid var(--nvr-border)}.topbar-title{display:flex;align-items:center;gap:10px;min-width:0}.topbar-title>div{display:flex;flex-direction:column;min-width:0}.topbar-title strong{font-size:15px;font-weight:650}.topbar-title span{margin-top:3px;color:#66758a;font-size:10px}.top-collapse{width:32px;height:32px;display:grid;place-items:center;border-radius:7px}.top-collapse:hover{color:var(--nvr-text);background:rgba(255,255,255,.05)}.top-collapse :deep(svg){width:16px}.system-pill{display:flex;align-items:center;gap:7px;padding:6px 10px;border:1px solid var(--nvr-border);border-radius:999px;font-size:11px;background:rgba(255,255,255,.025)}.system-pill :deep(svg){width:13px}.system-pill.healthy{color:var(--nvr-green)}.system-pill.danger{color:var(--nvr-red)}
 .nvr-workspace-content{min-width:0;overflow-x:hidden;background:var(--nvr-bg)}.nvr-statusbar{position:sticky;bottom:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 14px;color:#718095;background:#0d1218;border-top:1px solid var(--nvr-border);font-size:10px}.status-left,.status-items{display:flex;align-items:center;gap:14px;white-space:nowrap}.status-dot{width:6px;height:6px;border-radius:50%}.status-dot.ok{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.status-dot.bad{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.status-items b{color:#aeb9c6;font-weight:600}.status-items .storage-warning{color:var(--nvr-yellow)}.status-items .storage-critical{color:var(--nvr-red)}
 @media(max-width:900px){.nvr-shell{grid-template-columns:var(--nvr-sidebar-collapsed) minmax(0,1fr)}.nvr-sidebar{width:var(--nvr-sidebar-collapsed)}.brand-copy,.nav-caption,.nav-item span,.collapse-button span{display:none!important}.nav-item{justify-content:center;padding:0}.status-items span:nth-child(3),.status-items span:nth-child(4){display:none}}
 @media(max-width:620px){.nvr-shell{grid-template-columns:0 minmax(0,1fr)}.nvr-sidebar{transform:translateX(-68px);pointer-events:none}.nvr-shell:not(.sidebar-collapsed){grid-template-columns:var(--nvr-sidebar-width) minmax(0,1fr)}.nvr-shell:not(.sidebar-collapsed) .nvr-sidebar{width:var(--nvr-sidebar-width);transform:none;pointer-events:auto}.nvr-shell:not(.sidebar-collapsed) .brand-copy,.nvr-shell:not(.sidebar-collapsed) .nav-caption,.nvr-shell:not(.sidebar-collapsed) .nav-item span,.nvr-shell:not(.sidebar-collapsed) .collapse-button span{display:initial!important}.nvr-shell:not(.sidebar-collapsed) .nav-item{justify-content:flex-start;padding:0 11px}.nvr-statusbar{overflow:hidden}.status-items span:nth-child(2){display:none}}
