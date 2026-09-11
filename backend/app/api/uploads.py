@@ -10,6 +10,7 @@ from app.schemas.upload import UploadTaskRead
 from app.services.upload_manager import upload_manager
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
+ws_router = APIRouter(tags=["uploads"])
 
 
 def _serialize_task(task: UploadTask) -> dict:
@@ -63,7 +64,7 @@ async def list_upload_tasks(
     return list(result)
 
 
-@router.websocket("/ws")
+@ws_router.websocket("/ws/uploads")
 async def upload_websocket(websocket: WebSocket) -> None:
     """Push upload task/status changes without repeatedly reloading large REST lists."""
 
