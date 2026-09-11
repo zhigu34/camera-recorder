@@ -144,6 +144,13 @@ class SegmentProcessor:
             except TimeoutError:
                 self._task.cancel()
 
+    def status(self) -> dict:
+        return {
+            "running": bool(self._task and not self._task.done()),
+            "in_progress": len(self._in_progress),
+            "scan_interval_seconds": settings.segment_scan_interval_seconds,
+        }
+
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
