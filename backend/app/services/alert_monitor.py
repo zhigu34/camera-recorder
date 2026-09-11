@@ -235,7 +235,7 @@ class AlertMonitor:
         if failed_count > 0 and latest_failed is not None:
             await alert_dispatcher.alert(
                 key="upload:failed",
-                subject="[Camera Recorder] 云端上传持续失败",
+                subject="[Camera Recorder] 远端归档持续失败",
                 body=(
                     "上传任务已经耗尽自动重试或进入不可继续处理的失败状态。\n\n"
                     f"当前 failed 任务：{failed_count} 个\n"
@@ -243,7 +243,7 @@ class AlertMonitor:
                     f"远端路径：{latest_failed.remote_path}\n"
                     f"重试次数：{latest_failed.retry_count}\n"
                     f"最近错误：{latest_failed.last_error or '-'}\n\n"
-                    "本地录像不会因为上传失败而删除。请检查 OpenList/115、网络和 WebDAV 配置。\n"
+                    "本地录像不会因为上传失败而删除。请检查 OpenList/WebDAV、网络和存储挂载配置。\n"
                 ),
                 success_code="notification.upload_failure_email_sent",
             )
@@ -251,7 +251,7 @@ class AlertMonitor:
 
         await alert_dispatcher.recover(
             key="upload:failed",
-            subject="[Camera Recorder] 云端上传故障已恢复",
+            subject="[Camera Recorder] 远端归档故障已恢复",
             body="当前已经没有处于 failed 状态的上传任务，上传队列已恢复到可继续处理状态。\n",
             success_code="notification.upload_recovery_email_sent",
         )
