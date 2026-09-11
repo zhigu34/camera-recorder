@@ -6,9 +6,11 @@
 
 ```bash
 cp .env.example .env
-# 修改 CAMREC_SECRET_KEY 后启动
+# 至少修改 CAMREC_SECRET_KEY 和 OPENLIST_ADMIN_PASSWORD
 docker compose up -d --build
 ```
+
+`.env` 只保留部署级信息：宿主机端口、时区、系统加密密钥和 OpenList 容器初始化信息。录像参数、磁盘阈值、115 上传、WebDAV 和邮件告警均从 Web 配置并保存到 SQLite。
 
 Web：`http://127.0.0.1:8080`
 
@@ -50,9 +52,18 @@ Compose 使用 Docker 的 `TARGETARCH` 自动选择 BtbN `linuxarm64` FFmpeg；I
 3. 确认视频编码、分辨率、FPS、音频参数正确。
 4. 当前已验证的萤石设备优先使用 `reconstruct`。
 5. 点击 `开始`。
-6. 查看 `docker compose logs -f backend` 和宿主机 `logs/`。
+6. 点击右下角 `系统设置` 配置切片、磁盘和 115 上传。
+7. `告警设置` 页面配置 SMTP 和摄像头掉线邮件。
+8. 查看 `docker compose logs -f backend` 和宿主机 `logs/`。
 
 `reconstruct` 不写死 15fps：系统使用 Probe 得到的 `fps_num/fps_den` 动态生成视频 `setts`；AAC 使用实际 `sample_rate` 与 `audio_frame_samples` 生成音频时间轴。
+
+### 系统设置生效规则
+
+- 上传开关、上传并发、重试次数、保留时间、WebDAV 和磁盘阈值：保存后直接生效。
+- Remux 并发：下一轮 Segment 处理时生效。
+- 切片时长、RTSP 超时、整点切片：新启动或重连的摄像头 Worker 生效；对正在录制的摄像头可执行一次重启。
+- 启动时自动恢复录像：下次后端启动时生效。
 
 ## 本地开发
 
@@ -78,6 +89,7 @@ uv run uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```bash
 curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/api/system/status
+curl http://127.0.0.1:8000/api/settings
 ```
 
 ### 前端
@@ -95,13 +107,12 @@ npm run dev
 ```bash
 cd backend
 uv run pytest
-uv run ruff check .
 ```
 
 ## 数据目录
 
 ```text
-data/camera.db          SQLite 元数据
+data/camera.db          SQLite 元数据与运行时配置
 recordings/             完成的 MP4
 staging/camera-{id}/    FFmpeg 连续写入的 MKV
 failed/camera-{id}/     Remux/健康检查失败后保留的 MKV
