@@ -2,6 +2,7 @@
 import App from './App.vue'
 import BatchCamerasView from './BatchCamerasView.vue'
 import HealthView from './HealthView.vue'
+import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
 import RecordingBrowserViewV3 from './RecordingBrowserViewV3.vue'
 import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
@@ -43,6 +44,7 @@ function openRecordingBrowser() {
   <HealthView v-else-if="isHealth" />
   <template v-else-if="isRecordingBrowser">
     <RecordingBrowserViewV3 />
+    <PlaybackTelemetryBridge />
     <RecordingCalendarLegend />
     <RecordingTimelineLegend />
   </template>
