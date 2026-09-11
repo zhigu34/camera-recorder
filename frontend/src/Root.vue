@@ -34,6 +34,7 @@ interface NavEntry {
 interface ShellStatus {
   ffmpeg?: { setts_available?: boolean }
   recorders?: Array<{ camera_id: number; state: string }>
+  recording_schedule?: { cameras?: Array<{ camera_id: number }> }
   upload?: { enabled: boolean; configured: boolean; active: boolean }
   storage?: { used_percent: number; state: 'healthy' | 'warning' | 'critical' }
 }
@@ -58,7 +59,6 @@ const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
 const activeKey = ref('dashboard')
 const renderKey = ref('dashboard')
 const shellStatus = ref<ShellStatus | null>(null)
-const cameraCount = ref(0)
 const statusError = ref(false)
 let statusTimer: number | null = null
 
@@ -67,6 +67,7 @@ const coreEntries = computed(() => navEntries.filter((item) => item.group === 'c
 const opsEntries = computed(() => navEntries.filter((item) => item.group === 'ops'))
 const settingsEntry = computed(() => navEntries.find((item) => item.group === 'settings')!)
 const recordingCount = computed(() => (shellStatus.value?.recorders || []).filter((item) => item.state === 'RECORDING').length)
+const cameraCount = computed(() => shellStatus.value?.recording_schedule?.cameras?.length ?? 0)
 const storageState = computed(() => shellStatus.value?.storage?.state || 'healthy')
 const systemHealthy = computed(() => Boolean(
   shellStatus.value && !statusError.value && shellStatus.value.ffmpeg?.setts_available !== false && storageState.value !== 'critical',
@@ -100,11 +101,7 @@ function toggleSidebar() {
 }
 async function loadShellStatus() {
   try {
-    const [statusRes, cameraRes] = await Promise.all([
-      axios.get<ShellStatus>('/api/system/status'), axios.get<Array<{ id: number }>>('/api/cameras'),
-    ])
-    shellStatus.value = statusRes.data
-    cameraCount.value = cameraRes.data.length
+    shellStatus.value = (await axios.get<ShellStatus>('/api/system/status')).data
     statusError.value = false
   } catch {
     statusError.value = true
