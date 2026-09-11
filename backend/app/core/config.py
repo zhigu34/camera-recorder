@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     debug: bool = False
     secret_key: str = "change-me-before-exposing-this-service"
 
+    data_dir: Path = BASE_DIR / "data"
     database_url: str = f"sqlite+aiosqlite:///{BASE_DIR / 'data' / 'camera.db'}"
     recordings_dir: Path = BASE_DIR / "recordings"
     staging_dir: Path = BASE_DIR / "staging"
