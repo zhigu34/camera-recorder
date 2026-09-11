@@ -81,6 +81,23 @@ interface StorageStatus {
   critical_percent: number
 }
 
+interface EmailSettings {
+  email_enabled: boolean
+  offline_alert_seconds: number
+  recovery_stable_seconds: number
+  notify_recovery: boolean
+  smtp_host: string
+  smtp_port: number
+  smtp_username: string
+  smtp_password_set: boolean
+  smtp_from: string
+  smtp_to: string
+  smtp_use_ssl: boolean
+  smtp_starttls: boolean
+  smtp_timeout_seconds: number
+  configured: boolean
+}
+
 interface SystemStatus {
   app: string
   segment_duration_seconds: number
@@ -110,6 +127,8 @@ const uploadStatus = ref<UploadStatus | null>(null)
 const status = ref<SystemStatus | null>(null)
 const dialogVisible = ref(false)
 const saving = ref(false)
+const savingEmail = ref(false)
+const testingEmail = ref(false)
 
 const form = reactive({
   name: '',
@@ -121,6 +140,25 @@ const form = reactive({
   timestamp_mode: 'reconstruct',
   enabled: true,
   auto_record: false,
+})
+
+const emailSettings = reactive({
+  email_enabled: false,
+  offline_alert_seconds: 60,
+  recovery_stable_seconds: 10,
+  notify_recovery: true,
+  smtp_host: '',
+  smtp_port: 587,
+  smtp_username: '',
+  smtp_password: '',
+  smtp_password_set: false,
+  clear_smtp_password: false,
+  smtp_from: '',
+  smtp_to: '',
+  smtp_use_ssl: false,
+  smtp_starttls: true,
+  smtp_timeout_seconds: 15,
+  configured: false,
 })
 
 const recordingCount = computed(() =>
@@ -138,6 +176,7 @@ const pageTitle = computed(() => {
   if (page.value === 'recordings') return '录像文件'
   if (page.value === 'uploads') return '115 上传'
   if (page.value === 'events') return '事件中心'
+  if (page.value === 'alerts') return '告警设置'
   return '仪表盘'
 })
 
@@ -183,16 +222,32 @@ function storageTagType() {
   return 'success'
 }
 
+function applyEmailSettings(data: EmailSettings) {
+  Object.assign(emailSettings, data, {
+    smtp_password: '',
+    clear_smtp_password: false,
+  })
+}
+
+function enableSmtpSsl(value: boolean) {
+  if (value) emailSettings.smtp_starttls = false
+}
+
+function enableStarttls(value: boolean) {
+  if (value) emailSettings.smtp_use_ssl = false
+}
+
 async function loadAll() {
   loading.value = true
   try {
-    const [systemRes, cameraRes, recordingRes, uploadStatusRes, uploadTasksRes, eventRes] = await Promise.all([
+    const [systemRes, cameraRes, recordingRes, uploadStatusRes, uploadTasksRes, eventRes, emailRes] = await Promise.all([
       axios.get<SystemStatus>('/api/system/status'),
       axios.get<Camera[]>('/api/cameras'),
       axios.get<Recording[]>('/api/recordings?limit=100'),
       axios.get<UploadStatus>('/api/uploads'),
       axios.get<UploadTask[]>('/api/uploads/tasks?limit=100'),
       axios.get<EventItem[]>('/api/events?limit=200'),
+      axios.get<EmailSettings>('/api/notifications/email'),
     ])
     status.value = systemRes.data
     cameras.value = cameraRes.data
@@ -200,6 +255,7 @@ async function loadAll() {
     uploadStatus.value = uploadStatusRes.data
     uploads.value = uploadTasksRes.data
     events.value = eventRes.data
+    applyEmailSettings(emailRes.data)
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '加载失败')
   } finally {
@@ -295,6 +351,47 @@ async function scanUploads() {
   }
 }
 
+async function saveEmailSettings() {
+  savingEmail.value = true
+  try {
+    const payload = {
+      email_enabled: emailSettings.email_enabled,
+      offline_alert_seconds: emailSettings.offline_alert_seconds,
+      recovery_stable_seconds: emailSettings.recovery_stable_seconds,
+      notify_recovery: emailSettings.notify_recovery,
+      smtp_host: emailSettings.smtp_host,
+      smtp_port: emailSettings.smtp_port,
+      smtp_username: emailSettings.smtp_username,
+      smtp_password: emailSettings.smtp_password || null,
+      clear_smtp_password: emailSettings.clear_smtp_password,
+      smtp_from: emailSettings.smtp_from,
+      smtp_to: emailSettings.smtp_to,
+      smtp_use_ssl: emailSettings.smtp_use_ssl,
+      smtp_starttls: emailSettings.smtp_starttls,
+      smtp_timeout_seconds: emailSettings.smtp_timeout_seconds,
+    }
+    const { data } = await axios.put<EmailSettings>('/api/notifications/email', payload)
+    applyEmailSettings(data)
+    ElMessage.success('邮件告警配置已保存，立即生效')
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '保存失败')
+  } finally {
+    savingEmail.value = false
+  }
+}
+
+async function testEmail() {
+  testingEmail.value = true
+  try {
+    await axios.post('/api/notifications/email/test')
+    ElMessage.success('测试邮件已发送')
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '测试邮件发送失败')
+  } finally {
+    testingEmail.value = false
+  }
+}
+
 onMounted(loadAll)
 </script>
 
@@ -308,6 +405,7 @@ onMounted(loadAll)
         <el-menu-item index="recordings">录像文件</el-menu-item>
         <el-menu-item index="uploads">115 上传</el-menu-item>
         <el-menu-item index="events">事件中心</el-menu-item>
+        <el-menu-item index="alerts">告警设置</el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -443,7 +541,7 @@ onMounted(loadAll)
           </el-card>
         </template>
 
-        <template v-else>
+        <template v-else-if="page === 'events'">
           <el-card>
             <el-table :data="events" empty-text="暂无事件">
               <el-table-column prop="created_at" label="时间" min-width="190" />
@@ -457,6 +555,85 @@ onMounted(loadAll)
               <el-table-column prop="code" label="代码" min-width="170" />
               <el-table-column prop="message" label="信息" min-width="360" show-overflow-tooltip />
             </el-table>
+          </el-card>
+        </template>
+
+        <template v-else>
+          <el-card class="alert-card">
+            <template #header>
+              <div class="card-header">
+                <span>摄像头掉线邮件告警</span>
+                <el-tag :type="emailSettings.email_enabled && emailSettings.configured ? 'success' : 'info'">
+                  {{ emailSettings.email_enabled && emailSettings.configured ? '已启用' : '未启用' }}
+                </el-tag>
+              </div>
+            </template>
+
+            <el-form label-width="150px" class="settings-form">
+              <el-form-item label="邮件告警开关">
+                <el-switch v-model="emailSettings.email_enabled" />
+              </el-form-item>
+              <el-form-item label="掉线多久后告警">
+                <el-input-number v-model="emailSettings.offline_alert_seconds" :min="0" :max="86400" :step="10" />
+                <span class="form-hint">秒；默认 60 秒，短暂网络抖动不会立即发邮件</span>
+              </el-form-item>
+              <el-form-item label="恢复稳定时间">
+                <el-input-number v-model="emailSettings.recovery_stable_seconds" :min="0" :max="3600" :step="5" />
+                <span class="form-hint">秒；连续稳定后才判定恢复</span>
+              </el-form-item>
+              <el-form-item label="恢复邮件">
+                <el-switch v-model="emailSettings.notify_recovery" />
+              </el-form-item>
+
+              <el-divider content-position="left">SMTP</el-divider>
+
+              <el-form-item label="SMTP服务器">
+                <el-input v-model="emailSettings.smtp_host" placeholder="smtp.example.com" />
+              </el-form-item>
+              <el-form-item label="SMTP端口">
+                <el-input-number v-model="emailSettings.smtp_port" :min="1" :max="65535" />
+              </el-form-item>
+              <el-form-item label="SMTP用户名">
+                <el-input v-model="emailSettings.smtp_username" autocomplete="off" />
+              </el-form-item>
+              <el-form-item label="SMTP密码">
+                <el-input
+                  v-model="emailSettings.smtp_password"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :placeholder="emailSettings.smtp_password_set ? '已保存；留空保持不变' : '请输入SMTP密码/授权码'"
+                />
+                <div class="password-row">
+                  <el-tag v-if="emailSettings.smtp_password_set" size="small" type="success">已加密保存</el-tag>
+                  <el-checkbox v-if="emailSettings.smtp_password_set" v-model="emailSettings.clear_smtp_password">清除已保存密码</el-checkbox>
+                </div>
+              </el-form-item>
+              <el-form-item label="发件人">
+                <el-input v-model="emailSettings.smtp_from" placeholder="camera@example.com" />
+              </el-form-item>
+              <el-form-item label="收件人">
+                <el-input v-model="emailSettings.smtp_to" placeholder="ops@example.com,admin@example.com" />
+                <span class="form-hint">多个邮箱使用英文逗号分隔</span>
+              </el-form-item>
+              <el-form-item label="SSL">
+                <el-switch v-model="emailSettings.smtp_use_ssl" @change="enableSmtpSsl" />
+                <span class="form-hint">常见端口 465</span>
+              </el-form-item>
+              <el-form-item label="STARTTLS">
+                <el-switch v-model="emailSettings.smtp_starttls" @change="enableStarttls" />
+                <span class="form-hint">常见端口 587；与 SSL 二选一</span>
+              </el-form-item>
+              <el-form-item label="连接超时">
+                <el-input-number v-model="emailSettings.smtp_timeout_seconds" :min="1" :max="120" />
+                <span class="form-hint">秒</span>
+              </el-form-item>
+
+              <el-form-item>
+                <el-button type="primary" :loading="savingEmail" @click="saveEmailSettings">保存配置</el-button>
+                <el-button :loading="testingEmail" :disabled="!emailSettings.email_enabled" @click="testEmail">发送测试邮件</el-button>
+              </el-form-item>
+            </el-form>
           </el-card>
         </template>
       </el-main>
@@ -501,6 +678,10 @@ onMounted(loadAll)
 .top-gap { margin-top: 10px; }
 .section-card { margin-top: 16px; }
 .toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
-.upload-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.upload-head, .card-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .upload-note { margin-left: 12px; }
+.alert-card { max-width: 900px; }
+.settings-form { max-width: 760px; }
+.form-hint { margin-left: 12px; color: #909399; font-size: 12px; }
+.password-row { display: flex; align-items: center; gap: 12px; margin-top: 8px; width: 100%; }
 </style>
