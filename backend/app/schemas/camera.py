@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
@@ -165,12 +165,10 @@ class CameraRead(CameraBase):
                 item = item.model_dump()
             if not isinstance(item, dict):
                 continue
-            days = item.get("days")
-            start = item.get("start")
-            end = item.get("end")
-            if days is None:
-                days = list(range(7))
-            normalized.append({"days": days, "start": start, "end": end})
+            try:
+                normalized.append(RecordingWindow.model_validate(item).model_dump())
+            except ValidationError:
+                continue
         return normalized
 
     @model_validator(mode="after")
