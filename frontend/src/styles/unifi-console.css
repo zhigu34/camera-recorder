@@ -1,0 +1,602 @@
+/* Console refinement layer
+ *
+ * This stylesheet intentionally sits after the page-specific styles. It keeps the
+ * existing business DOM intact while giving the two primary NVR workspaces a
+ * quieter, camera-first hierarchy inspired by mature appliance consoles.
+ */
+
+/* ---------- Dashboard: exception first, less card chrome ---------- */
+.nvr-workspace-content .dashboard-page {
+  max-width: 1800px !important;
+  padding: 18px 20px 28px !important;
+}
+
+.nvr-workspace-content .dashboard-head {
+  min-height: 58px;
+  align-items: center !important;
+  margin: 0 0 10px !important;
+}
+
+.nvr-workspace-content .dashboard-head > div:first-child {
+  display: none !important;
+}
+
+.nvr-workspace-content .health-badge {
+  width: 100%;
+  min-width: 0 !important;
+  min-height: 58px;
+  display: grid !important;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px !important;
+  padding: 10px 13px !important;
+  border-color: var(--nvr-border) !important;
+  border-radius: 11px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: var(--nvr-card-shadow);
+}
+
+.nvr-workspace-content .health-badge::after {
+  content: 'LIVE STATUS';
+  justify-self: end;
+  padding: 4px 7px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 999px;
+  color: var(--nvr-subtle);
+  background: var(--nvr-pill-bg);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .12em;
+}
+
+.nvr-workspace-content .health-badge > svg {
+  width: 20px !important;
+  height: 20px;
+}
+
+.nvr-workspace-content .health-badge > div {
+  gap: 2px !important;
+}
+
+.nvr-workspace-content .health-badge strong {
+  color: var(--nvr-text) !important;
+  font-size: 12px !important;
+  font-weight: 650;
+}
+
+.nvr-workspace-content .health-badge span {
+  color: var(--nvr-muted) !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .health-badge.warning {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 28%, var(--nvr-border)) !important;
+  background: color-mix(in srgb, var(--nvr-yellow) 4%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin-bottom: 10px !important;
+}
+
+.nvr-workspace-content .metric-card {
+  min-height: 92px !important;
+  padding: 13px 14px !important;
+  border-radius: 10px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: var(--nvr-card-shadow);
+}
+
+.nvr-workspace-content .metric-card.primary {
+  border-color: color-mix(in srgb, var(--nvr-blue) 20%, var(--nvr-border)) !important;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--nvr-blue) 8%, transparent), transparent 62%),
+    var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .metric-card:has(.danger) {
+  order: -1;
+  border-color: color-mix(in srgb, var(--nvr-red) 26%, var(--nvr-border)) !important;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--nvr-red) 6%, transparent), transparent 62%),
+    var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .metric-icon {
+  top: 12px !important;
+  right: 12px !important;
+  width: 25px !important;
+  height: 25px !important;
+  color: var(--nvr-subtle) !important;
+  border-color: var(--nvr-border) !important;
+  background: var(--nvr-pill-bg) !important;
+}
+
+.nvr-workspace-content .metric-copy {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .metric-copy span {
+  color: var(--nvr-muted) !important;
+  font-size: 9px !important;
+  font-weight: 600;
+}
+
+.nvr-workspace-content .metric-copy strong {
+  color: var(--nvr-text) !important;
+  font-size: 25px !important;
+  font-weight: 660 !important;
+  letter-spacing: -.035em !important;
+}
+
+.nvr-workspace-content .metric-copy small {
+  color: var(--nvr-subtle) !important;
+  font-size: 11px !important;
+}
+
+.nvr-workspace-content .metric-foot {
+  left: 14px !important;
+  bottom: 11px !important;
+  color: var(--nvr-subtle) !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .metric-foot b {
+  color: var(--nvr-text-soft) !important;
+}
+
+.nvr-workspace-content .dashboard-grid {
+  grid-template-columns: minmax(0, 1.8fr) minmax(300px, .6fr) !important;
+  gap: 10px !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel {
+  border-radius: 11px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: var(--nvr-card-shadow);
+}
+
+.nvr-workspace-content .dashboard-page .panel-head {
+  min-height: 56px !important;
+  padding: 0 14px !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel-head.compact {
+  min-height: 52px !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel-kicker {
+  color: var(--nvr-subtle) !important;
+  font-size: 8px !important;
+  letter-spacing: .14em !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel-head h2 {
+  margin-top: 2px !important;
+  color: var(--nvr-text) !important;
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--nvr-muted) !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .dashboard-page .panel-meta::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--nvr-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nvr-green) 11%, transparent);
+}
+
+.nvr-workspace-content .camera-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 1px !important;
+  background: var(--nvr-border) !important;
+}
+
+.nvr-workspace-content .camera-tile {
+  min-height: 88px !important;
+  padding: 13px 14px !important;
+  background: var(--nvr-surface) !important;
+  transition: background .15s ease, box-shadow .15s ease;
+}
+
+.nvr-workspace-content .camera-tile:hover {
+  background: var(--nvr-hover) !important;
+}
+
+.nvr-workspace-content .camera-tile:has(.camera-detail .danger),
+.nvr-workspace-content .camera-tile:has(.camera-error) {
+  order: -1;
+  background: color-mix(in srgb, var(--nvr-red) 3.5%, var(--nvr-surface)) !important;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--nvr-red) 70%, transparent);
+}
+
+.nvr-workspace-content .camera-title > div strong {
+  color: var(--nvr-text) !important;
+  font-size: 11px !important;
+  font-weight: 630 !important;
+}
+
+.nvr-workspace-content .camera-title > div span,
+.nvr-workspace-content .camera-title > span {
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-workspace-content .camera-state {
+  padding: 2px 5px !important;
+  border: 1px solid var(--nvr-border);
+  border-radius: 999px !important;
+  background: var(--nvr-pill-bg) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .camera-detail {
+  margin: 9px 0 0 13px !important;
+  gap: 10px !important;
+  color: var(--nvr-muted) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .camera-error {
+  margin: 7px 0 0 13px !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .right-column {
+  gap: 10px !important;
+}
+
+.nvr-workspace-content .storage-stats span,
+.nvr-workspace-content .service-row,
+.nvr-workspace-content .event-content span,
+.nvr-workspace-content .empty-state {
+  color: var(--nvr-muted) !important;
+}
+
+.nvr-workspace-content .storage-stats strong,
+.nvr-workspace-content .event-content strong,
+.nvr-workspace-content .storage-value {
+  color: var(--nvr-text) !important;
+}
+
+.nvr-workspace-content .service-row,
+.nvr-workspace-content .event-row + .event-row {
+  border-top-color: var(--nvr-border) !important;
+}
+
+.nvr-workspace-content .event-row {
+  padding: 9px 14px !important;
+}
+
+.nvr-workspace-content .event-content strong {
+  font-size: 9px !important;
+  font-weight: 560 !important;
+}
+
+.nvr-workspace-content .event-content span {
+  font-size: 8px !important;
+}
+
+/* ---------- Live monitoring: video first, controls recede ---------- */
+.nvr-workspace-content .wall-page {
+  min-height: 100% !important;
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 14px 16px 24px !important;
+  background: var(--nvr-bg) !important;
+}
+
+.nvr-workspace-content .wall-header {
+  min-height: 48px;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 8px 10px !important;
+  border: 1px solid var(--nvr-border);
+  border-bottom: 0;
+  border-radius: 11px 11px 0 0;
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .wall-header > div:first-child {
+  display: none !important;
+}
+
+.nvr-workspace-content .header-actions {
+  width: 100%;
+  justify-content: flex-start !important;
+  gap: 6px !important;
+}
+
+.nvr-workspace-content .connection-pill,
+.nvr-workspace-content .profile-pill {
+  height: 27px !important;
+  border-color: var(--nvr-border) !important;
+  color: var(--nvr-muted) !important;
+  background: var(--nvr-pill-bg) !important;
+  border-radius: 999px !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .connection-pill.connected {
+  color: var(--nvr-green) !important;
+}
+
+.nvr-workspace-content .connection-pill.connecting,
+.nvr-workspace-content .connection-pill.retrying {
+  color: var(--nvr-yellow) !important;
+}
+
+.nvr-workspace-content .header-actions .el-button {
+  height: 27px;
+  margin-left: 0 !important;
+  padding: 0 9px !important;
+  border-radius: 7px !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .header-actions .el-button:first-of-type {
+  margin-left: auto !important;
+}
+
+.nvr-workspace-content .wall-toolbar {
+  min-height: 49px !important;
+  margin: 0 0 8px !important;
+  padding: 7px 9px !important;
+  border-color: var(--nvr-border) !important;
+  border-radius: 0 0 11px 11px !important;
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .layout-switcher {
+  gap: 1px !important;
+  padding: 2px !important;
+  border-color: var(--nvr-border) !important;
+  border-radius: 7px !important;
+  background: var(--nvr-input) !important;
+}
+
+.nvr-workspace-content .layout-switcher button {
+  width: 31px !important;
+  height: 27px !important;
+  border-radius: 5px !important;
+  color: var(--nvr-muted) !important;
+  background: transparent !important;
+}
+
+.nvr-workspace-content .layout-switcher button.active {
+  color: #fff !important;
+  background: var(--nvr-blue) !important;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--nvr-blue) 28%, transparent);
+}
+
+.nvr-workspace-content .tray-label {
+  color: var(--nvr-subtle) !important;
+  font-size: 8px !important;
+  letter-spacing: .08em;
+}
+
+.nvr-workspace-content .camera-tray {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .camera-chip {
+  min-width: 112px !important;
+  height: 32px !important;
+  padding: 3px 7px !important;
+  border-color: var(--nvr-border) !important;
+  border-radius: 7px !important;
+  color: var(--nvr-text-soft) !important;
+  background: var(--nvr-input) !important;
+  box-shadow: none !important;
+}
+
+.nvr-workspace-content .camera-chip:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 34%, var(--nvr-border)) !important;
+  background: var(--nvr-hover) !important;
+}
+
+.nvr-workspace-content .camera-chip.assigned {
+  border-color: color-mix(in srgb, var(--nvr-blue) 22%, var(--nvr-border)) !important;
+  background: color-mix(in srgb, var(--nvr-blue) 5%, var(--nvr-input)) !important;
+}
+
+.nvr-workspace-content .camera-chip small {
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-workspace-content .video-wall {
+  gap: 7px !important;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.nvr-workspace-content .wall-slot {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--nvr-border-strong) 70%, transparent);
+  border-radius: 10px !important;
+  background: #070a0e !important;
+  box-shadow: 0 1px 2px rgba(0,0,0,.14) !important;
+}
+
+.nvr-workspace-content .wall-slot::after {
+  box-shadow: inset 0 0 36px rgba(0,0,0,.15) !important;
+}
+
+.nvr-workspace-content .wall-slot.failed {
+  border-color: color-mix(in srgb, var(--nvr-red) 45%, transparent) !important;
+}
+
+.nvr-workspace-content .slot-topbar {
+  padding: 8px 9px 18px !important;
+  background: linear-gradient(to bottom, rgba(0,0,0,.62), transparent) !important;
+}
+
+.nvr-workspace-content .slot-topbar .camera-title strong {
+  max-width: 190px !important;
+  color: #f6f8fb !important;
+  font-size: 10px !important;
+  font-weight: 620 !important;
+  text-shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+
+.nvr-workspace-content .slot-topbar .camera-title > span:last-child {
+  color: rgba(255,255,255,.46) !important;
+}
+
+.nvr-workspace-content .slot-badges {
+  gap: 4px !important;
+}
+
+.nvr-workspace-content .rec-badge,
+.nvr-workspace-content .active-stream-badge,
+.nvr-workspace-content .stream-button {
+  min-height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px !important;
+  border-radius: 999px !important;
+  backdrop-filter: blur(8px);
+  font-size: 7px !important;
+}
+
+.nvr-workspace-content .stream-button {
+  border-color: rgba(255,255,255,.12) !important;
+  background: rgba(8,11,15,.66) !important;
+}
+
+.nvr-workspace-content .slot-actions {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .slot-actions button {
+  width: 34px !important;
+  height: 34px !important;
+  border-color: rgba(255,255,255,.12) !important;
+  border-radius: 9px !important;
+  color: #eef3f8 !important;
+  background: rgba(8,11,15,.67) !important;
+  box-shadow: 0 4px 16px rgba(0,0,0,.16);
+  backdrop-filter: blur(10px) !important;
+}
+
+.nvr-workspace-content .slot-actions button:hover {
+  color: #fff !important;
+  background: color-mix(in srgb, var(--nvr-blue) 86%, rgba(8,11,15,.8)) !important;
+}
+
+.nvr-workspace-content .slot-footer {
+  padding: 18px 9px 7px !important;
+  color: rgba(255,255,255,.52) !important;
+  font-size: 7px !important;
+}
+
+.nvr-workspace-content .slot-loading-ws,
+.nvr-workspace-content .slot-state-message {
+  background: #070a0e !important;
+}
+
+.nvr-workspace-content .empty-slot {
+  color: #536071 !important;
+}
+
+.nvr-workspace-content .empty-slot:hover {
+  color: #8998aa !important;
+  border-color: color-mix(in srgb, var(--nvr-blue) 24%, transparent) !important;
+  background: rgba(76,141,255,.035) !important;
+}
+
+.nvr-workspace-content .wall-note {
+  min-height: 34px;
+  margin-top: 8px !important;
+  padding: 7px 10px;
+  gap: 12px !important;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  color: var(--nvr-muted) !important;
+  background: var(--nvr-surface) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .config-camera {
+  border: 1px solid var(--nvr-border);
+  background: var(--nvr-pill-bg) !important;
+}
+
+/* Light mode keeps the chrome bright while the actual video surface stays black. */
+:root[data-theme="light"] .nvr-workspace-content .wall-slot {
+  box-shadow: 0 1px 3px rgba(15,23,42,.12) !important;
+}
+
+:root[data-theme="light"] .nvr-workspace-content .camera-dot.muted,
+:root[data-theme="light"] .nvr-workspace-content .chip-dot,
+:root[data-theme="light"] .nvr-workspace-content .note-dot.gray {
+  background: #a6afba !important;
+}
+
+@media (max-width: 1380px) {
+  .nvr-workspace-content .camera-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 1180px) {
+  .nvr-workspace-content .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .nvr-workspace-content .dashboard-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .nvr-workspace-content .right-column {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .nvr-workspace-content .dashboard-page,
+  .nvr-workspace-content .wall-page {
+    padding: 10px !important;
+  }
+
+  .nvr-workspace-content .metric-grid,
+  .nvr-workspace-content .camera-grid,
+  .nvr-workspace-content .right-column {
+    grid-template-columns: 1fr !important;
+  }
+
+  .nvr-workspace-content .health-badge::after {
+    display: none;
+  }
+
+  .nvr-workspace-content .header-actions .el-button:first-of-type {
+    margin-left: 0 !important;
+  }
+
+  .nvr-workspace-content .wall-header {
+    border-radius: 10px 10px 0 0;
+  }
+
+  .nvr-workspace-content .header-actions {
+    justify-content: flex-start !important;
+  }
+
+  .nvr-workspace-content .wall-toolbar {
+    align-items: stretch !important;
+  }
+
+  .nvr-workspace-content .video-wall.grid-4,
+  .nvr-workspace-content .video-wall.grid-9 {
+    grid-template-columns: 1fr !important;
+  }
+}
