@@ -4,11 +4,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
 
-interface Camera {
-  id: number
-  name: string
-}
-
+interface Camera { id: number; name: string }
 interface EventItem {
   id: number
   camera_id?: number | null
@@ -20,8 +16,8 @@ interface EventItem {
   metadata_json?: string | null
   created_at: string
 }
-
 type SocketState = 'connecting' | 'connected' | 'disconnected'
+type CameraFilter = number | 'all' | 'affected'
 
 const emit = defineEmits<{
   (event: 'open-cameras'): void
@@ -36,7 +32,7 @@ const loading = ref(false)
 const keyword = ref('')
 const levelFilter = ref('all')
 const categoryFilter = ref('all')
-const cameraFilter = ref<number | 'all'>('all')
+const cameraFilter = ref<CameraFilter>('all')
 const detailVisible = ref(false)
 const selectedEvent = ref<EventItem | null>(null)
 const socketState = ref<SocketState>('disconnected')
@@ -46,6 +42,7 @@ let socket: WebSocket | null = null
 let mounted = false
 
 const categories = computed(() => Array.from(new Set(events.value.map((item) => item.category).filter(Boolean))).sort())
+const levelOptions = computed(() => Array.from(new Set(events.value.map((item) => item.level).filter(Boolean))).sort())
 const recent24h = computed(() => {
   const threshold = Date.now() - 24 * 60 * 60 * 1000
   return events.value.filter((item) => {
@@ -61,25 +58,23 @@ const liveLabel = computed(() => socketState.value === 'connected' ? 'WebSocket 
 const filteredEvents = computed(() => {
   const needle = keyword.value.trim().toLowerCase()
   return events.value.filter((item) => {
-    if (levelFilter.value !== 'all' && item.level !== levelFilter.value) return false
+    const level = item.level.toLowerCase()
+    if (levelFilter.value === 'warnings' && !['warning', 'warn'].includes(level)) return false
+    if (levelFilter.value === 'problems' && !['error', 'critical', 'fatal'].includes(level)) return false
+    if (!['all', 'warnings', 'problems'].includes(levelFilter.value) && item.level !== levelFilter.value) return false
     if (categoryFilter.value !== 'all' && item.category !== categoryFilter.value) return false
-    if (cameraFilter.value !== 'all' && item.camera_id !== cameraFilter.value) return false
+    if (cameraFilter.value === 'affected' && typeof item.camera_id !== 'number') return false
+    if (typeof cameraFilter.value === 'number' && item.camera_id !== cameraFilter.value) return false
     if (!needle) return true
     const camera = cameraName(item.camera_id)
-    return [item.message, item.code, item.category, item.level, camera, item.metadata_json || '']
-      .join(' ')
-      .toLowerCase()
-      .includes(needle)
+    return [item.message, item.code, item.category, item.level, camera, item.metadata_json || ''].join(' ').toLowerCase().includes(needle)
   })
 })
-
-const levelOptions = computed(() => Array.from(new Set(events.value.map((item) => item.level).filter(Boolean))).sort())
 
 function cameraName(cameraId?: number | null) {
   if (!cameraId) return '-'
   return cameras.value.find((camera) => camera.id === cameraId)?.name || `摄像头 #${cameraId}`
 }
-
 function levelType(level: string) {
   const value = level.toLowerCase()
   if (['critical', 'fatal', 'error'].includes(value)) return 'danger'
@@ -87,7 +82,6 @@ function levelType(level: string) {
   if (['success', 'recovery', 'recovered'].includes(value)) return 'success'
   return 'info'
 }
-
 function levelLabel(level: string) {
   const value = level.toLowerCase()
   if (value === 'critical') return '严重'
@@ -98,7 +92,6 @@ function levelLabel(level: string) {
   if (value === 'success') return '正常'
   return level
 }
-
 function categoryLabel(category: string) {
   const labels: Record<string, string> = {
     camera: '摄像头', recorder: '录像', recording: '录像', upload: '上传', storage: '存储',
@@ -106,35 +99,19 @@ function categoryLabel(category: string) {
   }
   return labels[category.toLowerCase()] || category
 }
-
 function parsedMetadata(item: EventItem | null): Record<string, unknown> | null {
   if (!item?.metadata_json) return null
   try {
     const value = JSON.parse(item.metadata_json)
     return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-  } catch {
-    return null
-  }
+  } catch { return null }
 }
-
 function metadataText(item: EventItem | null) {
   const parsed = parsedMetadata(item)
-  if (parsed) return JSON.stringify(parsed, null, 2)
-  return item?.metadata_json || ''
+  return parsed ? JSON.stringify(parsed, null, 2) : item?.metadata_json || ''
 }
-
-function openDetail(item: EventItem) {
-  selectedEvent.value = item
-  detailVisible.value = true
-}
-
-function clearFilters() {
-  keyword.value = ''
-  levelFilter.value = 'all'
-  categoryFilter.value = 'all'
-  cameraFilter.value = 'all'
-}
-
+function openDetail(item: EventItem) { selectedEvent.value = item; detailVisible.value = true }
+function clearFilters() { keyword.value = ''; levelFilter.value = 'all'; categoryFilter.value = 'all'; cameraFilter.value = 'all' }
 function relatedAction(item: EventItem) {
   const category = item.category.toLowerCase()
   if (item.recording_id || ['recording', 'recorder', 'playback'].includes(category)) return { label: '查看录像管理', action: () => emit('open-recordings') }
@@ -142,67 +119,44 @@ function relatedAction(item: EventItem) {
   if (item.camera_id || category === 'camera') return { label: '查看摄像头', action: () => emit('open-cameras') }
   return { label: '查看系统健康', action: () => emit('open-health') }
 }
-
 function wsUrl() {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   const cursor = eventCursor === null ? '' : `?after_id=${eventCursor}`
   return `${scheme}//${window.location.host}/ws/events${cursor}`
 }
-
 function mergeEvent(item: EventItem) {
   if (events.value.some((existing) => existing.id === item.id)) return
   eventCursor = eventCursor === null ? item.id : Math.max(eventCursor, item.id)
   events.value = [item, ...events.value].sort((a, b) => b.id - a.id).slice(0, 500)
 }
-
 function closeSocket() {
   if (!socket) return
   const current = socket
   socket = null
-  current.onopen = null
-  current.onmessage = null
-  current.onerror = null
-  current.onclose = null
+  current.onopen = null; current.onmessage = null; current.onerror = null; current.onclose = null
   try { current.close() } catch { /* already closed */ }
 }
-
 function scheduleReconnect() {
   if (!mounted || reconnectTimer !== null) return
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null
-    connectEventsSocket()
-  }, 2000)
+  reconnectTimer = window.setTimeout(() => { reconnectTimer = null; connectEventsSocket() }, 2000)
 }
-
 function connectEventsSocket() {
   closeSocket()
   if (!mounted) return
   socketState.value = 'connecting'
   const ws = new WebSocket(wsUrl())
   socket = ws
-  ws.onopen = () => {
-    if (socket === ws) socketState.value = 'connected'
-  }
+  ws.onopen = () => { if (socket === ws) socketState.value = 'connected' }
   ws.onmessage = (event: MessageEvent) => {
     if (socket !== ws || typeof event.data !== 'string') return
     try {
       const message = JSON.parse(event.data) as { type?: string; data?: EventItem }
       if (message.type === 'event.created' && message.data) mergeEvent(message.data)
-    } catch {
-      // Ignore unknown event frames.
-    }
+    } catch { /* ignore unknown frames */ }
   }
-  ws.onerror = () => {
-    if (socket === ws) socketState.value = 'disconnected'
-  }
-  ws.onclose = () => {
-    if (socket !== ws) return
-    socket = null
-    socketState.value = 'disconnected'
-    scheduleReconnect()
-  }
+  ws.onerror = () => { if (socket === ws) socketState.value = 'disconnected' }
+  ws.onclose = () => { if (socket !== ws) return; socket = null; socketState.value = 'disconnected'; scheduleReconnect() }
 }
-
 async function load() {
   loading.value = true
   try {
@@ -215,29 +169,11 @@ async function load() {
     eventCursor = eventRes.data.reduce((maxId, item) => Math.max(maxId, item.id), 0)
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '事件加载失败')
-  } finally {
-    loading.value = false
-  }
+  } finally { loading.value = false }
 }
-
-async function reload() {
-  await load()
-  connectEventsSocket()
-}
-
-onMounted(() => {
-  mounted = true
-  void (async () => {
-    await load()
-    connectEventsSocket()
-  })()
-})
-
-onBeforeUnmount(() => {
-  mounted = false
-  closeSocket()
-  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
-})
+async function reload() { await load(); connectEventsSocket() }
+onMounted(() => { mounted = true; void (async () => { await load(); connectEventsSocket() })() })
+onBeforeUnmount(() => { mounted = false; closeSocket(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer) })
 </script>
 
 <template>
@@ -248,17 +184,17 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="metrics-grid">
-      <button class="metric-card" :class="{ active: levelFilter === 'all' }" @click="levelFilter = 'all'">
+      <button class="metric-card" :class="{ active: levelFilter === 'all' && cameraFilter === 'all' }" @click="levelFilter = 'all'; cameraFilter = 'all'">
         <span>已加载事件</span><strong>{{ events.length }}</strong><small>最近 24h {{ recent24h }}</small>
       </button>
-      <button class="metric-card warning" @click="levelFilter = levelOptions.includes('warning') ? 'warning' : 'all'">
-        <span>警告</span><strong>{{ warningCount }}</strong><small>需要关注</small>
+      <button class="metric-card warning" :class="{ active: levelFilter === 'warnings' }" @click="levelFilter = 'warnings'">
+        <span>警告</span><strong>{{ warningCount }}</strong><small>warning / warn</small>
       </button>
-      <button class="metric-card danger" @click="levelFilter = levelOptions.includes('error') ? 'error' : levelOptions.includes('critical') ? 'critical' : 'all'">
-        <span>错误 / 严重</span><strong>{{ errorCount }}</strong><small>优先处理</small>
+      <button class="metric-card danger" :class="{ active: levelFilter === 'problems' }" @click="levelFilter = 'problems'">
+        <span>错误 / 严重</span><strong>{{ errorCount }}</strong><small>error / critical / fatal</small>
       </button>
-      <button class="metric-card" @click="cameraFilter = 'all'">
-        <span>涉及摄像头</span><strong>{{ affectedCameras }}</strong><small>有事件关联</small>
+      <button class="metric-card" :class="{ active: cameraFilter === 'affected' }" @click="cameraFilter = 'affected'">
+        <span>涉及摄像头</span><strong>{{ affectedCameras }}</strong><small>仅显示设备相关事件</small>
       </button>
     </div>
 
@@ -266,6 +202,8 @@ onBeforeUnmount(() => {
       <el-input v-model="keyword" clearable :prefix-icon="Search" placeholder="搜索消息、事件码、分类、摄像头或元数据" class="search-input" />
       <el-select v-model="levelFilter" class="filter-select" placeholder="级别">
         <el-option label="全部级别" value="all" />
+        <el-option label="警告类" value="warnings" />
+        <el-option label="错误 / 严重" value="problems" />
         <el-option v-for="level in levelOptions" :key="level" :label="levelLabel(level)" :value="level" />
       </el-select>
       <el-select v-model="categoryFilter" class="filter-select" placeholder="分类">
@@ -274,6 +212,7 @@ onBeforeUnmount(() => {
       </el-select>
       <el-select v-model="cameraFilter" class="camera-select" filterable placeholder="摄像头">
         <el-option label="全部摄像头" value="all" />
+        <el-option label="所有设备相关事件" value="affected" />
         <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
       </el-select>
       <el-button text @click="clearFilters">清除筛选</el-button>
@@ -283,45 +222,24 @@ onBeforeUnmount(() => {
     <div class="table-panel">
       <el-table :data="filteredEvents" height="calc(100vh - 318px)" empty-text="暂无匹配事件" @row-click="openDetail">
         <el-table-column prop="created_at" label="时间" width="170" />
-        <el-table-column label="级别" width="88">
-          <template #default="{ row }"><el-tag size="small" :type="levelType(row.level)">{{ levelLabel(row.level) }}</el-tag></template>
-        </el-table-column>
+        <el-table-column label="级别" width="88"><template #default="{ row }"><el-tag size="small" :type="levelType(row.level)">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
         <el-table-column label="分类" width="108"><template #default="{ row }">{{ categoryLabel(row.category) }}</template></el-table-column>
         <el-table-column prop="code" label="事件码" min-width="150" show-overflow-tooltip />
         <el-table-column label="摄像头" min-width="145" show-overflow-tooltip><template #default="{ row }">{{ cameraName(row.camera_id) }}</template></el-table-column>
         <el-table-column prop="message" label="消息" min-width="320" show-overflow-tooltip />
-        <el-table-column label="关联" width="110">
-          <template #default="{ row }">
-            <span v-if="row.recording_id" class="relation">录像 #{{ row.recording_id }}</span>
-            <span v-else-if="row.camera_id" class="relation">摄像头 #{{ row.camera_id }}</span>
-            <span v-else class="muted">系统</span>
-          </template>
-        </el-table-column>
+        <el-table-column label="关联" width="110"><template #default="{ row }"><span v-if="row.recording_id" class="relation">录像 #{{ row.recording_id }}</span><span v-else-if="row.camera_id" class="relation">摄像头 #{{ row.camera_id }}</span><span v-else class="muted">系统</span></template></el-table-column>
         <el-table-column label="" width="52" fixed="right"><template #default><span class="open-arrow">›</span></template></el-table-column>
       </el-table>
     </div>
 
     <el-drawer v-model="detailVisible" title="事件详情" size="460px">
       <template v-if="selectedEvent">
-        <div class="detail-hero" :class="levelType(selectedEvent.level)">
-          <WarningFilled class="detail-icon" />
-          <div><el-tag size="small" :type="levelType(selectedEvent.level)">{{ levelLabel(selectedEvent.level) }}</el-tag><strong>{{ selectedEvent.message }}</strong><span>{{ selectedEvent.created_at }}</span></div>
-        </div>
+        <div class="detail-hero" :class="levelType(selectedEvent.level)"><WarningFilled class="detail-icon" /><div><el-tag size="small" :type="levelType(selectedEvent.level)">{{ levelLabel(selectedEvent.level) }}</el-tag><strong>{{ selectedEvent.message }}</strong><span>{{ selectedEvent.created_at }}</span></div></div>
         <dl class="detail-list">
-          <div><dt>事件 ID</dt><dd>#{{ selectedEvent.id }}</dd></div>
-          <div><dt>分类</dt><dd>{{ categoryLabel(selectedEvent.category) }}</dd></div>
-          <div><dt>事件码</dt><dd><code>{{ selectedEvent.code }}</code></dd></div>
-          <div><dt>摄像头</dt><dd>{{ cameraName(selectedEvent.camera_id) }}</dd></div>
-          <div><dt>录像</dt><dd>{{ selectedEvent.recording_id ? `#${selectedEvent.recording_id}` : '-' }}</dd></div>
+          <div><dt>事件 ID</dt><dd>#{{ selectedEvent.id }}</dd></div><div><dt>分类</dt><dd>{{ categoryLabel(selectedEvent.category) }}</dd></div><div><dt>事件码</dt><dd><code>{{ selectedEvent.code }}</code></dd></div><div><dt>摄像头</dt><dd>{{ cameraName(selectedEvent.camera_id) }}</dd></div><div><dt>录像</dt><dd>{{ selectedEvent.recording_id ? `#${selectedEvent.recording_id}` : '-' }}</dd></div>
         </dl>
-        <div v-if="selectedEvent.metadata_json" class="metadata-block">
-          <div class="section-label">元数据</div>
-          <pre>{{ metadataText(selectedEvent) }}</pre>
-        </div>
-        <div class="drawer-actions">
-          <el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button>
-          <el-button @click="detailVisible = false">关闭</el-button>
-        </div>
+        <div v-if="selectedEvent.metadata_json" class="metadata-block"><div class="section-label">元数据</div><pre>{{ metadataText(selectedEvent) }}</pre></div>
+        <div class="drawer-actions"><el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button><el-button @click="detailVisible = false">关闭</el-button></div>
       </template>
     </el-drawer>
   </div>
