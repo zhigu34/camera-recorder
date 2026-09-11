@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.recording import Recording
 from app.models.upload import UploadTask
+from app.services.event_log import add_event
 from app.services.system_settings import RuntimeSettings, load_runtime_settings
 
 
@@ -323,16 +324,33 @@ class UploadManager:
                 )
             )
             deleted = 0
+            freed_bytes = 0
             for recording in recordings:
                 path = Path(recording.mp4_path)
+                file_size = int(recording.file_size or 0)
                 if path.exists():
                     try:
+                        if not file_size:
+                            file_size = path.stat().st_size
                         await asyncio.to_thread(path.unlink)
                     except OSError:
                         continue
                 recording.status = "deleted"
                 deleted += 1
+                freed_bytes += max(0, file_size)
             if deleted:
+                add_event(
+                    session,
+                    level="info",
+                    category="storage",
+                    code="storage.retention_cleanup_completed",
+                    message=f"本地保留期清理完成：删除 {deleted} 个已上传录像",
+                    metadata={
+                        "deleted_files": deleted,
+                        "freed_bytes": freed_bytes,
+                        "local_retention_hours": runtime.local_retention_hours,
+                    },
+                )
                 await session.commit()
             return deleted
 
