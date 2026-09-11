@@ -11,7 +11,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Camera Recorder stability acceptance check")
     parser.add_argument("--hours", type=int, default=24, choices=range(1, 169), metavar="1-168")
     parser.add_argument("--url", default="http://127.0.0.1:8000", help="running backend base URL")
-    parser.add_argument("--json", action="store_true", help="print raw JSON only")
+    parser.add_argument("--json", action="store_true", help="print raw stability JSON only")
+    parser.add_argument(
+        "--ignore-uptime",
+        action="store_true",
+        help="allow historical rolling data to pass even if current backend uptime is shorter",
+    )
     return parser
 
 
@@ -33,23 +38,46 @@ def _seconds(value: object) -> str:
     return f"{int(hours)}h {int(minutes)}m"
 
 
-def _fetch(base_url: str, hours: int) -> dict:
-    url = f"{base_url.rstrip('/')}/api/health/stability?hours={hours}"
+def _fetch_json(url: str) -> dict:
     with urlopen(url, timeout=15) as response:  # noqa: S310 - operator-controlled local URL
         return json.load(response)
 
 
-def _print_report(report: dict) -> int:
+def _fetch(base_url: str, hours: int) -> tuple[dict, dict]:
+    base = base_url.rstrip("/")
+    report = _fetch_json(f"{base}/api/health/stability?hours={hours}")
+    summary = _fetch_json(f"{base}/api/health/summary")
+    return report, summary
+
+
+def _effective_verdict(report: dict, uptime_seconds: float, ignore_uptime: bool) -> str:
+    verdict = str((report.get("overall") or {}).get("verdict") or "collecting")
+    if verdict == "fail" or ignore_uptime:
+        return verdict
+    required_seconds = float(report.get("hours") or 0) * 3600
+    if uptime_seconds < required_seconds:
+        return "collecting"
+    return verdict
+
+
+def _print_report(report: dict, uptime_seconds: float, ignore_uptime: bool) -> int:
     overall = report.get("overall", {})
-    verdict = str(overall.get("verdict") or "collecting")
+    verdict = _effective_verdict(report, uptime_seconds, ignore_uptime)
     verdict_label = {
         "pass": "PASS",
         "fail": "FAIL",
         "collecting": "COLLECTING",
     }.get(verdict, verdict.upper())
 
-    print(f"Camera Recorder 稳定性验收：{report.get('hours', '-')}h  {verdict_label}")
+    hours = int(report.get("hours") or 0)
+    required_seconds = hours * 3600
+    print(f"Camera Recorder 稳定性验收：{hours or '-'}h  {verdict_label}")
     print("=" * 68)
+    print(
+        f"当前 backend 连续运行: {_seconds(uptime_seconds)} / 目标 {_seconds(required_seconds)}"
+    )
+    if not ignore_uptime and uptime_seconds < required_seconds and verdict != "fail":
+        print("当前进程连续运行时长不足，历史样本不会被用于提前判定 PASS。")
     print(
         "监控摄像头: {monitored}  通过: {passed}  失败: {failed}  采集中: {collecting}".format(
             monitored=overall.get("monitored_cameras", 0),
@@ -105,17 +133,19 @@ def _print_report(report: dict) -> int:
 def main() -> int:
     args = _parser().parse_args()
     try:
-        report = _fetch(args.url, args.hours)
+        report, summary = _fetch(args.url, args.hours)
     except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         print(f"无法读取稳定性报告: {exc}", file=sys.stderr)
         return 3
 
+    uptime_seconds = float(summary.get("uptime_seconds") or 0)
+    verdict = _effective_verdict(report, uptime_seconds, args.ignore_uptime)
+
     if args.json:
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
         print()
-        verdict = str((report.get("overall") or {}).get("verdict") or "collecting")
         return 0 if verdict == "pass" else 1 if verdict == "fail" else 2
-    return _print_report(report)
+    return _print_report(report, uptime_seconds, args.ignore_uptime)
 
 
 if __name__ == "__main__":
