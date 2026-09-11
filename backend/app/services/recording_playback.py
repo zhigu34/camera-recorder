@@ -1,8 +1,11 @@
 import asyncio
+import time
 from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
+
+_PROXY_CACHE_MAX_AGE_SECONDS = 24 * 3600
 
 
 class RecordingPlaybackManager:
@@ -24,6 +27,10 @@ class RecordingPlaybackManager:
             return {"state": "direct", "direct": True, "error": None}
         proxy = self.proxy_path(recording_id)
         if proxy.exists() and proxy.stat().st_size > 0:
+            try:
+                proxy.touch()
+            except OSError:
+                pass
             return {"state": "ready", "direct": False, "error": None}
         task = self._tasks.get(recording_id)
         if task and not task.done():
@@ -39,6 +46,7 @@ class RecordingPlaybackManager:
         if not source.exists():
             raise FileNotFoundError(str(source))
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self._cleanup_old_sync)
         self._errors.pop(recording_id, None)
         task = asyncio.create_task(
             self._generate(recording_id, source),
@@ -46,6 +54,18 @@ class RecordingPlaybackManager:
         )
         self._tasks[recording_id] = task
         return {"state": "generating", "direct": False, "error": None}
+
+    def _cleanup_old_sync(self) -> None:
+        if not self.proxy_dir.exists():
+            return
+        cutoff = time.time() - _PROXY_CACHE_MAX_AGE_SECONDS
+        for pattern in ("*.mp4", "*.part.mp4"):
+            for path in self.proxy_dir.glob(pattern):
+                try:
+                    if path.stat().st_mtime < cutoff:
+                        path.unlink()
+                except OSError:
+                    continue
 
     async def _generate(self, recording_id: int, source: Path) -> None:
         async with self._semaphore:
