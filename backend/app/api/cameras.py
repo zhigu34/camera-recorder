@@ -13,6 +13,7 @@ from app.services.camera_config import runtime_config
 from app.services.camera_probe import CameraProbeError, probe_camera
 from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
+from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
 
@@ -22,6 +23,26 @@ async def _camera_or_404(camera_id: int, db: AsyncSession) -> Camera:
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
     return camera
+
+
+def _camera_password(camera: Camera) -> str:
+    try:
+        return decrypt_secret(camera.password_encrypted)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="摄像头密码无法解密，请编辑该摄像头并重新输入密码后保存",
+        ) from exc
+
+
+def _runtime_config_or_409(camera: Camera):
+    try:
+        return runtime_config(camera)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="摄像头密码无法解密，请编辑该摄像头并重新输入密码后保存",
+        ) from exc
 
 
 @router.get("", response_model=list[CameraRead])
@@ -112,13 +133,16 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/{camera_id}/probe", response_model=CameraProbeResult)
 async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
+    runtime = await load_runtime_settings(db)
+    password = _camera_password(camera)
     try:
         result = await probe_camera(
             ip=camera.ip,
             port=camera.rtsp_port,
             username=camera.username,
-            password=decrypt_secret(camera.password_encrypted),
+            password=password,
             rtsp_path=camera.rtsp_path,
+            rtsp_timeout_us=runtime.rtsp_timeout_us,
         )
     except CameraProbeError as exc:
         camera.status = "probe_failed"
@@ -181,7 +205,7 @@ async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
-    runtime = await recorder_manager.start(runtime_config(camera))
+    runtime = await recorder_manager.start(_runtime_config_or_409(camera))
     camera.status = "recording"
     add_event(
         db,
@@ -205,7 +229,7 @@ async def stop_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
         level="info",
         category="recorder",
         code="recorder.stopped",
-        message=f"摄像头 {camera.name} 停止录像",
+        message=f"摄像头 {camera.name} 已停止录像",
         camera_id=camera.id,
     )
     await db.commit()
@@ -217,7 +241,7 @@ async def restart_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
-    runtime = await recorder_manager.restart(runtime_config(camera))
+    runtime = await recorder_manager.restart(_runtime_config_or_409(camera))
     camera.status = "recording"
     add_event(
         db,
