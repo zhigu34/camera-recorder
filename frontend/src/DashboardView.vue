@@ -16,6 +16,9 @@ interface CameraHealth {
   ip: string
   enabled: boolean
   expected_recording: boolean
+  connectivity_status: 'unknown' | 'online' | 'offline'
+  recorder_state: string
+  schedule_state: string
   state: string
   abnormal: boolean
   restart_count: number
@@ -31,6 +34,9 @@ interface HealthSummary {
     recording: number
     reconnecting: number
     abnormal: number
+    online: number
+    offline: number
+    unknown: number
   }
   recordings_24h: {
     segments: number
@@ -107,17 +113,39 @@ function eventTime(value: string) {
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
-function stateLabel(state: string) {
+function recorderLabel(state: string) {
   if (state === 'RECORDING') return '录像中'
   if (state === 'RECONNECTING') return '重连中'
   if (state === 'STARTING') return '启动中'
-  return '已停止'
+  if (state === 'STOPPING') return '停止中'
+  return '未录像'
 }
-function stateClass(camera: CameraHealth) {
-  if (camera.abnormal) return 'danger'
-  if (camera.state === 'RECORDING') return 'success'
-  if (camera.state === 'RECONNECTING' || camera.state === 'STARTING') return 'warning'
+function recorderClass(state: string) {
+  if (state === 'RECORDING') return 'success'
+  if (state === 'RECONNECTING' || state === 'STARTING' || state === 'STOPPING') return 'warning'
   return 'muted'
+}
+function connectivityLabel(state: string) {
+  if (state === 'online') return '在线'
+  if (state === 'offline') return '离线'
+  return '未检测'
+}
+function connectivityClass(camera: CameraHealth) {
+  if (!camera.enabled) return 'muted'
+  if (camera.connectivity_status === 'online') return 'success'
+  if (camera.connectivity_status === 'offline') return 'danger'
+  return 'warning'
+}
+function scheduleLabel(state: string) {
+  if (state === 'automatic') return '自动录像'
+  if (state === 'in_window') return '计划时段内'
+  if (state === 'scheduled') return '等待计划时段'
+  if (state === 'manual_override') return '手动运行'
+  if (state === 'manual_paused') return '手动暂停'
+  if (state === 'probe_required') return '需要检测参数'
+  if (state === 'error') return '计划启动失败'
+  if (state === 'global_disabled') return '全局自动启动关闭'
+  return '未启用自动录像'
 }
 function eventClass(level: string) {
   if (level === 'critical' || level === 'error') return 'danger'
@@ -172,7 +200,7 @@ onBeforeUnmount(() => {
       <article class="metric-card primary">
         <div class="metric-icon"><VideoCamera /></div>
         <div class="metric-copy"><span>正在录像</span><strong>{{ summary?.cameras.recording ?? '-' }}<small>/ {{ summary?.cameras.enabled ?? '-' }}</small></strong></div>
-        <div class="metric-foot">共 {{ summary?.cameras.total ?? '-' }} 路摄像头</div>
+        <div class="metric-foot">在线 {{ summary?.cameras.online ?? '-' }} · 离线 {{ summary?.cameras.offline ?? '-' }}</div>
       </article>
       <article class="metric-card">
         <div class="metric-icon"><DataLine /></div>
@@ -187,7 +215,7 @@ onBeforeUnmount(() => {
       <article class="metric-card">
         <div class="metric-icon"><Bell /></div>
         <div class="metric-copy"><span>当前异常</span><strong :class="{ danger: (summary?.cameras.abnormal || 0) > 0 }">{{ summary?.cameras.abnormal ?? '-' }}</strong></div>
-        <div class="metric-foot">{{ summary?.cameras.reconnecting ?? 0 }} 路正在重连</div>
+        <div class="metric-foot">{{ summary?.cameras.reconnecting ?? 0 }} 路正在重连 · {{ summary?.cameras.unknown ?? 0 }} 路未检测</div>
       </article>
     </section>
 
@@ -200,13 +228,15 @@ onBeforeUnmount(() => {
         <div class="camera-grid">
           <div v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-tile">
             <div class="camera-title">
-              <span class="camera-dot" :class="stateClass(camera)"></span>
+              <span class="camera-dot" :class="connectivityClass(camera)"></span>
               <div><strong>{{ camera.name }}</strong><span>{{ camera.ip }}</span></div>
-              <span class="camera-state" :class="stateClass(camera)">{{ stateLabel(camera.state) }}</span>
+              <span class="camera-state" :class="connectivityClass(camera)">{{ connectivityLabel(camera.connectivity_status) }}</span>
+              <span class="camera-state" :class="recorderClass(camera.recorder_state)">{{ recorderLabel(camera.recorder_state) }}</span>
             </div>
             <div class="camera-detail">
+              <span>{{ scheduleLabel(camera.schedule_state) }}</span>
               <span>重连 {{ camera.restart_count }}</span>
-              <span>{{ camera.expected_recording ? '计划录像' : '非录像时段' }}</span>
+              <span v-if="camera.abnormal" class="danger">需要关注</span>
             </div>
             <div v-if="camera.last_error && camera.abnormal" class="camera-error">{{ camera.last_error }}</div>
           </div>
@@ -274,7 +304,7 @@ onBeforeUnmount(() => {
 .panel-head h2 { margin: 4px 0 0; font-size: 13px; font-weight: 640; }.panel-meta { color: #657488; font-size: 10px; }
 .camera-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--nvr-border); }
 .camera-tile { min-height: 92px; padding: 14px 16px; background: var(--nvr-surface); }.camera-tile:hover { background: var(--nvr-surface-2); }
-.camera-title { display: flex; align-items: center; gap: 9px; }.camera-title > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }.camera-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.camera-title span { color: #647287; font-size: 10px; }
+.camera-title { display: flex; align-items: center; gap: 7px; }.camera-title > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }.camera-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.camera-title span { color: #647287; font-size: 10px; }
 .camera-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }.camera-dot.success { background: var(--nvr-green); box-shadow: 0 0 0 3px rgba(46,204,138,.08); }.camera-dot.warning { background: var(--nvr-yellow); }.camera-dot.danger { background: var(--nvr-red); }.camera-dot.muted { background: #526071; }
 .camera-state { flex: 0 0 auto; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,.035); }.camera-state.success { color: var(--nvr-green); }.camera-state.warning { color: var(--nvr-yellow); }.camera-state.danger { color: var(--nvr-red); }.camera-state.muted { color: #718095; }
 .camera-detail { display: flex; gap: 15px; margin: 11px 0 0 16px; color: #637084; font-size: 9px; }.camera-error { margin: 8px 0 0 16px; overflow: hidden; color: var(--nvr-red); font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
@@ -284,5 +314,5 @@ onBeforeUnmount(() => {
 .event-list { padding: 5px 0; }.event-row { display: flex; gap: 10px; padding: 10px 16px; }.event-row + .event-row { border-top: 1px solid rgba(255,255,255,.035); }.event-marker { flex: 0 0 6px; width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; }.event-marker.danger { background: var(--nvr-red); }.event-marker.warning { background: var(--nvr-yellow); }.event-marker.info { background: #577291; }.event-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }.event-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 560; }.event-content span { color: #5f6e81; font-size: 9px; }
 .empty-state { grid-column: 1/-1; padding: 34px; text-align: center; color: #657488; font-size: 11px; background: var(--nvr-surface); }.empty-state.compact { padding: 20px; }
 @media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.right-column{display:grid;grid-template-columns:1fr 1fr}}
-@media(max-width:760px){.dashboard-page{padding:14px}.dashboard-head{align-items:flex-start;flex-direction:column}.health-badge{width:100%}.metric-grid,.camera-grid,.right-column{grid-template-columns:1fr}.dashboard-head h1{font-size:21px}}
+@media(max-width:760px){.dashboard-page{padding:14px}.dashboard-head{align-items:flex-start;flex-direction:column}.health-badge{width:100%}.metric-grid,.camera-grid,.right-column{grid-template-columns:1fr}.dashboard-head h1{font-size:21px}.camera-state:nth-last-child(1){display:none}}
 </style>
