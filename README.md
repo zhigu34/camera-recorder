@@ -1,38 +1,69 @@
 # Camera Recorder
 
-轻量级 RTSP 摄像头录像、管理与 115 云端归档平台。
+轻量级 RTSP 摄像头录像、管理、健康监控与 OpenList/WebDAV 云端归档平台。
 
-## 已实现核心能力
+项目优先保证持续录像和故障隔离：单路摄像头、FFmpeg、Remux、上传或云端存储异常都不应影响其他录像 Worker。
 
-- 多路 RTSP TCP 长连接录像，每台摄像头独立 FFmpeg Worker
-- 摄像头 CRUD、单会话 RTSP Probe、动态识别分辨率/FPS/音频参数
-- H.265 / AAC 原码流保存，不重新编码主录像
+## 核心能力
+
+- 多路 RTSP/TCP 长连接录像，每台摄像头独立 FFmpeg Worker
+- 摄像头 CRUD、单会话 Probe、动态识别编码 / 分辨率 / FPS / 音频参数
+- H.264 / H.265 与音频原码流保存，主录像不重新编码
 - `native` / `reconstruct` / `wallclock` 三种时间戳策略
-- `reconstruct` 根据实际 FPS 和音频参数动态生成 `setts + prescale=1`
-- 默认 10 分钟 MKV 连续切片，不需要每段重新建立 RTSP 连接
-- 后台 MKV → MP4 无损 Remux，HEVC MP4 使用 `hvc1`
-- ffprobe 成品健康检查、断线自动重连、异常 MKV 保留
-- SQLite 元数据持久化，摄像头、SMTP、WebDAV 密码加密保存
-- OpenList WebDAV 持久化上传队列，可归档到 115 Open Platform
-- 上传失败自动退避重试，上传成功后按本地保留时间自动清理
-- Vue 3 Web 管理界面：摄像头、录像、115 上传、告警和系统设置
-- Docker Compose 一键部署 Web + API + OpenList，支持 amd64 / arm64（Apple Silicon）
+- 长连接 MKV 切片，后台无损 Remux 为 MP4
+- ffprobe 成品健康检查、断线自动重连、异常文件保留
+- 周录制计划、手动开始/暂停与自动恢复
+- 摄像头连接状态、Recorder 状态、Schedule 状态三线独立
+- SQLite 元数据、运行时设置、事件、上传任务持久化
+- OpenList WebDAV 上传队列，可挂载任意 OpenList 支持的可写存储
+- 上传失败自动退避，上传成功后按本地保留策略自动清理
+- 本地与 OpenList 云端录像统一时间轴回放
+- 1 / 4 / 9 宫格实时预览
+- 事件中心、邮件告警、系统健康、24h/72h 稳定性验收
+- Vue 3 + TypeScript 管理界面
+- Docker Compose 一键部署，支持 amd64 / arm64
 
-## Docker Compose 一键启动
+## 摄像头状态模型
 
-前置条件只需要 Docker Desktop / Docker Engine + Compose：
+三个维度互不覆盖：
+
+```text
+connectivity_status
+  unknown / online / offline
+
+recorder_state
+  STOPPED / STARTING / RECORDING / RECONNECTING / STOPPING
+
+schedule_state
+  disabled / global_disabled / automatic / scheduled / in_window
+  manual_override / manual_paused / probe_required / error
+```
+
+`status` 仅作为旧 API / 数据库兼容别名保留；新代码应使用上面三个明确字段。
+
+## 部署
+
+前置条件：Docker Engine / Docker Desktop + Compose。
+
+首次部署：
 
 ```bash
 git clone git@github.com:zhigu34/camera-recorder.git
 cd camera-recorder
 cp .env.example .env
-# 必须修改 CAMREC_SECRET_KEY 和 OPENLIST_ADMIN_PASSWORD
-docker compose up -d --build
+# 修改 CAMREC_SECRET_KEY 和 OPENLIST_ADMIN_PASSWORD
+./deploy.sh
 ```
 
-`.env` 只保留部署级参数：端口、时区、系统加密密钥、OpenList 容器初始化账号信息。录像、磁盘阈值、上传策略、WebDAV、邮件告警等运行时参数均在 Web 中配置并保存到 SQLite。
+以后升级统一使用：
 
-打开：
+```bash
+git pull && ./deploy.sh
+```
+
+`deploy.sh` 会检查 Docker/Compose/Buildx、FFmpeg 本地包、Compose 配置、镜像构建和服务健康状态。已有且有效的 FFmpeg 包与 Docker 层会直接复用。
+
+服务默认地址：
 
 ```text
 Camera Recorder  http://127.0.0.1:8080
@@ -40,100 +71,83 @@ FastAPI          http://127.0.0.1:8000
 OpenList         http://127.0.0.1:5244
 ```
 
-查看状态：
-
-```bash
-docker compose ps
-docker compose logs -f backend
-```
-
-停止：
-
-```bash
-docker compose down
-```
-
-数据库和录像不会因为 `down` 被删除，数据保存在宿主机：
+宿主机持久化目录：
 
 ```text
 data/           SQLite
 recordings/     最终 MP4
-staging/        正在录像/待处理 MKV
+staging/        正在录像 / 待处理 MKV
 failed/         处理失败的 MKV
-logs/           FFmpeg 日志
+logs/           FFmpeg 与部署日志
 openlist-data/  OpenList 配置与数据库
 ```
 
-> 后端 Docker 镜像按构建架构下载当前 BtbN 静态 FFmpeg，并在镜像构建阶段确认 `setts` 支持 `prescale`；不满足要求时直接停止构建。
-
 ## 首次使用
 
-1. 打开 Web → `摄像头` → `添加摄像头`。
-2. 填写名称、IP、账号密码、RTSP Path（例如 `/ch1/main`）。
-3. 当前已验证的萤石设备优先选择 `reconstruct`。
-4. 保存后先点 `Probe`，系统会读取真实 FPS、分辨率、音频采样率等。
-5. Probe 成功后点击 `开始`，或点击顶部 `全部开始`。
-6. 完成的 Segment 会自动从 MKV 无损封装为 MP4 并出现在 `录像文件` 页面。
-7. 右下角进入 `系统设置`，配置切片、磁盘阈值、115 上传和 WebDAV 参数。
-8. `告警设置` 页面配置 SMTP 和摄像头掉线邮件通知。
+1. 打开 `摄像头` → `添加摄像头`。
+2. 填写名称、IP、账号密码和 RTSP Path。
+3. 保存后执行 `检测`，让系统读取真实媒体参数。
+4. 根据设备情况选择时间戳模式；已验证存在时间戳问题的设备优先使用 `reconstruct`。
+5. 手动开始录像，或在 `录制计划` 中启用自动录像。
+6. 在 `实时监控` 查看预览，在 `录像回放` 查看时间轴和云端归档录像。
+7. 在 `系统设置` 配置切片、磁盘阈值、OpenList/WebDAV 和本地保留策略。
+8. 在 `告警设置` 配置 SMTP 与通知策略。
 
-## 115 上传
+## OpenList / WebDAV 归档
 
-Compose 会一起启动 OpenList，但 **115 OAuth 授权必须由账号持有人完成一次**。
+Camera Recorder 只依赖标准 WebDAV，不直接依赖具体云盘 API。实际存储由 OpenList 管理，可以是任意 OpenList 支持且允许写入的后端。
 
-完成下面步骤即可启用自动上传：
-
-1. 打开 `http://127.0.0.1:5244`，用 `admin` + `.env` 中的 `OPENLIST_ADMIN_PASSWORD` 登录。
-2. 获取 115 Open 的 Access Token / Refresh Token。
-3. 在 OpenList 添加 `115 Open Platform` 存储。
-4. 挂载路径填写 **`115`**。
-5. 确认 `/115` 能正常访问。
-6. 打开 Camera Recorder → `系统设置`。
-7. 填写 WebDAV URL、用户名、密码、远端根目录，并开启 `自动上传`。
-8. 保存后立即生效，无需重启 Docker。
-
-默认 WebDAV URL：
+两种常见配置都支持：
 
 ```text
-http://openlist:5244/dav/115
+WebDAV URL: http://openlist:5244/dav/archive
+远端根目录: 监控录像
 ```
 
-随后最终 MP4 会自动上传到：
+或：
 
 ```text
-115/监控录像/{摄像头名称}/YYYY-MM-DD/{摄像头名称}_YYYY-MM-DD_HH-MM-SS.mp4
+WebDAV URL: http://openlist:5244/dav
+远端根目录: archive/监控录像
 ```
 
-完整说明：[115 / OpenList 配置](docs/115_OPENLIST.md)
+最终目录类似：
+
+```text
+监控录像/
+└── 摄像头名称/
+    └── YYYY-MM-DD/
+        └── 摄像头名称_YYYY-MM-DD_HH-MM-SS.mp4
+```
+
+详见：[OpenList / WebDAV 配置](docs/OPENLIST.md)。
 
 ## 技术栈
 
-- Backend: Python 3.12+, FastAPI, SQLAlchemy 2, SQLite
-- Frontend: Vue 3, TypeScript, Vite, Pinia, Element Plus
+- Backend: Python 3.12+, FastAPI, SQLAlchemy 2, SQLite, asyncio
+- Frontend: Vue 3, TypeScript, Vite, Element Plus, Axios
 - Media: FFmpeg / ffprobe
-- Cloud bridge: OpenList / WebDAV / 115 Open Platform
+- Archive bridge: OpenList / WebDAV
 - Runtime: Docker Compose + Nginx
 
 ## 文档
 
-- [开发设计](docs/DEVELOPMENT.md)
-- [系统架构](docs/ARCHITECTURE.md)
-- [版本路线](docs/ROADMAP.md)
 - [启动与开发](docs/GETTING_STARTED.md)
-- [115 / OpenList](docs/115_OPENLIST.md)
+- [系统架构](docs/ARCHITECTURE.md)
+- [开发设计](docs/DEVELOPMENT.md)
+- [OpenList / WebDAV](docs/OPENLIST.md)
+- [版本路线](docs/ROADMAP.md)
 
 ## 安全
 
-- 不要提交 `.env`、摄像头密码、完整 RTSP URL、115 Token 或录像文件。
-- 摄像头、SMTP、WebDAV 密码只通过 Web/API 写入本地 SQLite，并使用 `CAMREC_SECRET_KEY` 派生的密钥加密。
-- **`CAMREC_SECRET_KEY` 在系统开始使用后不要随意修改**，否则旧密文无法解密。
-- OpenList 不建议直接以明文 HTTP 暴露到公网；本项目默认定位于可信 LAN 内使用。
+- 不要提交 `.env`、数据库、摄像头密码、完整 RTSP URL、WebDAV 密码、Token 或录像文件。
+- 摄像头、SMTP、WebDAV 密码使用 `CAMREC_SECRET_KEY` 派生密钥加密后保存到 SQLite，API 不回显明文。
+- `CAMREC_SECRET_KEY` 开始使用后应保持稳定，否则旧密文无法解密。
+- OpenList 默认定位于可信 LAN 内使用；如暴露到公网，应放在 HTTPS、认证与访问控制之后。
 
-## 当前下一步
+## 当前重点
 
-代码层面的录像、Remux、基础健康检查、上传队列、邮件告警、SQLite 运行时配置和 Compose 已完成。下一阶段重点是：
-
-- 真实摄像头 10 路 72 小时长稳测试
-- 更细粒度 Segment 健康评分
-- WebSocket 实时状态推送
-- 更多告警通道
+- 10 路 24h / 72h 真实稳定性验证与阈值校准
+- Chrome / Safari / Edge 本地与云端回放实机验收
+- 继续清理旧兼容代码与重复状态获取
+- 更细粒度录像健康评分与更多告警通道

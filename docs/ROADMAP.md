@@ -1,237 +1,196 @@
 # 版本路线
 
-> 当前开发版本：V0.8 录像浏览与 Web 回放版。
+> 当前阶段：V0.9.x 前端 V2 与状态模型收敛。
 >
-> 原路线中的部分能力已经提前完成，包括 OpenList/115 上传、统一邮件告警、SQLite 系统设置、批量添加摄像头和实时预览。
+> 录像、回放、OpenList/WebDAV 归档、实时预览、健康中心、事件中心和邮件告警等核心能力已经落地，当前重点从“补页面”转向状态一致性、稳定性验证和维护面清理。
 
-## V0.1 技术验证版
+## 已完成阶段
 
-目标：证明核心录像链路稳定。
+### V0.1 ～ V0.2：核心录像与多路并发
 
 - FastAPI / SQLite 基础框架
 - Camera CRUD
-- 单会话 RTSP Probe
-- FFmpegCommandBuilder
-- 单路 CameraWorker
-- `native` / `reconstruct` 时间戳策略
-- 10 分钟 MKV 切片
+- RTSP Probe
+- FFmpeg Command Builder
+- 单路与多路 CameraWorker
+- `native` / `reconstruct` / `wallclock`
+- 长连接切片
 - MKV → MP4 stream-copy Remux
-- 基础 ffprobe 健康检查
-- 最小前端：摄像头列表、添加、Probe、开始、停止
+- ffprobe 健康检查
+- Recorder 自动重连与故障隔离
 
-验收：单路连续 24 小时，无持续时间戳异常，MP4 可播放且音画同步。
+### V0.7：健康与稳定性
 
-## V0.2 多路录像版
-
-目标：10 路稳定并发。
-
-- RecorderManager
-- 10 个独立 CameraWorker
-- 自动重连 / 指数退避
-- 独立日志
-- SegmentProcessor 队列
-
-验收：10 路同时录像 24 小时；任意一路断线不影响其他路，恢复后自动继续录像。
-
-## V0.7 稳定性与实时状态版
-
-目标：让系统能够直接回答“现在是否健康”和“过去 24 / 72 小时是否稳定”，并为多路压测提供可观测性和明确验收结果。
-
-### 已完成
-
-- `GET /api/health/summary` 健康快照
-- `/ws/status` WebSocket 每 2 秒实时推送
-- 系统健康页面
-- 服务运行时间
-- 当前录像 / 重连 / 异常摄像头统计
-- 每路 Recorder 重连、时间戳和网络警告统计
-- 最近 24h 录像片段、异常片段和失败片段统计
-- 上传队列状态汇总
-- 磁盘使用率和健康状态
-- 每分钟摄像头健康采样
-- 健康采样 SQLite 持久化与 7 天自动保留
-- `GET /api/health/trends` 1～168 小时趋势查询
-- 24h 摄像头在线率
-- 24h 录像完整率
-- 按小时在线趋势
-- 每路摄像头稳定性汇总
-- FFmpeg 启动失败 / 异常退出事件记录
-- 连续 3 次 FFmpeg 失败识别与恢复
-- 秒级断流开始 / 恢复事件
-- 单次、累计、最长断流时长统计
-- `GET /api/health/stability` 稳定性验收报告
-- 24h / 72h 压测验收切换
-- 采样覆盖率 / 在线率 / 录像完整率 / FFmpeg 异常 / 连续失败 / 断流联合判定
-- 磁盘 critical 每分钟自动检查
-- 仅清理“已上传成功 + 超过本地保留期”的安全录像
-- 紧急清理按最旧优先，目标降至 warning 阈值以下
-- `local_retention_hours=-1` 时严格禁止自动删除
-- 普通保留期清理和紧急清理事件审计
-- 健康中心显示最近一次紧急磁盘清理结果
-- 统一告警旁路监控
-- 磁盘 critical / 清理受阻 / FFmpeg 连续失败 / 上传最终失败邮件告警
+- `GET /api/health/summary`
+- `/ws/status`
+- 每分钟健康采样
+- 24h 趋势
+- 24h / 72h 稳定性验收
+- Recorder 可用率 / 录像完整率
+- FFmpeg 失败、连续失败和断流统计
+- 磁盘 warning / critical
+- 安全自动清理
 - 告警去重与恢复通知
 
-### 持续验证
+历史接口中的 `online_rate` 表示期望录像时段内 Recorder 可用率；前端统一展示为“录像可用率”，不再与 RTSP 连接状态混淆。
 
-- 实际执行 10 路 24h / 72h 稳定性压测并根据数据调整验收阈值
-- WebSocket 推送继续扩展到主 Dashboard、上传和事件中心
+### V0.8：录像浏览与 Web 回放
 
-## V0.8 录像浏览与 Web 回放版（当前）
+- `/recordings/browser`
+- 摄像头 + 日期查询
+- 24 小时时间轴
+- 月历聚合
+- 录像缺口识别
+- 本地 H.264 / HEVC 回放
+- HEVC 解码失败后 H.264 Proxy fallback
+- Proxy Range / faststart / 缓存
+- 上一段 / 下一段与跨日自动续播
+- 云端已归档录像重新纳入时间轴
+- OpenList WebDAV 云端流式回放
+- 外部直链 302 与 Range proxy
+- 云端 HEVC 远程源 Proxy fallback
+- 相邻录像预热
+- 后端和浏览器回放质量遥测
 
-目标：让已录制内容可以按日期快速定位，并在浏览器中连续回看。
+### V0.9：前端与状态架构收敛
 
-### 已完成
+已完成：
 
-- 独立 `/recordings/browser` 录像浏览页面
-- 按摄像头 + 日期查询录像
-- 按部署 `TZ` 解释录像文件名派生的本地墙上时间
-- 进入页面默认定位最新录像摄像头和日期
-- 24 小时时间轴展示录像片段
-- 录像片段列表、健康状态、上传状态、时长、大小、编码和分辨率展示
-- H.264 MP4 原文件直接 Web 播放
-- HEVC/H.265 浏览器原片优先，实际解码失败才回退 H.264
-- HEVC fallback 使用 fragmented MP4 边转边播，无需等待整段转码完成
-- 边转边播完成后 stream-copy 整理为 faststart H.264 Proxy 缓存
-- AAC 音频 Proxy 直接 stream-copy，非 AAC 才转码
-- Proxy 单并发、最多 2 编码线程，避免抢占录像资源
-- Proxy 24 小时临时缓存自动淘汰
-- 完整 Proxy HTTP Range 转发，支持浏览器拖动 / 跳播
-- FFmpeg `-progress` 实时解析 Proxy 已转时长和运行时间
-- 播放器每秒显示 H.264 Proxy 转码百分比
-- `POST /api/recordings/{id}/playback/cancel` 主动终止 Proxy 转码
-- 停止转码后清理 `.part.mp4` / live 临时文件，不留下残缺缓存
-- 关闭播放器时主动终止仍在运行的边转边播进程
-- 原始 H.265 录像文件不修改
-- 上一段 / 下一段播放
-- 播放结束自动续播
-- `GET /api/recordings/{id}/adjacent` 全局相邻可播放录像导航
-- 上一段 / 下一段支持跨自然日，并自动跳过不可播放历史记录
-- 当天最后一段播放结束后自动进入后续日期的第一条可播放录像
-- 中间整天无录像时继续寻找下一条可播放录像
-- 跨日时自动切换当前日期、时间轴和录像列表，保持播放器连续工作
-- 时间轴当前播放片段高亮
-- 录像列表当前播放行高亮
-- 时间轴真实录像缺口识别与斜纹标识
-- 缺口次数 / 累计缺失时长汇总
-- 健康 / 警告 / 异常 / 已清理片段状态强化
-- `GET /api/recordings/calendar` 月度录像聚合
-- 月历显示每天录像片段数、总时长、云端片段和异常提示
-- 本地已清理录像重新纳入时间轴、上一段 / 下一段和自动续播
-- OpenList/115 已归档录像直接云端流式回放，不再要求整段预下载
-- OpenList WebDAV 302 外部直链直接交给浏览器，媒体流量可绕过 camera-recorder
-- OpenList 非 302 场景由 camera-recorder 保留 HTTP Range 进行流式透传
-- OpenList WebDAV 用户名 / 密码只保留在后端，不暴露给浏览器
-- 云端 H.264 直接原片播放
-- 云端 HEVC 优先让浏览器直接解码，失败时 FFmpeg 直接读取远程流边转 H.264 边播放
-- 云端 HEVC 完成转码后只缓存 H.264 Proxy，不缓存完整 HEVC 原片
-- 旧版 `cloud-playback` 完整下载缓存机制保留为内部兜底能力
-- 当前片段开始播放后自动定位下一条真正可播放录像
-- 下一条为 OpenList/115 云端录像时，在片尾前 45 秒执行轻量 Range 预热
-- OpenList provider/CDN 直链短时缓存，自动续播命中后直接 302，减少重复解析等待
-- 同摄像头预热任务自动去重；提前切片时取消旧任务，避免无效后台探测
-- `GET /api/playback/metrics` 暴露预热次数、直链命中、失败数和活跃任务
-- 回放质量指标拆分为 OpenList 预热探测耗时，以及本地流 / 云端流 / H.264 Proxy 的后端首个响应体或重定向耗时（平均 / P95 / 最大）
-- 浏览器侧捕获 `loadedmetadata` / `loadeddata` / `canplay` / `playing` / `error` 回放事件
-- 支持 `requestVideoFrameCallback` 的浏览器记录真实首帧提交时间，不支持时回退 `playing`
-- `POST /api/playback/metrics/client` 接收浏览器回放质量样本
-- 样本按浏览器主版本 / 平台 / 编码 / 播放模式 / 来源聚合成功率和首帧平均 / P95
-- 浏览器遥测不上传完整 UA、视频 URL、OpenList token、凭据或 IP，且只保留内存最近 500 条
-- 系统健康页新增 Web 回放质量 / 浏览器兼容性面板
+- 新 NVR Shell
+- 左侧可折叠导航
+- 顶部统一页面标题
+- 移除旧 workspace tabs
+- Dashboard V2
+- 摄像头管理 V2
+- 录像管理 V2
+- 上传管理 V2
+- 事件中心 V2
+- 告警设置 V2
+- 系统健康 V2
+- 录制计划页面
+- 1 / 4 / 9 宫格实时预览
+- 删除 legacy `App.vue` / `Root.vue`
+- OpenList/WebDAV 去存储品牌绑定
+- 摄像头连接 / Recorder / Schedule 三状态分离
+- Dashboard 与 Health 统一状态口径
+- 删除旧回放页面代际与预览透传层
 
-### 下一步
+当前状态模型：
 
-- 使用 Chrome / Safari / Edge 实机播放本地 H.264、HEVC、OpenList H.264、OpenList HEVC，积累真实样本
-- 根据实机首帧、启动错误和预热命中数据调整 prefetch lead time / 直链 TTL / HEVC fallback 策略
-- V0.8 回放模块完成实机验收后冻结功能，进入 10 路 24h / 72h 稳定性验证
+```text
+connectivity_status
+  unknown / online / offline
+
+recorder_state
+  STOPPED / STARTING / RECORDING / RECONNECTING / STOPPING
+
+schedule_state
+  disabled / global_disabled / automatic / scheduled / in_window
+  manual_override / manual_paused / probe_required / error
+```
+
+## 当前优先级
+
+### 1. 真实稳定性验证
+
+- 10 路 24h 连续录像
+- 10 路 72h 连续录像
+- 主动断网 / 摄像头重启 / RTSP 抖动
+- FFmpeg 异常退出恢复
+- OpenList/WebDAV 故障期间录像持续性
+- 磁盘 critical 自动保护
+- 根据真实数据校准稳定性验收阈值
+
+### 2. 回放实机验收
+
+使用 Chrome / Safari / Edge 验证：
+
+- 本地 H.264
+- 本地 HEVC
+- OpenList H.264
+- OpenList HEVC
+- 跨日自动续播
+- Proxy fallback
+- 云端预热命中
+
+根据真实首帧耗时和错误数据调整：
+
+- prefetch lead time
+- 直链 TTL
+- HEVC fallback 条件
+- Proxy 缓存策略
+
+### 3. 维护面继续收敛
+
+- 逐步删除旧 `status` API 兼容依赖
+- 减少重复状态请求
+- 清理组件名中的历史 V2/V3 后缀
+- 收敛前端共享类型与状态 label 映射
+- 文档与 OpenAPI 保持一致
+- 增加 lint / dead-code 检查
 
 ## V1.0 正式可用版
 
-- Dashboard
-- 摄像头管理
-- 录像状态
-- 录像文件管理
-- 事件中心
-- 健康检查
-- 日志查看
-- 磁盘统计 / 告警
-- 启动恢复
-- Graceful Shutdown
-- Linux systemd / Docker Compose 部署完善
+目标：家庭 / 小型现场可长期运行和维护。
+
+验收重点：
+
+- 10 路稳定性数据达标
+- 启动恢复可靠
+- Graceful Shutdown 可验证
+- 录像缺失可观测
+- 磁盘策略安全
+- 上传失败不影响本地录像
+- 告警可用
+- 本地与云端回放可用
+- Docker 部署、升级、回滚流程清晰
+
+计划补齐：
+
+- 日志查看 / 下载入口
+- 配置导入导出
+- 更完整的操作审计
+- 发布版本与迁移说明
 
 ## V1.1 稳定性增强
 
-- 录像健康评分
-- RTSP 重连统计
-- 时间戳异常统计
-- 24h 健康趋势
-- 磁盘自动清理
-- 日志轮转
-- 配置导入导出
+- 更细粒度录像健康评分
+- 长期稳定性趋势
+- 日志轮转策略
+- 告警冷却与策略细化
+- Webhook / 企业微信 / Telegram 等通知通道
+- Prometheus Metrics
 
-## V1.2 115 云端归档
+## V1.2 存储与归档增强
 
-当前核心能力已提前完成：
+OpenList/WebDAV 已作为统一归档层，后续重点：
 
-- UploadManager
-- UploadTask
-- OpenList WebDAV Provider
-- 自动上传 / 失败重试
-- 上传幂等
-- 本地保留时间
-- 上传成功后自动清理
-- 上传最终失败邮件告警与恢复通知
-- 已归档录像直接纳入时间轴回放
-- OpenList 302 直链 / Range 流式回放
-- HEVC 云端远程源直接转 H.264 fallback
-- 相邻录像直链预热
-- 云端播放预热命中与后端响应耗时统计
-- 浏览器真实首帧 / 启动错误 / 编解码兼容性统计
+- 多归档目标
+- Provider 级健康状态
+- 云端回放链路长期趋势
+- 归档一致性校验
+- 大规模历史录像索引优化
 
-后续增强：
-
-- 预热阈值根据真实播放数据动态校准
-- 云端播放链路质量长期趋势
-
-## V1.3 录像浏览
-
-核心能力已提前到 V0.8 完成，后续继续增强：
-
-- 更平滑的片段切换实机调优
-- 播放性能与失败率长期可观测性
-
-## V1.4 告警
-
-当前已完成：
-
-- 摄像头离线与恢复
-- FFmpeg 连续失败
-- 磁盘严重不足 / 清理受阻
-- 上传长期失败
-- 邮件去重、恢复通知
-
-后续扩展：
-
-- Webhook / 企业微信 / Telegram
-- 更细的告警策略和冷却配置
+不在 Camera Recorder 内直接实现具体云盘 SDK；实际存储适配优先交给 OpenList。
 
 ## V2.0 NVR Lite
 
-实时预览已经提前实现，后续重点：
-
-- 1 / 4 / 9 宫格实时预览
-- 完整时间轴
 - 多用户 / RBAC
 - 摄像头分组
-- 多存储 Provider
 - 多节点
-- Prometheus Metrics
+- 多存储目标策略
+- 更完整事件规则
 - 远程管理
+- 设备发现 / ONVIF（评估后决定）
 
-## 当前开发顺序
+## 长期原则
 
-1. V0.8 Chrome / Safari / Edge 实机兼容性验收与参数校准
-2. 10 路 24h / 72h 实际稳定性验证与阈值校准
-3. WebSocket 扩展到 Dashboard / 上传 / 事件中心
-4. 前端整体路由 / Tab / 导航架构升级
-5. 多画面实时预览
+```text
+可靠录像
+  > 状态正确
+  > 可恢复
+  > 文件完整
+  > 存储安全
+  > 可回放
+  > UI 丰富度
+```

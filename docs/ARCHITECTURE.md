@@ -3,28 +3,48 @@
 ## 总览
 
 ```text
-Browser (Vue 3)
+Browser / Vue 3
       │
  REST / WebSocket
       │
-  FastAPI
+   FastAPI
       │
-      ├── RecorderManager ── CameraWorker × N ── FFmpeg ── RTSP/TCP Cameras
-      │
+      ├── Camera Probe ──────────────── connectivity_status
+      ├── RecorderManager ── CameraWorker × N ── FFmpeg ── RTSP/TCP
+      ├── RecordingScheduleManager ─── schedule_state
       ├── SegmentProcessor ── ffprobe / remux / health check
-      │
-      ├── StorageManager ── disk thresholds / cleanup
-      │
-      ├── UploadManager ── Provider ── 115 / OpenList / future backends
-      │
-      └── EventBus ── WebSocket / event persistence
+      ├── StorageCleanupManager ── disk thresholds / safe cleanup
+      ├── UploadManager ── OpenList WebDAV ── storage backend
+      ├── HealthSampler / StabilityReport
+      └── AlertMonitor / Event persistence
 
-SQLite 保存元数据、状态、事件和任务；媒体文件只保存在文件系统。
+SQLite 保存配置、元数据、事件、健康采样和任务；媒体文件保存在文件系统。
 ```
 
-## 进程模型
+## 状态所有权
 
-每台摄像头一个长期 FFmpeg 子进程。Web API 不直接承担 FFmpeg 生命周期，所有操作统一通过 `RecorderManager`。
+摄像头状态拆成三个维度，禁止互相覆盖：
+
+```text
+Probe
+  └── connectivity_status
+      unknown / online / offline
+
+RecorderManager
+  └── recorder_state
+      STOPPED / STARTING / RECORDING / RECONNECTING / STOPPING
+
+RecordingScheduleManager
+  └── schedule_state
+      disabled / global_disabled / automatic / scheduled / in_window
+      manual_override / manual_paused / probe_required / error
+```
+
+数据库 `camera.status` 只作为旧数据/API 兼容字段保留，并按连接状态解释。新代码不得再把 Recorder 或 Schedule 状态写入该字段。
+
+## Recorder 进程模型
+
+每台摄像头对应一个独立长期 FFmpeg 子进程：
 
 ```text
 RecorderManager
@@ -35,11 +55,14 @@ RecorderManager
 
 CameraWorker 负责：
 
-- 生成安全的 FFmpeg 参数
-- 启动/停止/重启子进程
-- 采集 stderr 并分类 warning
-- 自动重连
-- 上报状态和事件
+- 生成 FFmpeg 参数
+- 启动 / 停止 / 重连
+- stderr 分类统计
+- 指数退避
+- Recorder runtime 快照
+- 录像链路中断与恢复事件
+
+一路摄像头异常不能导致其他 Worker 停止。
 
 ## 媒体链路
 
@@ -51,7 +74,7 @@ FFmpeg stream copy
 Timestamp strategy
   ├── native
   ├── reconstruct(setts)
-  └── wallclock(special-case only)
+  └── wallclock
   ↓
 Long-running segmentation
   ↓
@@ -65,31 +88,88 @@ SegmentProcessor
   ↓
 recordings/
   ↓
-Upload Queue
+UploadTask
+  ↓
+OpenList WebDAV
 ```
 
-## 并发策略
+主录像不做视频转码。HEVC 浏览器不兼容时，仅回放链路按需生成 H.264 Proxy，不修改原始录像。
 
-- Recorder：每路独立 FFmpeg，数量等于启用摄像头数。
-- Remux：默认并发 2～4，避免抢占录像磁盘 IO。
-- Upload：默认并发 2，避免抢占录像网络与磁盘。
+## 录制调度
+
+`RecordingScheduleManager` 每隔约 10 秒 reconcile：
+
+- 处理全局自动启动开关
+- 处理摄像头自动录像开关
+- 处理周计划窗口
+- 管理自动启动的 Recorder
+- 尊重手动开始和手动暂停 override
+
+计划状态只描述“调度意图”，不表示网络在线，也不表示 FFmpeg 一定正在录像。
+
+## 上传与云端存储
+
+Camera Recorder 只依赖标准 WebDAV。OpenList 负责适配实际存储后端，因此应用本身不绑定具体云盘品牌。
+
+上传与录像完全解耦：
+
+- 上传失败不停止 Recorder
+- UploadTask 写入 SQLite
+- 自动重试使用退避
+- 上传成功后才允许按本地保留策略清理
+- 本地文件清理后仍保留 Recording 元数据
+- 云端录像继续参与时间轴、相邻录像和自动续播
+
+## 健康与稳定性
+
+实时健康源：
+
+- `GET /api/health/summary`
+- `/ws/status`
+
+包含连接、Recorder、Schedule、存储、上传和 24h 录像统计。
+
+健康采样每分钟持久化，用于：
+
+- Recorder 可用率
+- 录像完整率
+- 24h / 72h 稳定性报告
+- FFmpeg 失败与断流统计
+
+历史 `online_rate` 字段实际表示“期望录像时段内 Recorder 可用率”，不是 RTSP Probe 连通率。
+
+## 实时预览
+
+实时监控使用独立 WebSocket 预览墙：
+
+```text
+Browser
+  ↕ /ws/preview-wall
+FastAPI preview wall
+  ↕
+FFmpeg preview process
+  ↕
+RTSP Camera
+```
+
+预览连接状态与录像状态是两个不同信号：浏览器预览失败不代表 Recorder 一定停止，Recorder 正常也不保证当前浏览器预览链路正常。
 
 ## 故障域
 
-必须隔离以下故障：
+以下故障必须彼此隔离：
 
 - 单摄像头离线
 - 单 FFmpeg 崩溃
-- 单 MKV Remux 失败
-- 115 暂时不可用
-- 网络瞬断
-
-这些故障均不能导致其他录像 Worker 停止。
+- 单片段 Remux / ffprobe 失败
+- 磁盘压力
+- OpenList / WebDAV / 云端存储异常
+- 浏览器预览断开
+- 浏览器回放兼容性问题
 
 ## 文件生命周期
 
 ```text
-active .mkv
+active MKV
   ↓ segment closed
 staging/*.mkv
   ↓ remux
@@ -102,40 +182,38 @@ upload queue
 eligible for local cleanup
 ```
 
-任何阶段失败均保留足够信息用于恢复和排障。
+失败文件保留足够信息用于恢复和排障。
 
 ## 数据库
 
-SQLite 开启 WAL。数据库仅保存元数据：Camera、Recording、UploadTask、Event、Settings。
-
-媒体绝不存入数据库。
-
-## 实时事件
-
-WebSocket `/ws/events` 推送：
+SQLite 使用 WAL，主要实体包括：
 
 ```text
-camera.online
-camera.offline
-recorder.started
-recorder.stopped
-recorder.reconnecting
-segment.completed
-segment.warning
-segment.failed
-upload.started
-upload.completed
-upload.failed
-storage.warning
-storage.critical
+Camera
+Recording
+UploadTask
+Event
+SystemSettings
+NotificationSettings
+CameraHealthSample
 ```
+
+媒体内容不写入数据库。
 
 ## 部署
 
-开发环境：macOS，直接运行 FastAPI/Vite，系统 FFmpeg。
+当前标准部署方式为 Docker Compose。
 
-V1 macOS 守护：launchd。
+首次部署准备 `.env` 后运行：
 
-Linux：systemd。
+```bash
+./deploy.sh
+```
 
-Docker Compose 后续提供，但核心程序不得依赖 Docker 才能工作。
+升级：
+
+```bash
+git pull && ./deploy.sh
+```
+
+`deploy.sh` 负责环境检查、FFmpeg 包校验、Compose 配置检查、镜像构建、启动和健康检查。
