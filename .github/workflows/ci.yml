@@ -38,8 +38,27 @@ jobs:
       - run: npm install
       - run: npm run build
 
-  compose:
+  docker-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: docker compose config
+      - run: docker compose build backend frontend
+      - run: docker compose up -d backend frontend
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs backend
+          exit 1
+      - name: Verify frontend
+        run: curl -fsS http://127.0.0.1:8080/ >/dev/null
+      - name: Show service state
+        run: docker compose ps
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
