@@ -16,6 +16,8 @@ from app.schemas.camera import (
     CameraProbeResult,
     CameraRead,
     CameraUpdate,
+    RecordingScheduleBatchApply,
+    RecordingScheduleBatchResult,
 )
 from app.services.camera_config import runtime_config
 from app.services.camera_preview import (
@@ -163,6 +165,47 @@ async def create_cameras_batch(payload: CameraBatchCreate, db: AsyncSession = De
     )
 
 
+@router.put("/recording-schedule/batch", response_model=RecordingScheduleBatchResult)
+async def apply_recording_schedule_batch(
+    payload: RecordingScheduleBatchApply,
+    db: AsyncSession = Depends(get_db),
+):
+    cameras = list(
+        await db.scalars(select(Camera).where(Camera.id.in_(payload.camera_ids)).order_by(Camera.id))
+    )
+    found_ids = {camera.id for camera in cameras}
+    missing = [camera_id for camera_id in payload.camera_ids if camera_id not in found_ids]
+    if missing:
+        raise HTTPException(
+            status_code=404,
+            detail=f"以下摄像头不存在: {', '.join(str(item) for item in missing)}",
+        )
+
+    windows = [item.model_dump() for item in payload.recording_schedule]
+    for camera in cameras:
+        camera.auto_record = payload.auto_record
+        camera.recording_schedule_enabled = payload.recording_schedule_enabled
+        camera.recording_schedule = windows
+        add_event(
+            db,
+            level="info",
+            category="camera",
+            code="camera.recording_schedule_batch_updated",
+            message=f"摄像头 {camera.name} 已应用批量周计划",
+            camera_id=camera.id,
+            metadata={"camera_count": len(cameras)},
+        )
+
+    await db.commit()
+    for camera in cameras:
+        recording_schedule_manager.reset_for_schedule_change(camera.id)
+    await recording_schedule_manager.reconcile()
+    return RecordingScheduleBatchResult(
+        updated=len(cameras),
+        camera_ids=[camera.id for camera in cameras],
+    )
+
+
 @router.get("/{camera_id}/preview.mjpeg")
 async def preview_camera(
     camera_id: int,
@@ -257,7 +300,7 @@ async def update_camera(
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     await db.refresh(camera)
     if schedule_changed:
-        recording_schedule_manager.clear_override(camera.id)
+        recording_schedule_manager.reset_for_schedule_change(camera.id)
         await recording_schedule_manager.reconcile()
     return camera
 
