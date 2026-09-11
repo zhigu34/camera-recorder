@@ -1,5 +1,4 @@
 import asyncio
-from datetime import datetime
 
 from fastapi import APIRouter, Query, WebSocket
 from sqlalchemy import select
@@ -52,12 +51,13 @@ async def _schedule_aware_snapshot() -> dict:
         schedule_state = recording_schedule_manager.state_for(camera)
         expected = schedule_state in _EXPECTED_RECORDING_STATES
 
-        if connectivity_status == "online":
-            online_count += 1
-        elif connectivity_status == "offline":
-            offline_count += 1
-        else:
-            unknown_count += 1
+        if camera.enabled:
+            if connectivity_status == "online":
+                online_count += 1
+            elif connectivity_status == "offline":
+                offline_count += 1
+            else:
+                unknown_count += 1
 
         abnormal = bool(
             camera.enabled
