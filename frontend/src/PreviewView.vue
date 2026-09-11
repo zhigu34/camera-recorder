@@ -13,6 +13,7 @@ import {
 
 type LayoutCount = 1 | 4 | 9
 type PreviewStream = 'auto' | 'sub' | 'main'
+type ActivePreviewStream = 'sub' | 'main'
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'retrying'
 
 interface Camera {
@@ -36,6 +37,7 @@ interface SystemStatus {
 interface WallSlot {
   cameraId: number | null
   stream: PreviewStream
+  activeStream: ActivePreviewStream | null
   frameUrl: string
   loaded: boolean
   failed: boolean
@@ -67,7 +69,7 @@ let socketGeneration = 0
 let mounted = false
 
 function emptySlot(): WallSlot {
-  return { cameraId: null, stream: 'auto', frameUrl: '', loaded: false, failed: false, error: '' }
+  return { cameraId: null, stream: 'auto', activeStream: null, frameUrl: '', loaded: false, failed: false, error: '' }
 }
 
 const slots = ref<WallSlot[]>(Array.from({ length: 9 }, emptySlot))
@@ -109,6 +111,18 @@ function stateClass(cameraId: number | null) {
   return 'idle'
 }
 
+function streamPolicyLabel(stream: PreviewStream) {
+  if (stream === 'main') return '主码流'
+  if (stream === 'sub') return '子码流'
+  return 'AUTO / 子码流优先'
+}
+
+function activeStreamLabel(stream: ActivePreviewStream | null) {
+  if (stream === 'main') return '主码流'
+  if (stream === 'sub') return '子码流'
+  return '确认中'
+}
+
 function revokeFrame(slot: WallSlot) {
   if (slot.frameUrl) URL.revokeObjectURL(slot.frameUrl)
   slot.frameUrl = ''
@@ -126,6 +140,7 @@ function loadSavedWall() {
         slots.value[index] = {
           cameraId: typeof item.cameraId === 'number' ? item.cameraId : null,
           stream,
+          activeStream: null,
           frameUrl: '',
           loaded: false,
           failed: false,
@@ -172,6 +187,7 @@ function markSlotsConnecting() {
   configuredSlots.value.forEach(({ slot }) => {
     slot.failed = false
     slot.error = ''
+    slot.activeStream = null
     slot.loaded = Boolean(slot.frameUrl)
   })
 }
@@ -188,12 +204,25 @@ function scheduleReconnect() {
 
 function handleTextMessage(raw: string) {
   try {
-    const message = JSON.parse(raw) as { type?: string; slot?: number; detail?: string }
-    if (message.type === 'slot_error' && typeof message.slot === 'number') {
+    const message = JSON.parse(raw) as {
+      type?: string
+      slot?: number
+      stream?: ActivePreviewStream
+      detail?: string
+    }
+    if ((message.type === 'slot_ready' || message.type === 'slot_fallback') && typeof message.slot === 'number') {
+      const slot = slots.value[message.slot]
+      if (slot && (message.stream === 'main' || message.stream === 'sub')) {
+        slot.activeStream = message.stream
+        slot.failed = false
+        slot.error = ''
+      }
+    } else if (message.type === 'slot_error' && typeof message.slot === 'number') {
       const slot = slots.value[message.slot]
       if (slot) {
         slot.failed = true
         slot.loaded = false
+        slot.activeStream = null
         slot.error = message.detail || '预览连接失败'
       }
     } else if (message.type === 'fatal') {
@@ -311,6 +340,7 @@ function restartSlot(index: number) {
   const slot = slots.value[index]
   slot.failed = false
   slot.loaded = false
+  slot.activeStream = null
   slot.error = ''
   revokeFrame(slot)
   scheduleConnect()
@@ -322,6 +352,7 @@ function setStream(index: number, stream: PreviewStream) {
   slot.stream = stream
   slot.failed = false
   slot.loaded = false
+  slot.activeStream = null
   slot.error = ''
   revokeFrame(slot)
   persistWall()
@@ -342,7 +373,7 @@ function assignCamera(index: number, cameraId: number) {
     slots.value[previousIndex] = emptySlot()
   }
   revokeFrame(slots.value[index])
-  slots.value[index] = { cameraId, stream: 'auto', frameUrl: '', loaded: false, failed: false, error: '' }
+  slots.value[index] = { cameraId, stream: 'auto', activeStream: null, frameUrl: '', loaded: false, failed: false, error: '' }
   persistWall()
   scheduleConnect()
 }
@@ -360,7 +391,7 @@ function autoFill(reconnect = true) {
     revokeFrame(slots.value[index])
     const camera = available[index]
     slots.value[index] = camera
-      ? { cameraId: camera.id, stream: 'auto', frameUrl: '', loaded: false, failed: false, error: '' }
+      ? { cameraId: camera.id, stream: 'auto', activeStream: null, frameUrl: '', loaded: false, failed: false, error: '' }
       : emptySlot()
   }
   persistWall()
@@ -434,6 +465,7 @@ async function saveSubPath() {
         revokeFrame(slot)
         slot.loaded = false
         slot.failed = false
+        slot.activeStream = null
       }
     })
     configVisible.value = false
@@ -567,8 +599,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="slot-badges">
               <span class="rec-badge" :class="stateClass(slot.cameraId)">{{ stateLabel(slot.cameraId) }}</span>
+              <span class="active-stream-badge" :class="slot.activeStream || 'pending'">
+                {{ activeStreamLabel(slot.activeStream) }}
+              </span>
               <el-dropdown trigger="click" @command="(command: PreviewStream) => setStream(index, command)">
-                <button class="stream-button">{{ slot.stream === 'main' ? 'MAIN' : slot.stream === 'sub' ? 'SUB' : 'AUTO' }}</button>
+                <button class="stream-button" :title="`码流策略：${streamPolicyLabel(slot.stream)}`">
+                  {{ slot.stream === 'main' ? 'MAIN' : slot.stream === 'sub' ? 'SUB' : 'AUTO' }}
+                </button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item command="auto">AUTO · 子码流优先</el-dropdown-item>
@@ -589,7 +626,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="slot-footer">
-            <span>{{ slot.stream === 'main' ? '主码流' : slot.stream === 'sub' ? '子码流' : '自动/子码流优先' }}</span>
+            <span>实际：{{ activeStreamLabel(slot.activeStream) }} · 策略：{{ streamPolicyLabel(slot.stream) }}</span>
             <span>{{ previewProfile.label }}</span>
           </div>
         </template>
@@ -606,6 +643,7 @@ onBeforeUnmount(() => {
       <span><i class="note-dot green"></i>录像中</span>
       <span><i class="note-dot yellow"></i>重连 / 启动</span>
       <span><i class="note-dot gray"></i>未录像</span>
+      <span>画面右上角“主码流/子码流”表示实际生效码流；AUTO 只是选择策略。</span>
       <span>4/9 宫格只使用 1 条浏览器 WebSocket；每路预览 FFmpeg 在断开页面后会自动退出。</span>
     </div>
 
@@ -652,7 +690,7 @@ p { margin: 0; color: #6f7c8d; font-size: 11px; }
 .wall-slot { position: relative; aspect-ratio: 16/9; min-width: 0; overflow: hidden; background: #070a0e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.045); }.wall-slot:after { content:''; position:absolute; inset:0; pointer-events:none; box-shadow: inset 0 0 42px rgba(0,0,0,.22); }.wall-slot.failed { box-shadow: inset 0 0 0 1px rgba(240,93,94,.35); }
 .preview-image { width: 100%; height: 100%; object-fit: contain; display: block; background: black; }
 .slot-topbar { position: absolute; z-index: 4; inset: 0 0 auto 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 7px 8px 16px; background: linear-gradient(to bottom, rgba(0,0,0,.68), transparent); pointer-events: none; }.camera-title { min-width: 0; display: flex; align-items: center; gap: 6px; }.camera-title strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #eef3f8; font-size: 10px; }.camera-title > span:last-child { color: rgba(255,255,255,.42); font-size: 8px; }.live-dot { width: 6px; height: 6px; border-radius: 50%; }.live-dot.live { background: #29d98c; box-shadow: 0 0 0 3px rgba(41,217,140,.12); }.live-dot.waiting { background: var(--nvr-yellow); }.live-dot.error { background: var(--nvr-red); }
-.slot-badges { display:flex; align-items:center; gap:5px; pointer-events:auto; }.rec-badge, .stream-button { padding: 3px 5px; border-radius: 4px; font-size: 7px; font-weight:800; letter-spacing:.04em; }.rec-badge { color:#8491a1; background:rgba(15,20,27,.7); }.rec-badge.recording { color:#87e5b7; background:rgba(46,204,138,.12); }.rec-badge.warning { color:#ffd37b; background:rgba(245,185,66,.12); }.stream-button { border:1px solid rgba(255,255,255,.1); color:#aab5c2; background:rgba(10,14,19,.78); cursor:pointer; }
+.slot-badges { display:flex; align-items:center; gap:5px; pointer-events:auto; }.rec-badge, .active-stream-badge, .stream-button { padding: 3px 5px; border-radius: 4px; font-size: 7px; font-weight:800; letter-spacing:.04em; }.rec-badge { color:#8491a1; background:rgba(15,20,27,.7); }.rec-badge.recording { color:#87e5b7; background:rgba(46,204,138,.12); }.rec-badge.warning { color:#ffd37b; background:rgba(245,185,66,.12); }.active-stream-badge { border:1px solid transparent; }.active-stream-badge.sub { color:#86d7ff; border-color:rgba(80,178,255,.22); background:rgba(47,139,218,.14); }.active-stream-badge.main { color:#e8c879; border-color:rgba(230,185,66,.24); background:rgba(196,145,38,.15); }.active-stream-badge.pending { color:#748398; border-color:rgba(255,255,255,.07); background:rgba(15,20,27,.64); }.stream-button { border:1px solid rgba(255,255,255,.1); color:#aab5c2; background:rgba(10,14,19,.78); cursor:pointer; }
 .slot-actions { position:absolute; z-index:5; top:50%; left:50%; display:flex; gap:4px; opacity:0; transform:translate(-50%,-50%); transition:opacity .15s ease; }.wall-slot:hover .slot-actions { opacity:1; }.slot-actions button { width:30px; height:30px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.11); border-radius:6px; color:#d5dde6; background:rgba(7,10,14,.78); backdrop-filter:blur(5px); cursor:pointer; }.slot-actions button:hover { color:white; background:rgba(38,104,216,.88); }.slot-actions :deep(svg) { width:14px; }
 .slot-footer { position:absolute; z-index:4; inset:auto 0 0; display:flex; justify-content:space-between; padding:14px 8px 6px; color:rgba(255,255,255,.42); background:linear-gradient(to top,rgba(0,0,0,.58),transparent); font-size:8px; opacity:0; transition:.15s ease; }.wall-slot:hover .slot-footer { opacity:1; }
 .slot-loading-ws, .slot-state-message { position:absolute; z-index:2; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#66768a; background:#070a0e; font-size:10px; text-align:center; }.loader-ring { width:20px; height:20px; border:2px solid #202a36; border-top-color:var(--nvr-blue); border-radius:50%; animation:spin .8s linear infinite; }.slot-state-message :deep(svg) { width:26px; color:#435267; }.slot-state-message strong { color:#8b98a8; font-size:11px; }.slot-state-message span { max-width:75%; color:#526073; font-size:9px; }.slot-state-message.error strong { color:#f48c8d; }.slot-state-message.error :deep(svg) { color:#b54648; }
