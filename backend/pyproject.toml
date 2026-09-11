@@ -1,0 +1,31 @@
+[project]
+name = "camera-recorder-backend"
+version = "0.1.0"
+description = "FastAPI backend for Camera Recorder"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+  "sqlalchemy>=2.0,<3",
+  "aiosqlite>=0.21,<1",
+  "alembic>=1.16,<2",
+  "pydantic-settings>=2.10,<3",
+  "cryptography>=45,<46",
+  "psutil>=7,<8",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "httpx>=0.28,<1",
+  "ruff>=0.12,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
