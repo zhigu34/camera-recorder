@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select
 
 from app.api.cameras import router as cameras_router
 from app.api.events import router as events_router
@@ -19,14 +18,13 @@ from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
 from app.core.migrations import upgrade_database
-from app.models.camera import Camera
 from app.services.alert_dispatcher import alert_dispatcher
 from app.services.alert_monitor import alert_monitor
-from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
 from app.services.recorder_manager import recorder_manager
+from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_cleanup import storage_cleanup_manager
 from app.services.storage_manager import storage_snapshot
@@ -51,7 +49,6 @@ async def lifespan(_: FastAPI):
     async with SessionLocal() as session:
         await get_or_create_system_settings(session)
         await session.commit()
-        runtime = await load_runtime_settings(session)
 
     # Start the alert observer before background workers/recorders so new failure
     # events are never missed. It only reads state/events and cannot block recording.
@@ -59,27 +56,13 @@ async def lifespan(_: FastAPI):
     await segment_processor.start()
     await upload_manager.start()
 
-    if runtime.auto_start_enabled:
-        async with SessionLocal() as session:
-            cameras = list(
-                await session.scalars(
-                    select(Camera).where(
-                        Camera.enabled.is_(True),
-                        Camera.auto_record.is_(True),
-                    )
-                )
-            )
-            for camera in cameras:
-                if camera.timestamp_mode == "reconstruct" and (
-                    not camera.fps_num or not camera.fps_den
-                ):
-                    continue
-                await recorder_manager.start(runtime_config(camera))
-                camera.status = "recording"
-            await session.commit()
+    # Auto-record startup is owned by the schedule manager. With schedules disabled
+    # this preserves the old 24/7 auto_record behavior; enabled schedules only start
+    # cameras while the deployment-local time is inside a configured window.
+    await recording_schedule_manager.start()
 
     # Start background observability/protection after recorder auto-start. Planned
-    # startup transitions should not pollute health metrics, and cleanup must never
+    # schedule transitions should not pollute health metrics, and cleanup must never
     # delay recorder startup.
     await health_sampler.start()
     await storage_cleanup_manager.start()
@@ -89,6 +72,7 @@ async def lifespan(_: FastAPI):
     await playback_prefetch_manager.stop()
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
+    await recording_schedule_manager.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
     await segment_processor.scan_once()
@@ -100,7 +84,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.8.10",
+    version="0.8.11",
     lifespan=lifespan,
 )
 
@@ -141,6 +125,7 @@ async def system_status() -> dict:
         "segment_duration_seconds": runtime.segment_duration_seconds,
         "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
+        "recording_schedule": recording_schedule_manager.status(),
         "upload": upload,
         "storage": await storage_snapshot(),
         "storage_cleanup": storage_cleanup_manager.status(),
