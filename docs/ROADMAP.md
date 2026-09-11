@@ -132,12 +132,18 @@
 - 同摄像头预热任务自动去重；提前切片时取消旧任务，避免无效后台探测
 - `GET /api/playback/metrics` 暴露预热次数、直链命中、失败数和活跃任务
 - 回放质量指标拆分为 OpenList 预热探测耗时，以及本地流 / 云端流 / H.264 Proxy 的后端首个响应体或重定向耗时（平均 / P95 / 最大）
+- 浏览器侧捕获 `loadedmetadata` / `loadeddata` / `canplay` / `playing` / `error` 回放事件
+- 支持 `requestVideoFrameCallback` 的浏览器记录真实首帧提交时间，不支持时回退 `playing`
+- `POST /api/playback/metrics/client` 接收浏览器回放质量样本
+- 样本按浏览器主版本 / 平台 / 编码 / 播放模式 / 来源聚合成功率和首帧平均 / P95
+- 浏览器遥测不上传完整 UA、视频 URL、OpenList token、凭据或 IP，且只保留内存最近 500 条
+- 系统健康页新增 Web 回放质量 / 浏览器兼容性面板
 
 ### 下一步
 
-- 浏览器回放兼容性实机验证
-- 前端播放器事件上报真正的首帧时间，并接入健康 / Dashboard 页面
-- 根据实机结果调整预热 lead time 与临时直链 TTL
+- 使用 Chrome / Safari / Edge 实机播放本地 H.264、HEVC、OpenList H.264、OpenList HEVC，积累真实样本
+- 根据实机首帧、启动错误和预热命中数据调整 prefetch lead time / 直链 TTL / HEVC fallback 策略
+- V0.8 回放模块完成实机验收后冻结功能，进入 10 路 24h / 72h 稳定性验证
 
 ## V1.0 正式可用版
 
@@ -180,6 +186,7 @@
 - HEVC 云端远程源直接转 H.264 fallback
 - 相邻录像直链预热
 - 云端播放预热命中与后端响应耗时统计
+- 浏览器真实首帧 / 启动错误 / 编解码兼容性统计
 
 后续增强：
 
@@ -223,7 +230,7 @@
 
 ## 当前开发顺序
 
-1. V0.8 浏览器实机兼容性验证 + 前端首帧指标上报
+1. V0.8 Chrome / Safari / Edge 实机兼容性验收与参数校准
 2. 10 路 24h / 72h 实际稳定性验证与阈值校准
 3. WebSocket 扩展到 Dashboard / 上传 / 事件中心
 4. 前端整体路由 / Tab / 导航架构升级
