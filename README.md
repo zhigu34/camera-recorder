@@ -12,10 +12,10 @@
 - 默认 10 分钟 MKV 连续切片，不需要每段重新建立 RTSP 连接
 - 后台 MKV → MP4 无损 Remux，HEVC MP4 使用 `hvc1`
 - ffprobe 成品健康检查、断线自动重连、异常 MKV 保留
-- SQLite 元数据持久化、摄像头密码加密保存
+- SQLite 元数据持久化，摄像头、SMTP、WebDAV 密码加密保存
 - OpenList WebDAV 持久化上传队列，可归档到 115 Open Platform
 - 上传失败自动退避重试，上传成功后按本地保留时间自动清理
-- Vue 3 Web 管理界面：摄像头、录像、115 上传任务
+- Vue 3 Web 管理界面：摄像头、录像、115 上传、告警和系统设置
 - Docker Compose 一键部署 Web + API + OpenList，支持 amd64 / arm64（Apple Silicon）
 
 ## Docker Compose 一键启动
@@ -29,6 +29,8 @@ cp .env.example .env
 # 必须修改 CAMREC_SECRET_KEY 和 OPENLIST_ADMIN_PASSWORD
 docker compose up -d --build
 ```
+
+`.env` 只保留部署级参数：端口、时区、系统加密密钥、OpenList 容器初始化账号信息。录像、磁盘阈值、上传策略、WebDAV、邮件告警等运行时参数均在 Web 中配置并保存到 SQLite。
 
 打开：
 
@@ -72,6 +74,8 @@ openlist-data/  OpenList 配置与数据库
 4. 保存后先点 `Probe`，系统会读取真实 FPS、分辨率、音频采样率等。
 5. Probe 成功后点击 `开始`，或点击顶部 `全部开始`。
 6. 完成的 Segment 会自动从 MKV 无损封装为 MP4 并出现在 `录像文件` 页面。
+7. 右下角进入 `系统设置`，配置切片、磁盘阈值、115 上传和 WebDAV 参数。
+8. `告警设置` 页面配置 SMTP 和摄像头掉线邮件通知。
 
 ## 115 上传
 
@@ -84,16 +88,14 @@ Compose 会一起启动 OpenList，但 **115 OAuth 授权必须由账号持有�
 3. 在 OpenList 添加 `115 Open Platform` 存储。
 4. 挂载路径填写 **`115`**。
 5. 确认 `/115` 能正常访问。
-6. 修改 `.env`：
+6. 打开 Camera Recorder → `系统设置`。
+7. 填写 WebDAV URL、用户名、密码、远端根目录，并开启 `自动上传`。
+8. 保存后立即生效，无需重启 Docker。
 
-```env
-CAMREC_UPLOAD_ENABLED=true
-```
+默认 WebDAV URL：
 
-7. 应用配置：
-
-```bash
-docker compose up -d
+```text
+http://openlist:5244/dav/115
 ```
 
 随后最终 MP4 会自动上传到：
@@ -123,16 +125,15 @@ docker compose up -d
 ## 安全
 
 - 不要提交 `.env`、摄像头密码、完整 RTSP URL、115 Token 或录像文件。
-- 摄像头密码只通过 Web/API 写入本地 SQLite，并使用 `CAMREC_SECRET_KEY` 派生的密钥加密。
-- **`CAMREC_SECRET_KEY` 在摄像头已经录入后不要随意修改**，否则旧密码无法解密。
+- 摄像头、SMTP、WebDAV 密码只通过 Web/API 写入本地 SQLite，并使用 `CAMREC_SECRET_KEY` 派生的密钥加密。
+- **`CAMREC_SECRET_KEY` 在系统开始使用后不要随意修改**，否则旧密文无法解密。
 - OpenList 不建议直接以明文 HTTP 暴露到公网；本项目默认定位于可信 LAN 内使用。
 
 ## 当前下一步
 
-代码层面的录像、Remux、基础健康检查、上传队列和 Compose 已完成。下一阶段重点是：
+代码层面的录像、Remux、基础健康检查、上传队列、邮件告警、SQLite 运行时配置和 Compose 已完成。下一阶段重点是：
 
 - 真实摄像头 10 路 72 小时长稳测试
-- 更细粒度 Segment 健康评分与事件中心
-- 磁盘容量可视化与更主动的空间告警
+- 更细粒度 Segment 健康评分
 - WebSocket 实时状态推送
-- 数据库正式 Alembic Migration 流程
+- 更多告警通道
