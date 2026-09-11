@@ -10,6 +10,7 @@ from app.api.health import router as health_router
 from app.api.notifications import router as notifications_router
 from app.api.playback_control import router as playback_control_router
 from app.api.playback_metrics import router as playback_metrics_router
+from app.api.preview_wall import router as preview_wall_router
 from app.api.recording_navigation import router as recording_navigation_router
 from app.api.recordings import router as recordings_router
 from app.api.recorder import router as recorder_router
@@ -84,7 +85,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Camera Recorder",
-    version="0.9.0",
+    version="0.9.1",
     lifespan=lifespan,
 )
 
@@ -108,6 +109,7 @@ app.include_router(events_router)
 app.include_router(notifications_router)
 app.include_router(settings_router)
 app.include_router(health_router)
+app.include_router(preview_wall_router)
 
 
 @app.get("/health")
