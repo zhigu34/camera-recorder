@@ -223,9 +223,12 @@ function syncDrawerFromLocation(showMissing = false) {
     selectedCamera.value = null
     return
   }
+  const openingDifferentCamera = !drawerVisible.value || selectedCamera.value?.id !== camera.id
   selectedCamera.value = camera
-  previewFailed.value = false
-  previewNonce.value = Date.now()
+  if (openingDifferentCamera) {
+    previewFailed.value = false
+    previewNonce.value = Date.now()
+  }
   drawerVisible.value = true
 }
 
