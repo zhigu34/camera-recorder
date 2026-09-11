@@ -26,7 +26,7 @@ class SystemSettings(Base):
     upload_concurrency: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
     upload_retry_max: Mapped[int] = mapped_column(Integer, default=8, nullable=False)
     webdav_url: Mapped[str] = mapped_column(
-        String(1024), default="http://openlist:5244/dav/115", nullable=False
+        String(1024), default="http://openlist:5244/dav", nullable=False
     )
     webdav_root: Mapped[str] = mapped_column(String(512), default="监控录像", nullable=False)
     webdav_username: Mapped[str] = mapped_column(String(255), default="admin", nullable=False)
