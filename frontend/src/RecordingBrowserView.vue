@@ -24,7 +24,7 @@ interface PlaybackState {
   original_available?: boolean
   source_kind?: string
   remote_available?: boolean
-  cloud_state?: 'ready' | 'downloading' | 'needed' | 'error' | string
+  cloud_state?: 'ready' | 'downloading' | 'needed' | 'error' | 'streaming' | string
   cloud_error?: string | null
   can_try_original?: boolean
 }
@@ -107,7 +107,6 @@ const playerVisible = ref(false)
 const activeRecording = ref<RecordingItem | null>(null)
 const videoSrc = ref('')
 const preparing = ref(false)
-const restoringCloud = ref(false)
 const proxyError = ref('')
 const playbackMode = ref<PlaybackMode>('')
 const playbackNotice = ref('')
@@ -193,9 +192,9 @@ const playbackModeLabel = computed(() => {
   return ''
 })
 const playerLoadingText = computed(() => {
-  if (restoringCloud.value) return '正在从 OpenList / 115 拉取云端录像…'
   if (playbackMode.value === 'proxy-live') return '正在启动 H.264 边转边播…'
   if (playbackMode.value === 'proxy') return '正在加载 H.264 Proxy…'
+  if (activeRecording.value && isCloudOnly(activeRecording.value)) return '正在连接 OpenList / 115 云端流…'
   return '正在加载原始录像…'
 })
 
@@ -241,6 +240,7 @@ function playbackButtonLabel(item: RecordingItem) {
 }
 
 function storageLabel(item: RecordingItem) {
+  if (item.playback?.source_kind === 'openlist_stream') return 'OpenList直连'
   if (item.playback?.source_kind === 'cloud_cache') return '云端缓存'
   if (item.playback?.original_available) return '本地'
   if (item.playback?.remote_available) return '115归档'
@@ -434,31 +434,6 @@ function liveProxyUrl(id: number) {
   return `/api/recordings/${id}/proxy-live.mp4?v=${Date.now()}`
 }
 
-async function ensureCloudSource(item: RecordingItem) {
-  restoringCloud.value = true
-  playbackNotice.value = '本地录像已清理，正在从 OpenList / 115 拉取临时播放缓存…'
-  try {
-    let response = await axios.post<PlaybackState>(`/api/recordings/${item.id}/cloud-playback`)
-    let state = response.data
-    item.playback = { ...item.playback, ...state }
-    if (state.original_available) return state
-    if (state.cloud_state === 'error') throw new Error(state.cloud_error || '云端录像拉取失败')
-
-    for (let attempt = 0; attempt < 900; attempt += 1) {
-      if (!playerVisible.value || activeRecording.value?.id !== item.id) throw new Error('__cancelled__')
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-      response = await axios.get<PlaybackState>(`/api/recordings/${item.id}/playback`)
-      state = response.data
-      item.playback = { ...item.playback, ...state }
-      if (state.original_available) return state
-      if (state.cloud_state === 'error') throw new Error(state.cloud_error || '云端录像拉取失败')
-    }
-    throw new Error('云端录像拉取超时')
-  } finally {
-    restoringCloud.value = false
-  }
-}
-
 async function prepareProxy(item: RecordingItem, automaticFallback = false) {
   if (fallbackInProgress.value) return
   fallbackInProgress.value = true
@@ -473,7 +448,9 @@ async function prepareProxy(item: RecordingItem, automaticFallback = false) {
 
     if (state.state === 'direct') {
       playbackMode.value = 'original'
-      playbackNotice.value = '原片可直接播放，无需转码'
+      playbackNotice.value = isCloudOnly(item)
+        ? 'OpenList 云端 H.264 原片直放，不需要完整下载到本地'
+        : '原片可直接播放，无需转码'
       videoSrc.value = streamUrl(item.id, 'original')
       await nextTick()
       return
@@ -491,8 +468,12 @@ async function prepareProxy(item: RecordingItem, automaticFallback = false) {
 
     playbackMode.value = 'proxy-live'
     playbackNotice.value = automaticFallback
-      ? 'HEVC 原片解码失败，正在边转 H.264 边播放；完成后自动缓存'
-      : '正在边转 H.264 边播放；无需等待整段转码完成'
+      ? isCloudOnly(item)
+        ? 'HEVC 云端原片解码失败，FFmpeg 正直接读取 OpenList 远程流并边转 H.264 边播放'
+        : 'HEVC 原片解码失败，正在边转 H.264 边播放；完成后自动缓存'
+      : isCloudOnly(item)
+        ? 'FFmpeg 正直接读取 OpenList 远程流并边转 H.264 边播放'
+        : '正在边转 H.264 边播放；无需等待整段转码完成'
     videoSrc.value = liveProxyUrl(item.id)
     await nextTick()
   } catch (error: any) {
@@ -516,7 +497,6 @@ async function play(item: RecordingItem) {
   proxyError.value = ''
   playbackNotice.value = ''
   fallbackInProgress.value = false
-  restoringCloud.value = false
   preparing.value = true
 
   if (!item.playback.original_available && item.playback.state === 'ready') {
@@ -527,38 +507,32 @@ async function play(item: RecordingItem) {
     return
   }
 
-  if (!item.playback.original_available) {
-    if (!item.playback.remote_available) {
-      preparing.value = false
-      proxyError.value = '本地原录像已清理，且没有成功归档记录'
-      return
-    }
-    try {
-      const state = await ensureCloudSource(item)
-      if (!playerVisible.value || activeRecording.value?.id !== item.id) return
-      item.playback = { ...item.playback, ...state }
-      playbackNotice.value = '云端录像已拉回临时缓存，准备播放'
-    } catch (error: any) {
-      if (error?.message === '__cancelled__') return
-      preparing.value = false
-      proxyError.value = error?.response?.data?.detail || error?.message || '云端录像拉取失败'
-      playbackNotice.value = ''
-      ElMessage.error(proxyError.value)
-      return
-    }
+  if (!item.playback.original_available && !item.playback.remote_available) {
+    preparing.value = false
+    proxyError.value = '本地原录像已清理，且没有成功归档记录'
+    return
   }
 
+  const cloudStream = isCloudOnly(item)
   if (isH264(item.video_codec) || isHevc(item.video_codec)) {
     playbackMode.value = 'original'
     if (isHevc(item.video_codec)) {
       const hint = browserHevcHint()
-      playbackNotice.value = hint === 'unsupported'
-        ? '优先尝试 HEVC 原片；浏览器失败会自动边转边播 H.264'
-        : '优先尝试 HEVC 原片，失败会自动边转边播 H.264'
+      if (cloudStream) {
+        playbackNotice.value = hint === 'unsupported'
+          ? '浏览器未声明 HEVC 支持；先直读 OpenList 云端原片，失败后自动远程转 H.264'
+          : 'OpenList 云端 HEVC 原片优先直放，失败后自动远程转 H.264'
+      } else {
+        playbackNotice.value = hint === 'unsupported'
+          ? '优先尝试 HEVC 原片；浏览器失败会自动边转边播 H.264'
+          : '优先尝试 HEVC 原片，失败会自动边转边播 H.264'
+      }
     } else {
-      playbackNotice.value = item.playback.source_kind === 'cloud_cache'
-        ? '云端录像临时缓存已就绪，H.264 原片直放'
-        : 'H.264 原片直放，不转码'
+      playbackNotice.value = cloudStream
+        ? 'OpenList 云端 H.264 原片直放；优先走 302 直链，必要时 Range 透传，不完整落盘'
+        : item.playback.source_kind === 'cloud_cache'
+          ? '云端录像临时缓存已就绪，H.264 原片直放'
+          : 'H.264 原片直放，不转码'
     }
     videoSrc.value = streamUrl(item.id, 'original')
     await nextTick()
@@ -578,13 +552,20 @@ async function playNext() {
 
 function handleVideoCanPlay() {
   preparing.value = false
-  const cloudPrefix = activeRecording.value?.playback.source_kind === 'cloud_cache' ? '云端临时缓存 · ' : ''
+  const sourceKind = activeRecording.value?.playback.source_kind
+  const sourcePrefix = sourceKind === 'openlist_stream'
+    ? 'OpenList 云端流 · '
+    : sourceKind === 'cloud_cache'
+      ? '云端临时缓存 · '
+      : ''
   if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) {
-    playbackNotice.value = `${cloudPrefix}浏览器已直接解码 HEVC 原片，无需转码`
+    playbackNotice.value = `${sourcePrefix}浏览器已直接解码 HEVC 原片，无需转码`
   } else if (playbackMode.value === 'original') {
-    playbackNotice.value = `${cloudPrefix}原片直放，无需转码`
+    playbackNotice.value = `${sourcePrefix}原片直放，无需转码`
   } else if (playbackMode.value === 'proxy-live') {
-    playbackNotice.value = '正在边转边播 H.264；完整转码结束后会自动缓存，后续播放可直接拖动'
+    playbackNotice.value = sourceKind === 'openlist_stream'
+      ? 'FFmpeg 正直接读取 OpenList 远程流并边转边播 H.264；完成后只缓存 H.264 Proxy'
+      : '正在边转边播 H.264；完整转码结束后会自动缓存，后续播放可直接拖动'
   } else if (playbackMode.value === 'proxy') {
     playbackNotice.value = '正在播放已缓存的 H.264 Proxy'
   }
@@ -614,7 +595,7 @@ async function handleVideoError() {
   if (!proxyError.value) {
     if (playbackMode.value === 'proxy-live') proxyError.value = 'H.264 边转边播启动或传输失败'
     else if (playbackMode.value === 'proxy') proxyError.value = 'H.264 Proxy 加载失败'
-    else proxyError.value = '原始录像无法在当前浏览器中播放'
+    else proxyError.value = isCloudOnly(item) ? 'OpenList 云端原片无法在当前浏览器中播放' : '原始录像无法在当前浏览器中播放'
   }
 }
 
@@ -624,7 +605,6 @@ function closePlayer() {
   playbackNotice.value = ''
   proxyError.value = ''
   preparing.value = false
-  restoringCloud.value = false
   fallbackInProgress.value = false
 }
 
@@ -643,7 +623,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h2>录像浏览</h2>
-        <p>连续回看 · 录像日历 · 本地优先 · OpenList / 115 云端归档回放</p>
+        <p>连续回看 · 录像日历 · 本地优先 · OpenList 直链 / Range 云端流式回放</p>
       </div>
       <el-button @click="goBack">返回主界面</el-button>
     </div>
@@ -757,7 +737,7 @@ onMounted(async () => {
         <el-table-column label="时长" width="110"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
         <el-table-column label="大小" width="110"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
         <el-table-column label="视频" width="100"><template #default="{ row }">{{ row.video_codec || '-' }}</template></el-table-column>
-        <el-table-column label="位置" width="110"><template #default="{ row }"><el-tag :type="isCloudOnly(row) ? 'warning' : row.playback.original_available ? 'success' : 'info'">{{ storageLabel(row) }}</el-tag></template></el-table-column>
+        <el-table-column label="位置" width="125"><template #default="{ row }"><el-tag :type="isCloudOnly(row) ? 'warning' : row.playback.original_available ? 'success' : 'info'">{{ storageLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="100"><template #default="{ row }"><el-tag :type="healthType(row.health_status)">{{ row.health_status }}</el-tag></template></el-table-column>
         <el-table-column prop="upload_status" label="上传" width="110" />
         <el-table-column prop="filename" label="文件" min-width="240" show-overflow-tooltip />
@@ -804,7 +784,7 @@ onMounted(async () => {
         />
         <el-empty v-else-if="!preparing && proxyError" :description="proxyError" />
         <div v-else-if="preparing" class="prepare-note">
-          {{ restoringCloud ? '云端录像只写入临时播放缓存，不会恢复到录像主目录。' : playbackMode === 'proxy-live' ? '首批 H.264 数据产生后即可播放，不需要等整段转码完成。' : playbackMode === 'proxy' ? '正在加载已经生成的 Proxy 缓存。' : '正在准备播放源。' }}
+          {{ playbackMode === 'proxy-live' ? '首批 H.264 数据产生后即可播放；云端归档会直接读取远程流，不先完整下载原片。' : playbackMode === 'proxy' ? '正在加载已经生成的 Proxy 缓存。' : isCloudOnly(activeRecording!) ? '正在连接 OpenList 云端流；优先使用直链，必要时仅透传当前 Range。' : '正在准备播放源。' }}
         </div>
       </div>
     </el-dialog>
