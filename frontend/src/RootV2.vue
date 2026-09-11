@@ -16,9 +16,11 @@ import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
 import PreviewView from './PreviewView.vue'
 import RecordingBrowserViewV3 from './RecordingBrowserViewV3.vue'
 import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
+import RecordingManagementView from './RecordingManagementView.vue'
 import RecordingScheduleView from './RecordingScheduleView.vue'
 import RecordingTimelineLegend from './RecordingTimelineLegend.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
+import UploadManagementView from './UploadManagementView.vue'
 
 interface NavEntry {
   key: string
@@ -42,8 +44,8 @@ const navEntries: NavEntry[] = [
   { key: 'cameras', label: '摄像头', kind: 'route', target: '/cameras', group: 'core', icon: markRaw(Camera) },
   { key: 'schedule', label: '录制计划', kind: 'route', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
   { key: 'health', label: '系统健康', kind: 'route', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
-  { key: 'recordings', label: '录像文件', kind: 'legacy', target: 'recordings', group: 'ops', icon: markRaw(Files) },
-  { key: 'uploads', label: '上传管理', kind: 'legacy', target: 'uploads', group: 'ops', icon: markRaw(UploadFilled) },
+  { key: 'recordings', label: '录像管理', kind: 'route', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
+  { key: 'uploads', label: '上传管理', kind: 'route', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
   { key: 'events', label: '事件中心', kind: 'legacy', target: 'events', group: 'ops', icon: markRaw(Bell) },
   { key: 'alerts', label: '告警设置', kind: 'legacy', target: 'alerts', group: 'ops', icon: markRaw(WarningFilled) },
   { key: 'batch', label: '批量添加', kind: 'route', target: '/cameras/batch', group: 'ops', icon: markRaw(Plus) },
@@ -51,7 +53,7 @@ const navEntries: NavEntry[] = [
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
 const legacyLabels: Record<string, string> = {
-  recordings: '录像文件', uploads: '115 上传', events: '事件中心', alerts: '告警设置',
+  events: '事件中心', alerts: '告警设置',
 }
 
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
@@ -180,6 +182,8 @@ onBeforeUnmount(() => {
       <main class="nvr-workspace-content">
         <DashboardView v-if="renderKey === 'dashboard'" />
         <CamerasViewV2 v-else-if="renderKey === 'cameras'" @open-batch="navigate('batch')" @open-preview="navigate('preview')" />
+        <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
+        <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
         <div v-else-if="isLegacy" class="legacy-host"><App /></div>
         <PreviewView v-else-if="renderKey === 'preview'" />
         <template v-else-if="renderKey === 'playback'"><RecordingBrowserViewV3 /><PlaybackTelemetryBridge /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
