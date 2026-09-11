@@ -5,14 +5,14 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.recording import Recording
 from app.schemas.recording import RecordingRead
-from app.services.recording_playback import recording_playback_manager
+from app.services.recording_playback import PlaybackProxyError, recording_playback_manager
 
 router = APIRouter(prefix="/api/recordings", tags=["recordings"])
 
@@ -144,6 +144,8 @@ async def playback_status(recording_id: int, db: AsyncSession = Depends(get_db))
 
 @router.post("/{recording_id}/playback")
 async def prepare_playback(recording_id: int, db: AsyncSession = Depends(get_db)) -> dict:
+    """Compatibility endpoint for pre-generating a complete playback proxy."""
+
     recording = await db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
@@ -157,6 +159,58 @@ async def prepare_playback(recording_id: int, db: AsyncSession = Depends(get_db)
         )
     except FileNotFoundError:
         raise HTTPException(status_code=410, detail="local recording file no longer exists")
+
+
+@router.get("/{recording_id}/proxy-live.mp4")
+async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db)):
+    """Transcode to browser-compatible fragmented MP4 while streaming it out.
+
+    If a completed H.264 proxy cache already exists, serve that file directly.
+    Otherwise FFmpeg emits fMP4 to the browser immediately and the same stream is
+    retained for conversion into the normal seekable proxy cache after completion.
+    """
+
+    recording = await db.get(Recording, recording_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="recording not found")
+
+    source = Path(recording.mp4_path)
+    if not source.exists():
+        raise HTTPException(status_code=410, detail="local recording file no longer exists")
+
+    state = recording_playback_manager.status(recording.id, recording.video_codec)
+    if state["state"] == "ready":
+        proxy = recording_playback_manager.proxy_path(recording.id)
+        recording_playback_manager.mark_accessed(recording.id)
+        return FileResponse(proxy, media_type="video/mp4")
+
+    try:
+        session = await recording_playback_manager.open_live_proxy(
+            recording.id,
+            source,
+            recording.audio_codec,
+        )
+    except PlaybackProxyError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except FileNotFoundError:
+        raise HTTPException(status_code=410, detail="local recording file no longer exists")
+
+    # Another queued request may have waited until the first transcode completed.
+    if session is None:
+        proxy = recording_playback_manager.proxy_path(recording.id)
+        recording_playback_manager.mark_accessed(recording.id)
+        return FileResponse(proxy, media_type="video/mp4")
+
+    return StreamingResponse(
+        session.stream(),
+        media_type="video/mp4",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Playback-Mode": "live-proxy",
+        },
+    )
 
 
 @router.get("/{recording_id}/stream")
