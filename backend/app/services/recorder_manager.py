@@ -120,7 +120,7 @@ class CameraWorker:
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-            except Exception as exc:  # startup failures should enter reconnect loop
+            except Exception as exc:
                 self.last_error = str(exc)
                 await self._log(f"failed to start ffmpeg: {exc}")
                 await self._mark_disconnected(self.last_error)
@@ -175,10 +175,12 @@ class CameraWorker:
 
     async def _offline_alert_after_delay(self) -> None:
         try:
-            await asyncio.sleep(max(0.0, settings.camera_offline_alert_seconds))
+            config = await email_notifier.load_config()
+            await asyncio.sleep(max(0.0, config.offline_alert_seconds))
             if self.stop_requested or self.offline_since is None or self.offline_alert_active:
                 return
 
+            config = await email_notifier.load_config()
             self.offline_alert_active = True
             offline_since = self.offline_since
             await self._record_connectivity_event(
@@ -186,18 +188,20 @@ class CameraWorker:
                 code="camera.offline",
                 message=(
                     f"摄像头 {self.camera.name} 持续掉线超过 "
-                    f"{int(settings.camera_offline_alert_seconds)} 秒"
+                    f"{int(config.offline_alert_seconds)} 秒"
                 ),
             )
-            await email_notifier.send_offline(
-                camera_id=self.camera.id,
-                camera_name=self.camera.name,
-                camera_ip=self.camera.ip,
-                rtsp_path=self.camera.rtsp_path,
-                offline_since=offline_since,
-                last_error=self.last_error,
-                restart_count=self.restart_count,
-            )
+            if config.email_enabled:
+                await email_notifier.send_offline(
+                    camera_id=self.camera.id,
+                    camera_name=self.camera.name,
+                    camera_ip=self.camera.ip,
+                    rtsp_path=self.camera.rtsp_path,
+                    offline_since=offline_since,
+                    last_error=self.last_error,
+                    restart_count=self.restart_count,
+                    config=config,
+                )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -214,7 +218,8 @@ class CameraWorker:
 
     async def _confirm_recovery(self, process: asyncio.subprocess.Process) -> None:
         try:
-            await asyncio.sleep(max(0.0, settings.camera_recovery_stable_seconds))
+            config = await email_notifier.load_config()
+            await asyncio.sleep(max(0.0, config.recovery_stable_seconds))
             if (
                 self.stop_requested
                 or self.process is not process
@@ -236,13 +241,16 @@ class CameraWorker:
                     code="camera.recovered",
                     message=f"摄像头 {self.camera.name} 录像连接已恢复",
                 )
-                await email_notifier.send_recovery(
-                    camera_id=self.camera.id,
-                    camera_name=self.camera.name,
-                    camera_ip=self.camera.ip,
-                    rtsp_path=self.camera.rtsp_path,
-                    offline_since=offline_since,
-                )
+                config = await email_notifier.load_config()
+                if config.email_enabled and config.notify_recovery:
+                    await email_notifier.send_recovery(
+                        camera_id=self.camera.id,
+                        camera_name=self.camera.name,
+                        camera_ip=self.camera.ip,
+                        rtsp_path=self.camera.rtsp_path,
+                        offline_since=offline_since,
+                        config=config,
+                    )
             await self._log("camera connectivity stable")
         except asyncio.CancelledError:
             raise
