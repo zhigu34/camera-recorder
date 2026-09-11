@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.security import decrypt_secret, encrypt_secret
 from app.models.camera import Camera
 from app.schemas.camera import (
@@ -17,6 +18,12 @@ from app.schemas.camera import (
     CameraUpdate,
 )
 from app.services.camera_config import runtime_config
+from app.services.camera_preview import (
+    CameraPreviewError,
+    PreviewStream,
+    open_mjpeg_preview,
+    resolve_preview_path,
+)
 from app.services.camera_probe import CameraProbeError, probe_camera
 from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
@@ -40,6 +47,7 @@ def _new_camera(payload: CameraCreate) -> Camera:
         username=payload.username,
         password_encrypted=encrypt_secret(payload.password),
         rtsp_path=payload.rtsp_path,
+        sub_rtsp_path=payload.sub_rtsp_path.strip() if payload.sub_rtsp_path else None,
         enabled=payload.enabled,
         auto_record=payload.auto_record,
         timestamp_mode=payload.timestamp_mode,
@@ -152,6 +160,54 @@ async def create_cameras_batch(payload: CameraBatchCreate, db: AsyncSession = De
     )
 
 
+@router.get("/{camera_id}/preview.mjpeg")
+async def preview_camera(
+    camera_id: int,
+    stream: PreviewStream = Query(default="auto"),
+    fps: int = Query(default=8, ge=1, le=15),
+    width: int = Query(default=960, ge=320, le=1920),
+):
+    # Do not keep an SQLite session open for the lifetime of a streaming response.
+    async with SessionLocal() as db:
+        camera = await _camera_or_404(camera_id, db)
+        runtime = await load_runtime_settings(db)
+        password = _camera_password(camera)
+        try:
+            rtsp_path, selected_stream = resolve_preview_path(
+                main_path=camera.rtsp_path,
+                sub_path=camera.sub_rtsp_path,
+                stream=stream,
+            )
+        except CameraPreviewError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        preview_args = {
+            "ip": camera.ip,
+            "port": camera.rtsp_port,
+            "username": camera.username,
+            "password": password,
+            "rtsp_path": rtsp_path,
+            "rtsp_timeout_us": runtime.rtsp_timeout_us,
+            "fps": fps,
+            "width": width,
+        }
+
+    try:
+        session = await open_mjpeg_preview(**preview_args)
+    except CameraPreviewError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return StreamingResponse(
+        session.stream(),
+        media_type="multipart/x-mixed-replace; boundary=ffmpeg",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "Pragma": "no-cache",
+            "X-Accel-Buffering": "no",
+            "X-Preview-Stream": selected_stream,
+        },
+    )
+
+
 @router.get("/{camera_id}", response_model=CameraRead)
 async def get_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     return await _camera_or_404(camera_id, db)
@@ -166,9 +222,13 @@ async def update_camera(
     camera = await _camera_or_404(camera_id, db)
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
+    sub_rtsp_path_present = "sub_rtsp_path" in values
+    sub_rtsp_path = values.pop("sub_rtsp_path", None)
     for key, value in values.items():
         if value is not None:
             setattr(camera, key, value)
+    if sub_rtsp_path_present:
+        camera.sub_rtsp_path = sub_rtsp_path.strip() if sub_rtsp_path else None
     if password is not None:
         camera.password_encrypted = encrypt_secret(password)
 
