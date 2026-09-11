@@ -42,6 +42,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache FFmpeg archive
+        uses: actions/cache@v4
+        with:
+          path: vendor/ffmpeg/ffmpeg-linux64.tar.xz
+          key: camera-recorder-ffmpeg-linux64-v1
+      - name: Prepare FFmpeg archive
+        run: bash scripts/download-ffmpeg.sh amd64
       - run: docker compose config
       - run: docker compose build backend frontend
       - run: docker compose up -d backend frontend
