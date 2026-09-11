@@ -11,6 +11,7 @@ from app.api.recorder import router as recorder_router
 from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.database import SessionLocal, close_db, init_db
+from app.core.migrations import upgrade_database
 from app.models.camera import Camera
 from app.services.camera_config import runtime_config
 from app.services.ffmpeg_capabilities import capabilities_dict
@@ -30,6 +31,7 @@ async def lifespan(_: FastAPI):
     ):
         path.mkdir(parents=True, exist_ok=True)
 
+    await upgrade_database()
     await init_db()
     await segment_processor.start()
     await upload_manager.start()
@@ -65,7 +67,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.3.0",
+    version="0.4.0",
     lifespan=lifespan,
 )
 
