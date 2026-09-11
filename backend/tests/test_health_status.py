@@ -15,6 +15,8 @@ def test_health_summary_shape() -> None:
     assert "abnormal" in body["cameras"]
     assert "segments" in body["recordings_24h"]
     assert "used_percent" in body["storage"]
+    assert "cleanup" in body["storage"]
+    assert "last_result" in body["storage"]["cleanup"]
     assert isinstance(body["camera_health"], list)
 
 
