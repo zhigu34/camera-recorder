@@ -28,10 +28,14 @@ async def init_db() -> None:
     # Import models before create_all so SQLAlchemy sees every table.
     import app.models  # noqa: F401
 
-    async with engine.begin() as connection:
-        if settings.database_url.startswith("sqlite"):
+    if settings.database_url.startswith("sqlite"):
+        # journal_mode persists in the database; run it outside create_all's
+        # transaction to avoid SQLite's journal-mode transaction restrictions.
+        async with engine.connect() as connection:
             await connection.execute(text("PRAGMA journal_mode=WAL"))
-            await connection.execute(text("PRAGMA foreign_keys=ON"))
+            await connection.commit()
+
+    async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
 
@@ -41,4 +45,6 @@ async def close_db() -> None:
 
 async def get_db() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:
+        if settings.database_url.startswith("sqlite"):
+            await session.execute(text("PRAGMA foreign_keys=ON"))
         yield session
