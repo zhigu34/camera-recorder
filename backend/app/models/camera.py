@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import JSON, Boolean, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -26,6 +26,8 @@ class Camera(Base):
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_record: Mapped[bool] = mapped_column(Boolean, default=False)
+    recording_schedule_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    recording_schedule: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     timestamp_mode: Mapped[str] = mapped_column(String(32), default="reconstruct")
 
     video_codec: Mapped[str | None] = mapped_column(String(32), nullable=True)
