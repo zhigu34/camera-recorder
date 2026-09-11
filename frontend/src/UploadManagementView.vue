@@ -187,7 +187,7 @@ function applyTasks(incoming: UploadTask[], removedIds: number[] = []) {
 
 function wsUrl() {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${window.location.host}/api/uploads/ws`
+  return `${scheme}//${window.location.host}/ws/uploads`
 }
 
 function closeSocket() {
