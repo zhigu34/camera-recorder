@@ -20,6 +20,17 @@ def test_h264_is_direct_playback(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_existing_compatibility_proxy_wins_over_h264_direct_play(tmp_path):
+    manager = RecordingPlaybackManager()
+    manager.proxy_dir = tmp_path
+    manager.proxy_path(1).write_bytes(b"browser-compatible-proxy")
+
+    state = manager.status(1, "h264")
+
+    assert state["state"] == "ready"
+    assert state["direct"] is False
+
+
 def test_hevc_can_try_original_without_being_guaranteed_direct():
     manager = RecordingPlaybackManager()
 
@@ -28,39 +39,51 @@ def test_hevc_can_try_original_without_being_guaranteed_direct():
     assert manager.can_direct_play("hevc") is False
 
 
-def test_proxy_command_copies_aac_audio(tmp_path):
+def test_proxy_command_normalizes_aac_and_keeps_1080p_quality(tmp_path):
     source = tmp_path / "source.mp4"
     target = tmp_path / "target.mp4"
 
     command = RecordingPlaybackManager.build_proxy_command(source, target, "aac")
 
-    audio_index = command.index("-c:a")
-    assert command[audio_index + 1] == "copy"
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-profile:a") + 1] == "aac_low"
+    assert command[command.index("-b:a") + 1] == "128k"
+    assert command[command.index("-ar") + 1] == "48000"
+    assert command[command.index("-vf") + 1] == "scale='min(1920,iw)':-2"
+    assert command[command.index("-crf") + 1] == "20"
     assert command[command.index("-pix_fmt") + 1] == "yuv420p"
+    assert command[command.index("-threads") + 1] == "4"
     assert command[command.index("-progress") + 1] == "pipe:2"
     assert "-nostats" in command
 
 
-def test_proxy_command_transcodes_non_aac_audio(tmp_path):
+def test_proxy_command_normalizes_non_aac_audio(tmp_path):
     source = tmp_path / "source.mp4"
     target = tmp_path / "target.mp4"
 
     command = RecordingPlaybackManager.build_proxy_command(source, target, "pcm_alaw")
 
-    audio_index = command.index("-c:a")
-    assert command[audio_index + 1] == "aac"
-    assert "96k" in command
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-profile:a") + 1] == "aac_low"
+    assert command[command.index("-b:a") + 1] == "128k"
+    assert command[command.index("-ar") + 1] == "48000"
 
 
-def test_live_proxy_command_is_fragmented_and_low_latency(tmp_path):
+def test_live_proxy_command_is_fragmented_low_latency_and_high_quality(tmp_path):
     source = tmp_path / "source.mp4"
 
     command = RecordingPlaybackManager.build_live_proxy_command(source, "aac")
 
     assert command[-2:] == ["mp4", "pipe:1"]
     assert command[command.index("-tune") + 1] == "zerolatency"
+    assert command[command.index("-vf") + 1] == "scale='min(1920,iw)':-2"
+    assert command[command.index("-crf") + 1] == "21"
     assert command[command.index("-pix_fmt") + 1] == "yuv420p"
-    assert command[command.index("-c:a") + 1] == "copy"
+    assert command[command.index("-threads") + 1] == "4"
+    assert command[command.index("-c:a") + 1] == "aac"
+    assert command[command.index("-profile:a") + 1] == "aac_low"
+    assert command[command.index("-b:a") + 1] == "128k"
+    assert command[command.index("-ar") + 1] == "48000"
     assert command[command.index("-progress") + 1] == "pipe:2"
     movflags = command[command.index("-movflags") + 1]
     assert "frag_keyframe" in movflags
@@ -75,7 +98,7 @@ def test_live_proxy_command_accepts_remote_url():
     command = RecordingPlaybackManager.build_live_proxy_command(remote, "aac")
 
     assert command[command.index("-i") + 1] == remote
-    assert command[command.index("-c:a") + 1] == "copy"
+    assert command[command.index("-c:a") + 1] == "aac"
 
 
 def test_live_proxy_status_includes_progress():
