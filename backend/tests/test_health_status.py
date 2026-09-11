@@ -41,6 +41,30 @@ def test_health_trends_reject_invalid_window() -> None:
     assert response.status_code == 422
 
 
+def test_stability_report_shape() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/health/stability?hours=24")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hours"] == 24
+    assert body["overall"]["verdict"] in {"pass", "fail", "collecting"}
+    assert body["criteria"]["min_sample_coverage"] == 95.0
+    assert body["criteria"]["min_online_rate"] == 99.5
+    assert body["criteria"]["max_longest_outage_seconds"] == 120
+    assert "ffmpeg_failures" in body["overall"]
+    assert "failure_streaks" in body["overall"]
+    assert "longest_offline_seconds" in body["overall"]
+    assert isinstance(body["cameras"], list)
+
+
+def test_stability_report_reject_invalid_window() -> None:
+    with TestClient(app) as client:
+        response = client.get("/api/health/stability?hours=169")
+
+    assert response.status_code == 422
+
+
 def test_health_websocket_sends_snapshot() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/status") as websocket:
