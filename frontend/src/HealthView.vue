@@ -106,6 +106,14 @@ function storageTagType() {
   return 'success'
 }
 
+function sortSegments24h(a: CameraHealth, b: CameraHealth) {
+  return a.recordings_24h.segments - b.recordings_24h.segments
+}
+
+function sortUnhealthy24h(a: CameraHealth, b: CameraHealth) {
+  return a.recordings_24h.unhealthy_segments - b.recordings_24h.unhealthy_segments
+}
+
 async function loadSnapshot() {
   loading.value = true
   try {
@@ -278,10 +286,10 @@ onBeforeUnmount(() => {
           <el-table-column prop="restart_count" label="重连" width="75" sortable />
           <el-table-column prop="timestamp_warning_count" label="时间戳" width="85" sortable />
           <el-table-column prop="network_warning_count" label="网络" width="75" sortable />
-          <el-table-column label="24h片段" width="90" sortable :sort-method="(a: CameraHealth, b: CameraHealth) => a.recordings_24h.segments - b.recordings_24h.segments">
+          <el-table-column label="24h片段" width="90" sortable :sort-method="sortSegments24h">
             <template #default="{ row }">{{ row.recordings_24h.segments }}</template>
           </el-table-column>
-          <el-table-column label="24h异常" width="90" sortable :sort-method="(a: CameraHealth, b: CameraHealth) => a.recordings_24h.unhealthy_segments - b.recordings_24h.unhealthy_segments">
+          <el-table-column label="24h异常" width="90" sortable :sort-method="sortUnhealthy24h">
             <template #default="{ row }">
               <span :class="{ danger: row.recordings_24h.unhealthy_segments > 0 }">{{ row.recordings_24h.unhealthy_segments }}</span>
             </template>
