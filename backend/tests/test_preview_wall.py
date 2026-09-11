@@ -1,3 +1,4 @@
+from app.api.preview_wall import _stream_status_payload
 from app.services.preview_wall import JpegFrameParser, build_wall_preview_command
 
 
@@ -27,3 +28,22 @@ def test_wall_preview_command_uses_image2pipe_and_requested_profile():
     assert "fps=3,scale='min(480,iw)':-2" in command
     assert "-rtsp_transport" in command
     assert "tcp" in command
+
+
+def test_preview_stream_status_payload_reports_actual_stream():
+    assert _stream_status_payload("slot_ready", 2, "sub") == {
+        "type": "slot_ready",
+        "slot": 2,
+        "stream": "sub",
+    }
+    assert _stream_status_payload(
+        "slot_fallback",
+        2,
+        "main",
+        "子码流不可用，已自动切换主码流",
+    ) == {
+        "type": "slot_fallback",
+        "slot": 2,
+        "stream": "main",
+        "detail": "子码流不可用，已自动切换主码流",
+    }
