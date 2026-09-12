@@ -1,0 +1,184 @@
+/* Annotated real-device adjustments for the recording workspace.
+ * Keep this layer focused on the changes called out in the review screenshot.
+ */
+
+/* Calendar filters: each control gets a deliberate width instead of equal tracks.
+ * Camera is longest, date second, and state filters stay compact with clear gaps. */
+.nvr-workspace-content .recording-center .calendar-toolbar {
+  display: grid !important;
+  grid-template-columns:
+    minmax(190px, 2.15fr)
+    minmax(145px, 1.45fr)
+    minmax(96px, .92fr)
+    minmax(96px, .92fr)
+    minmax(102px, 1fr) !important;
+  grid-template-areas: "camera date storage health upload" !important;
+  gap: 10px !important;
+  align-items: center !important;
+  padding: 9px 11px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(1) { grid-area: camera !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(2) { grid-area: date !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(3) { grid-area: storage !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(4) { grid-area: health !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(5) { grid-area: upload !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(6),
+.nvr-workspace-content .recording-center .calendar-toolbar .search-box {
+  display: none !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-toolbar .el-input__wrapper,
+.nvr-workspace-content .recording-center .calendar-toolbar .el-select__wrapper,
+.nvr-workspace-content .recording-center .calendar-toolbar .el-date-editor.el-input__wrapper {
+  width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Player content is ordered explicitly so auto-advance lives with the bottom
+ * segment controls rather than taking a full-width strip below playback. */
+.nvr-workspace-content .recording-center .player-panel {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+.nvr-workspace-content .recording-center .player-head { order: 1; }
+.nvr-workspace-content .recording-center .player-box { order: 2; }
+.nvr-workspace-content .recording-center .player-nav { order: 3; }
+.nvr-workspace-content .recording-center .playback-notice,
+.nvr-workspace-content .recording-center .playback-error,
+.nvr-workspace-content .recording-center .proxy-progress { order: 4; }
+.nvr-workspace-content .recording-center .heat-section { order: 5; }
+.nvr-workspace-content .recording-center .detail-title { order: 6; }
+.nvr-workspace-content .recording-center .detail-grid { order: 7; }
+.nvr-workspace-content .recording-center .auto-advance { order: 8; }
+.nvr-workspace-content .recording-center .player-actions { order: 9; }
+.nvr-workspace-content .recording-center .position-note { order: 10; }
+
+.nvr-workspace-content .recording-center .auto-advance {
+  align-self: flex-end !important;
+  width: auto !important;
+  min-height: 32px !important;
+  margin: 10px 12px 0 auto !important;
+  padding: 0 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--nvr-muted) !important;
+  gap: 9px !important;
+}
+
+.nvr-workspace-content .recording-center .auto-advance span {
+  font-size: 10px !important;
+  font-weight: 550 !important;
+}
+
+.nvr-workspace-content .recording-center .player-actions {
+  margin-top: 0 !important;
+  padding-top: 4px !important;
+}
+
+/* Five-minute heatmap: labels live on the right, without colons. Increase both
+ * label clarity and row height so 288 bins remain readable at a glance. */
+.nvr-workspace-content .recording-center .heat-grid {
+  grid-template-rows: repeat(12, 10px) !important;
+  gap: 2px 3px !important;
+  padding-left: 0 !important;
+  padding-right: 36px !important;
+}
+
+.nvr-workspace-content .recording-center .heat-grid::before {
+  content: "00\A05\A10\A15\A20\A25\A30\A35\A40\A45\A50\A55" !important;
+  left: auto !important;
+  right: 0 !important;
+  top: 0 !important;
+  width: 30px !important;
+  color: color-mix(in srgb, var(--nvr-text-soft) 82%, var(--nvr-muted)) !important;
+  font-size: 8px !important;
+  font-weight: 600 !important;
+  line-height: 12px !important;
+  text-align: left !important;
+  letter-spacing: .01em !important;
+}
+
+.nvr-workspace-content .recording-center .heat-cell {
+  min-height: 10px !important;
+  height: 10px !important;
+  border-radius: 3px !important;
+}
+
+.nvr-workspace-content .recording-center .heat-axis {
+  margin-left: 0 !important;
+  margin-right: 36px !important;
+  margin-top: 8px !important;
+  font-size: 8px !important;
+  font-weight: 550 !important;
+}
+
+.nvr-workspace-content .recording-center .heat-legend {
+  margin-right: 36px !important;
+}
+
+/* Keep the three-column metadata layout firm on desktop. */
+.nvr-workspace-content .recording-center .detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+@media (max-width: 1280px) {
+  .nvr-workspace-content .recording-center .calendar-toolbar {
+    grid-template-columns:
+      minmax(165px, 2fr)
+      minmax(132px, 1.4fr)
+      minmax(86px, .9fr)
+      minmax(86px, .9fr)
+      minmax(92px, 1fr) !important;
+    gap: 8px !important;
+  }
+}
+
+@media (max-width: 1080px) {
+  .nvr-workspace-content .recording-center .calendar-toolbar {
+    grid-template-columns:
+      minmax(180px, 2fr)
+      minmax(140px, 1.45fr)
+      repeat(3, minmax(90px, 1fr)) !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .nvr-workspace-content .recording-center .calendar-toolbar {
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-areas:
+      "camera camera"
+      "date date"
+      "storage health"
+      "upload upload" !important;
+    gap: 7px !important;
+  }
+
+  .nvr-workspace-content .recording-center .heat-grid {
+    grid-template-rows: repeat(12, 8px) !important;
+    padding-right: 32px !important;
+  }
+
+  .nvr-workspace-content .recording-center .heat-grid::before {
+    width: 27px !important;
+    font-size: 7px !important;
+    line-height: 10px !important;
+  }
+
+  .nvr-workspace-content .recording-center .heat-cell {
+    min-height: 8px !important;
+    height: 8px !important;
+  }
+
+  .nvr-workspace-content .recording-center .heat-axis,
+  .nvr-workspace-content .recording-center .heat-legend {
+    margin-right: 32px !important;
+  }
+
+  .nvr-workspace-content .recording-center .detail-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
