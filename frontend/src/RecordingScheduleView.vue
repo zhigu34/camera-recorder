@@ -1,45 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
-
-interface RecordingWindow {
-  days: number[]
-  start: string
-  end: string
-}
-
-interface Camera {
-  id: number
-  name: string
-  ip: string
-  enabled: boolean
-  auto_record: boolean
-  recording_schedule_enabled: boolean
-  recording_schedule: RecordingWindow[]
-}
-
-interface ScheduleRuntime {
-  camera_id: number
-  schedule_enabled: boolean
-  schedule: string
-  schedule_state: string
-  in_window: boolean
-  auto_eligible: boolean
-  running: boolean
-  mode: string
-}
-
-interface SystemStatus {
-  recording_schedule?: {
-    running: boolean
-    poll_interval_seconds: number
-    last_check_at?: string | null
-    last_error?: string | null
-    cameras: ScheduleRuntime[]
-  }
-}
+import { useCameraStore, type RecordingWindow, type SharedCamera } from './stores/cameras'
+import { useRuntimeStore } from './stores/runtime'
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const WORK_DAYS = [0, 1, 2, 3, 4]
@@ -54,10 +20,13 @@ const weekdayOptions = [
   { value: 6, label: '周日', short: '日' },
 ]
 
-const loading = ref(false)
+const cameraStore = useCameraStore()
+const runtime = useRuntimeStore()
+const { cameras, loading: cameraLoading } = storeToRefs(cameraStore)
+const { systemStatus } = storeToRefs(runtime)
+const refreshing = ref(false)
+const loading = computed(() => refreshing.value || cameraLoading.value)
 const saving = ref(false)
-const cameras = ref<Camera[]>([])
-const systemStatus = ref<SystemStatus | null>(null)
 const dialogVisible = ref(false)
 const dialogMode = ref<'single' | 'batch'>('single')
 const editingId = ref<number | null>(null)
@@ -127,54 +96,53 @@ function windowDurationLabel(item: RecordingWindow) {
   return `${hours} 小时${minutes ? ` ${minutes} 分` : ''}`
 }
 
-function scheduleText(camera: Camera) {
+function scheduleText(camera: SharedCamera) {
+  const schedule = camera.recording_schedule || []
   if (!camera.auto_record) return camera.recording_schedule_enabled ? '周计划已配置 · 自动录像关闭' : '仅手动'
   if (!camera.recording_schedule_enabled) return '全天自动录像'
-  if (!camera.recording_schedule.length) return '未配置时段'
-  return camera.recording_schedule
-    .map((item) => `${dayLabel(item.days)} ${item.start}-${item.end}`)
-    .join('；')
+  if (!schedule.length) return '未配置时段'
+  return schedule.map((item) => `${dayLabel(item.days)} ${item.start}-${item.end}`).join('；')
 }
 
-function stateText(camera: Camera) {
-  const runtime = scheduleByCamera.value.get(camera.id)
+function stateText(camera: SharedCamera) {
+  const runtimeState = scheduleByCamera.value.get(camera.id)
   if (!camera.enabled) return '已禁用'
-  if (!camera.auto_record) return runtime?.running ? '手动录像中' : '仅手动'
-  const state = runtime?.schedule_state
+  if (!camera.auto_record) return runtimeState?.running ? '手动录像中' : '仅手动'
+  const state = runtimeState?.schedule_state
   if (state === 'global_disabled') return '全局自动录像已关闭'
-  if (state === 'automatic') return runtime?.running ? '全天录像中' : '等待自动启动'
+  if (state === 'automatic') return runtimeState?.running ? '全天录像中' : '等待自动启动'
   if (state === 'scheduled') return '等待录制时段'
-  if (state === 'in_window') return runtime?.running ? '时段内录像中' : '时段内等待启动'
+  if (state === 'in_window') return runtimeState?.running ? '时段内录像中' : '时段内等待启动'
   if (state === 'manual_override') return '手动覆盖录像中'
   if (state === 'manual_paused') return '当前时段已手动暂停'
   if (state === 'probe_required') return '需要先检测媒体参数'
   if (state === 'error') return '计划启动失败'
-  if (runtime?.running) return '录像中'
+  if (runtimeState?.running) return '录像中'
   return '待命'
 }
 
-function stateType(camera: Camera) {
-  const runtime = scheduleByCamera.value.get(camera.id)
+function stateType(camera: SharedCamera) {
+  const runtimeState = scheduleByCamera.value.get(camera.id)
   if (!camera.enabled || !camera.auto_record) return 'info'
-  if (runtime?.schedule_state === 'error') return 'danger'
-  if (runtime?.schedule_state === 'probe_required' || runtime?.schedule_state === 'manual_paused') return 'warning'
-  if (runtime?.running) return 'success'
-  if (runtime?.schedule_state === 'in_window') return 'warning'
+  if (runtimeState?.schedule_state === 'error') return 'danger'
+  if (runtimeState?.schedule_state === 'probe_required' || runtimeState?.schedule_state === 'manual_paused') return 'warning'
+  if (runtimeState?.running) return 'success'
+  if (runtimeState?.schedule_state === 'in_window') return 'warning'
   return 'info'
 }
 
-function applyCameraToForm(camera: Camera) {
+function applyCameraToForm(camera: SharedCamera) {
   form.name = camera.name
-  form.recording_schedule_enabled = camera.recording_schedule_enabled
+  form.recording_schedule_enabled = Boolean(camera.recording_schedule_enabled)
   // Repair the legacy contradictory combination in the editor. A weekly schedule
   // is an automatic-recording policy, so opening an existing scheduled camera
   // should present auto recording as enabled and saving will persist that repair.
-  form.auto_record = camera.recording_schedule_enabled ? true : camera.auto_record
+  form.auto_record = camera.recording_schedule_enabled ? true : Boolean(camera.auto_record)
   form.recording_schedule = cloneWindows(camera.recording_schedule)
   if (form.recording_schedule_enabled && !form.recording_schedule.length) addWindow()
 }
 
-function openSchedule(camera: Camera) {
+function openSchedule(camera: SharedCamera) {
   dialogMode.value = 'single'
   editingId.value = camera.id
   applyCameraToForm(camera)
@@ -199,33 +167,20 @@ function openBatchSchedule() {
   dialogVisible.value = true
 }
 
-function onSelectionChange(rows: Camera[]) {
+function onSelectionChange(rows: SharedCamera[]) {
   selectedIds.value = rows.map((item) => item.id)
 }
 
-function addWindow() {
-  form.recording_schedule.push({ days: [...ALL_DAYS], start: '08:00', end: '18:00' })
-}
-
-function removeWindow(index: number) {
-  form.recording_schedule.splice(index, 1)
-}
-
-function setWindowDays(index: number, days: number[]) {
-  form.recording_schedule[index].days = [...days]
-}
-
+function addWindow() { form.recording_schedule.push({ days: [...ALL_DAYS], start: '08:00', end: '18:00' }) }
+function removeWindow(index: number) { form.recording_schedule.splice(index, 1) }
+function setWindowDays(index: number, days: number[]) { form.recording_schedule[index].days = [...days] }
 function toggleWindowDay(index: number, day: number) {
   const days = form.recording_schedule[index].days
   form.recording_schedule[index].days = days.includes(day)
     ? days.filter((value) => value !== day)
     : [...days, day].sort((a, b) => a - b)
 }
-
-function useAllDay() {
-  form.recording_schedule_enabled = false
-}
-
+function useAllDay() { form.recording_schedule_enabled = false }
 function setAutoRecord(value: boolean) {
   form.auto_record = value
   if (!value && form.recording_schedule_enabled) {
@@ -233,7 +188,6 @@ function setAutoRecord(value: boolean) {
     ElMessage.info('已关闭周计划；周计划需要自动录像开启后才能执行')
   }
 }
-
 function enableSchedule(value: boolean) {
   if (!value) return
   if (!form.auto_record) {
@@ -266,19 +220,14 @@ function validateWindows() {
   return true
 }
 
-async function load() {
-  loading.value = true
+async function load(force = false) {
+  refreshing.value = true
   try {
-    const [cameraRes, statusRes] = await Promise.all([
-      axios.get<Camera[]>('/api/cameras'),
-      axios.get<SystemStatus>('/api/system/status'),
-    ])
-    cameras.value = cameraRes.data
-    systemStatus.value = statusRes.data
+    await Promise.all([cameraStore.load(force), runtime.refreshSystem()])
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '录制计划加载失败')
   } finally {
-    loading.value = false
+    refreshing.value = false
   }
 }
 
@@ -293,17 +242,15 @@ async function save() {
   }
   try {
     if (dialogMode.value === 'batch') {
-      await axios.put('/api/cameras/recording-schedule/batch', {
-        ...payload,
-        camera_ids: selectedIds.value,
-      })
+      await axios.put('/api/cameras/recording-schedule/batch', { ...payload, camera_ids: selectedIds.value })
       ElMessage.success(`周计划已批量应用到 ${selectedIds.value.length} 路摄像头`)
     } else if (editingId.value !== null) {
       await axios.put(`/api/cameras/${editingId.value}`, payload)
       ElMessage.success('周计划已保存并立即重新校准')
     }
     dialogVisible.value = false
-    await load()
+    cameraStore.invalidate()
+    await load(true)
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '保存失败')
   } finally {
@@ -311,7 +258,7 @@ async function save() {
   }
 }
 
-onMounted(load)
+onMounted(() => void load(false))
 </script>
 
 <template>
@@ -328,7 +275,7 @@ onMounted(load)
       </div>
       <div class="toolbar-actions">
         <span class="selected-note">已选择 {{ selectedIds.length }} 路</span>
-        <el-button :icon="Refresh" @click="load">刷新</el-button>
+        <el-button :icon="Refresh" @click="load(true)">刷新</el-button>
         <el-button type="primary" :disabled="!selectedIds.length" @click="openBatchSchedule">批量应用周计划</el-button>
       </div>
     </div>
@@ -338,18 +285,10 @@ onMounted(load)
         <el-table-column type="selection" width="50" />
         <el-table-column prop="name" label="摄像头" min-width="150" />
         <el-table-column prop="ip" label="IP" width="145" />
-        <el-table-column label="自动录像" width="105">
-          <template #default="{ row }"><el-tag :type="row.auto_record ? 'success' : 'info'">{{ row.auto_record ? '开启' : '关闭' }}</el-tag></template>
-        </el-table-column>
-        <el-table-column label="周计划" min-width="430">
-          <template #default="{ row }"><span class="schedule-cell">{{ scheduleText(row) }}</span></template>
-        </el-table-column>
-        <el-table-column label="调度状态" min-width="190">
-          <template #default="{ row }"><el-tag :type="stateType(row)">{{ stateText(row) }}</el-tag></template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
-          <template #default="{ row }"><el-button size="small" type="primary" @click="openSchedule(row)">设置周计划</el-button></template>
-        </el-table-column>
+        <el-table-column label="自动录像" width="105"><template #default="{ row }"><el-tag :type="row.auto_record ? 'success' : 'info'">{{ row.auto_record ? '开启' : '关闭' }}</el-tag></template></el-table-column>
+        <el-table-column label="周计划" min-width="430"><template #default="{ row }"><span class="schedule-cell">{{ scheduleText(row) }}</span></template></el-table-column>
+        <el-table-column label="调度状态" min-width="190"><template #default="{ row }"><el-tag :type="stateType(row)">{{ stateText(row) }}</el-tag></template></el-table-column>
+        <el-table-column label="操作" width="120" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" @click="openSchedule(row)">设置周计划</el-button></template></el-table-column>
       </el-table>
     </div>
 
@@ -368,68 +307,32 @@ onMounted(load)
       </div>
 
       <div v-if="form.recording_schedule_enabled" class="schedule-editor">
-        <div class="editor-head">
-          <div><strong>录制时间窗口</strong><span>每个窗口可独立选择星期和起止时间，支持跨午夜。</span></div>
-          <el-button type="primary" plain size="small" @click="addWindow">+ 新增时间段</el-button>
-        </div>
-
+        <div class="editor-head"><div><strong>录制时间窗口</strong><span>每个窗口可独立选择星期和起止时间，支持跨午夜。</span></div><el-button type="primary" plain size="small" @click="addWindow">+ 新增时间段</el-button></div>
         <div class="window-list">
           <article v-for="(item, index) in form.recording_schedule" :key="index" class="window-card" :class="{ overnight: crossesMidnight(item) }">
             <div class="window-card-head">
-              <div class="window-title">
-                <span class="window-number">{{ String(index + 1).padStart(2, '0') }}</span>
-                <div><strong>时间窗口 {{ index + 1 }}</strong><small>{{ dayLabel(item.days) }} · {{ item.start }} → {{ item.end }}</small></div>
-              </div>
-              <div class="window-head-actions">
-                <span v-if="crossesMidnight(item)" class="overnight-badge">跨午夜</span>
-                <button class="delete-window" type="button" @click="removeWindow(index)">删除</button>
-              </div>
+              <div class="window-title"><span class="window-number">{{ String(index + 1).padStart(2, '0') }}</span><div><strong>时间窗口 {{ index + 1 }}</strong><small>{{ dayLabel(item.days) }} · {{ item.start }} → {{ item.end }}</small></div></div>
+              <div class="window-head-actions"><span v-if="crossesMidnight(item)" class="overnight-badge">跨午夜</span><button class="delete-window" type="button" @click="removeWindow(index)">删除</button></div>
             </div>
-
             <div class="window-section">
               <div class="section-title"><strong>生效日期</strong><span>点击星期即可切换</span></div>
-              <div class="preset-row">
-                <button type="button" :class="{ active: sameDays(item.days, ALL_DAYS) }" @click="setWindowDays(index, ALL_DAYS)">每天</button>
-                <button type="button" :class="{ active: sameDays(item.days, WORK_DAYS) }" @click="setWindowDays(index, WORK_DAYS)">工作日</button>
-                <button type="button" :class="{ active: sameDays(item.days, WEEKEND) }" @click="setWindowDays(index, WEEKEND)">周末</button>
-              </div>
-              <div class="weekday-grid">
-                <button v-for="day in weekdayOptions" :key="day.value" type="button" :class="{ active: item.days.includes(day.value) }" :title="day.label" @click="toggleWindowDay(index, day.value)">
-                  <span>{{ day.short }}</span><small>{{ day.label }}</small>
-                </button>
-              </div>
+              <div class="preset-row"><button type="button" :class="{ active: sameDays(item.days, ALL_DAYS) }" @click="setWindowDays(index, ALL_DAYS)">每天</button><button type="button" :class="{ active: sameDays(item.days, WORK_DAYS) }" @click="setWindowDays(index, WORK_DAYS)">工作日</button><button type="button" :class="{ active: sameDays(item.days, WEEKEND) }" @click="setWindowDays(index, WEEKEND)">周末</button></div>
+              <div class="weekday-grid"><button v-for="day in weekdayOptions" :key="day.value" type="button" :class="{ active: item.days.includes(day.value) }" :title="day.label" @click="toggleWindowDay(index, day.value)"><span>{{ day.short }}</span><small>{{ day.label }}</small></button></div>
             </div>
-
             <div class="time-band">
-              <div class="time-field">
-                <span class="time-label">开始时间</span>
-                <el-time-picker v-model="item.start" format="HH:mm" value-format="HH:mm" :clearable="false" placeholder="开始" />
-              </div>
+              <div class="time-field"><span class="time-label">开始时间</span><el-time-picker v-model="item.start" format="HH:mm" value-format="HH:mm" :clearable="false" placeholder="开始" /></div>
               <div class="time-bridge"><span>→</span><small>{{ crossesMidnight(item) ? '次日结束' : '当日结束' }}</small></div>
-              <div class="time-field">
-                <span class="time-label">结束时间</span>
-                <el-time-picker v-model="item.end" format="HH:mm" value-format="HH:mm" :clearable="false" placeholder="结束" />
-              </div>
+              <div class="time-field"><span class="time-label">结束时间</span><el-time-picker v-model="item.end" format="HH:mm" value-format="HH:mm" :clearable="false" placeholder="结束" /></div>
               <div class="duration-box"><strong>{{ windowDurationLabel(item) }}</strong><span>持续时长</span></div>
             </div>
-
-            <div class="window-note" :class="{ overnight: crossesMidnight(item) }">
-              <i></i>
-              <span v-if="crossesMidnight(item)">从 {{ item.start }} 开始录像，并在次日 {{ item.end }} 结束；该窗口归属于开始日。</span>
-              <span v-else>{{ item.start }} 至 {{ item.end }} 在所选日期内完成。</span>
-            </div>
+            <div class="window-note" :class="{ overnight: crossesMidnight(item) }"><i></i><span v-if="crossesMidnight(item)">从 {{ item.start }} 开始录像，并在次日 {{ item.end }} 结束；该窗口归属于开始日。</span><span v-else>{{ item.start }} 至 {{ item.end }} 在所选日期内完成。</span></div>
           </article>
         </div>
-
         <button class="add-window-tile" type="button" @click="addWindow"><span>＋</span><strong>添加另一个时间窗口</strong><small>例如周末使用不同录像时间</small></button>
         <div class="schedule-example"><strong>示例</strong><span>工作日 08:00-18:00 · 周末 09:00-12:00 · 周五 22:00-06:00（跨到周六）</span></div>
       </div>
 
-      <div v-else class="all-day-state">
-        <div class="all-day-icon">24</div>
-        <div><strong>{{ form.auto_record ? '全天自动录像' : '仅手动录像' }}</strong><span>{{ form.auto_record ? '周计划未启用，自动录像摄像头将按全天策略运行。' : '自动录像已关闭；启用周计划时会自动重新开启。' }}</span></div>
-      </div>
-
+      <div v-else class="all-day-state"><div class="all-day-icon">24</div><div><strong>{{ form.auto_record ? '全天自动录像' : '仅手动录像' }}</strong><span>{{ form.auto_record ? '周计划未启用，自动录像摄像头将按全天策略运行。' : '自动录像已关闭；启用周计划时会自动重新开启。' }}</span></div></div>
       <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="save">{{ dialogMode === 'batch' ? '批量应用' : '保存计划' }}</el-button></template>
     </el-dialog>
   </section>

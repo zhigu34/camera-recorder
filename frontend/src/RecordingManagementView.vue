@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Cloudy, DataLine, Search, VideoPlay, WarningFilled } from '@element-plus/icons-vue'
+import { useCameraStore } from './stores/cameras'
 
-interface Camera { id: number; name: string; ip: string }
 interface Recording {
   id: number
   camera_id: number
@@ -45,11 +47,13 @@ const emit = defineEmits<{
   (event: 'open-uploads'): void
 }>()
 
+const router = useRouter()
+const cameraStore = useCameraStore()
+const { cameras } = storeToRefs(cameraStore)
 const loading = ref(false)
 const deleting = ref(false)
 const recordings = ref<Recording[]>([])
 const selectedRows = ref<Recording[]>([])
-const cameras = ref<Camera[]>([])
 const uploadStatus = ref<UploadStatus | null>(null)
 const stats = ref<RecordingStats>({ total: 0, total_size: 0, archived: 0, pending_archive: 0, abnormal: 0 })
 const total = ref(0)
@@ -123,9 +127,7 @@ function healthType(row: Recording) {
   if (row.health_status === 'failed') return 'danger'
   return 'warning'
 }
-function canDelete(row: Recording) {
-  return row.status !== 'deleted' && row.upload_status !== 'uploading'
-}
+function canDelete(row: Recording) { return row.status !== 'deleted' && row.upload_status !== 'uploading' }
 function handleSelectionChange(rows: Recording[]) { selectedRows.value = rows }
 function clearFilters() {
   searchText.value = ''
@@ -137,14 +139,14 @@ function clearFilters() {
 }
 function openDetail(row: Recording) { activeRecording.value = row; detailVisible.value = true }
 function openPlayback(row: Recording) {
-  const params = new URLSearchParams()
-  params.set('camera_id', String(row.camera_id))
+  const query: Record<string, string> = {
+    camera_id: String(row.camera_id),
+    recording_id: String(row.id),
+  }
   const date = row.started_at?.slice(0, 10)
-  if (date) params.set('date', date)
-  params.set('recording_id', String(row.id))
+  if (date) query.date = date
   detailVisible.value = false
-  window.history.pushState({}, '', `/recordings/browser?${params.toString()}`)
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  void router.push({ path: '/recordings/browser', query })
 }
 function requestParams() {
   const params: Record<string, string | number> = {
@@ -178,15 +180,14 @@ async function loadPage(showLoading = true) {
 async function loadInitial() {
   loading.value = true
   try {
-    const [pageRes, cameraRes, statusRes] = await Promise.all([
+    const [pageRes, , statusRes] = await Promise.all([
       axios.get<RecordingPage>('/api/recording-management', { params: requestParams() }),
-      axios.get<Camera[]>('/api/cameras'),
+      cameraStore.load(),
       axios.get<UploadStatus>('/api/uploads'),
     ])
     recordings.value = pageRes.data.items
     total.value = pageRes.data.total
     stats.value = pageRes.data.stats
-    cameras.value = cameraRes.data
     uploadStatus.value = statusRes.data
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '录像管理加载失败')
@@ -220,7 +221,6 @@ async function deleteOne(row: Recording) {
       confirmButtonClass: 'el-button--danger',
     })
   } catch { return }
-
   deleting.value = true
   try {
     const { data } = await axios.delete<RecordingDeleteResult>(`/api/recording-management/${row.id}`)
@@ -251,7 +251,6 @@ async function batchDelete() {
       dangerouslyUseHTMLString: false,
     })
   } catch { return }
-
   deleting.value = true
   try {
     const { data } = await axios.post<RecordingDeleteResult>('/api/recording-management/batch-delete', { ids: rows.map((row) => row.id) })
