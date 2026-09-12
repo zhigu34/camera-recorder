@@ -5,12 +5,21 @@
   padding: 0 20px !important;
 }
 
-.playback-health.embedded {
+/* Non-compact metrics are teleported into RecordingBrowserView's page-shell.
+ * Grid placement makes the visual order explicit: timeline -> quality -> clips. */
+.nvr-workspace-content .page-shell > .playback-health.embedded {
+  grid-column: 2;
+  grid-row: 3;
   width: 100%;
   max-width: none !important;
-  margin: 12px 0 0 !important;
+  min-width: 0;
+  margin: 0 !important;
   padding: 0 !important;
   overflow: hidden;
+}
+
+.nvr-workspace-content .page-shell > .el-card:nth-child(5) {
+  grid-row: 4 !important;
 }
 
 .playback-health .el-card {
@@ -115,12 +124,17 @@
 .playback-health.compact .compact-hint { margin-top: 8px; }
 
 @media (max-width: 1180px) {
+  .nvr-workspace-content .page-shell > .playback-health.embedded,
+  .nvr-workspace-content .page-shell > .el-card:nth-child(5) {
+    grid-column: 1;
+    grid-row: auto !important;
+  }
   .playback-health .backend-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
   .playback-health { margin: 10px auto 20px !important; padding: 0 14px !important; }
-  .playback-health.embedded { margin: 12px 0 0 !important; padding: 0 !important; }
+  .nvr-workspace-content .page-shell > .playback-health.embedded { margin: 0 !important; padding: 0 !important; }
   .playback-health .backend-strip { grid-template-columns: 1fr; }
   .playback-health.compact .compact-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
