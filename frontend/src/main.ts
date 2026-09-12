@@ -3,15 +3,17 @@ import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
+
+// Style ownership: tokens -> shared component system -> product shell -> page refinements.
 import './styles/nvr-theme.css'
+import './styles/appliance-console.css'
+import './styles/unifi-console.css'
 import './styles/recording-browser.css'
 import './styles/health-workspace.css'
 import './styles/recording-management.css'
 import './styles/playback-metrics.css'
 import './styles/system-settings.css'
-import './styles/unifi-console.css'
 import './styles/camera-device-center.css'
-import './styles/appliance-console.css'
 
 import Root from './Root.vue'
 
