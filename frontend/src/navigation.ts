@@ -11,7 +11,7 @@ export function eventRoute(eventId: number): RouteLocationRaw {
 export function recordingPlaybackRoute(recordingId: number, cameraId?: number | null): RouteLocationRaw {
   const query: Record<string, string> = { recording_id: String(recordingId) }
   if (cameraId) query.camera_id = String(cameraId)
-  return { path: '/recordings/browser', query }
+  return { path: '/recordings/manage', query }
 }
 
 export function settingsSectionRoute(section: string): RouteLocationRaw {

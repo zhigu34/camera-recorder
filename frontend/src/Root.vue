@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
   Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
-  Monitor, Moon, Setting, Sunny, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
+  Monitor, Moon, Setting, Sunny, UploadFilled, VideoCamera, WarningFilled,
 } from '@element-plus/icons-vue'
 
 import { useRuntimeStore } from './stores/runtime'
@@ -22,11 +22,10 @@ type ThemeMode = 'light' | 'dark'
 const navEntries: NavEntry[] = [
   { key: 'dashboard', label: '总览', description: '运行概览与异常状态', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
   { key: 'preview', label: '实时监控', description: '实时画面与码流状态', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
-  { key: 'playback', label: '录像回放', description: '检索、时间轴与兼容回放', target: '/recordings/browser', group: 'core', icon: markRaw(VideoPlay) },
+  { key: 'recordings', label: '录像管理', description: '检索、日历、时间轴、播放与清理', target: '/recordings/manage', group: 'core', icon: markRaw(Files) },
   { key: 'cameras', label: '摄像头', description: '设备、码流与录像配置', target: '/cameras', group: 'core', icon: markRaw(Camera) },
   { key: 'schedule', label: '录制计划', description: '自动录像与时间窗口', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
   { key: 'health', label: '系统健康', description: '录像服务、存储与稳定性', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
-  { key: 'recordings', label: '录像管理', description: '录像资产与归档状态', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
   { key: 'uploads', label: '上传管理', description: 'OpenList 归档任务与传输', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
   { key: 'events', label: '事件中心', description: '异常、告警与运行事件', target: '/events', group: 'ops', icon: markRaw(Bell) },
   { key: 'settings', label: '系统设置', description: '录像、存储与通知配置', target: '/settings', group: 'settings', icon: markRaw(Setting) },

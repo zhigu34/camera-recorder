@@ -4,7 +4,10 @@ import WorkspaceRoute from './WorkspaceRoute.vue'
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'dashboard', component: WorkspaceRoute, meta: { navKey: 'dashboard' } },
   { path: '/preview', name: 'preview', component: WorkspaceRoute, meta: { navKey: 'preview' } },
-  { path: '/recordings/browser', name: 'playback', component: WorkspaceRoute, meta: { navKey: 'playback' } },
+  {
+    path: '/recordings/browser',
+    redirect: (to) => ({ path: '/recordings/manage', query: to.query, hash: to.hash }),
+  },
   { path: '/cameras', name: 'cameras', component: WorkspaceRoute, meta: { navKey: 'cameras' } },
   { path: '/cameras/batch', name: 'camera-batch', component: WorkspaceRoute, meta: { navKey: 'cameras' } },
   { path: '/recording-schedules', name: 'schedule', component: WorkspaceRoute, meta: { navKey: 'schedule' } },

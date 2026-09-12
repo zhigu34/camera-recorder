@@ -10,9 +10,9 @@ describe('navigation deep links', () => {
     expect(eventRoute(9)).toEqual({ path: '/events', query: { event_id: '9' } })
   })
 
-  it('keeps recording and camera context together', () => {
+  it('keeps recording and camera context inside recording management', () => {
     expect(recordingPlaybackRoute(77, 4)).toEqual({
-      path: '/recordings/browser',
+      path: '/recordings/manage',
       query: { recording_id: '77', camera_id: '4' },
     })
   })

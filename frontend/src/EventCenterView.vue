@@ -137,7 +137,7 @@ function relatedAction(item: EventItem) {
   if (item.recording_id) {
     const query: Record<string, string> = { recording_id: String(item.recording_id) }
     if (item.camera_id) query.camera_id = String(item.camera_id)
-    return { label: '打开关联录像', action: () => router.push({ path: '/recordings/manage', query }) }
+    return { label: '打开关联录像', action: () => router.push({ path: '/recordings/browser', query }) }
   }
   if (category === 'upload') return { label: '查看上传管理', action: () => router.push('/uploads') }
   if (item.camera_id || category === 'camera') {
@@ -219,44 +219,61 @@ onBeforeUnmount(() => { mounted = false; closeSocket(); if (reconnectTimer !== n
         <span>警告</span><strong>{{ warningCount }}</strong><small>warning / warn</small>
       </button>
       <button class="metric-card danger" :class="{ active: levelFilter === 'problems' }" @click="levelFilter = 'problems'">
-        <span>错误</span><strong>{{ errorCount }}</strong><small>error / critical / fatal</small>
+        <span>错误 / 严重</span><strong>{{ errorCount }}</strong><small>error / critical / fatal</small>
       </button>
       <button class="metric-card" :class="{ active: cameraFilter === 'affected' }" @click="cameraFilter = 'affected'">
-        <span>受影响摄像头</span><strong>{{ affectedCameras }}</strong><small>有 camera_id 的事件</small>
+        <span>涉及摄像头</span><strong>{{ affectedCameras }}</strong><small>仅显示设备相关事件</small>
       </button>
     </div>
 
-    <div class="filter-panel">
-      <el-input v-model="keyword" clearable :prefix-icon="Search" placeholder="搜索消息、事件代码、摄像头或元数据" class="search-box" />
-      <el-select v-model="levelFilter" class="filter-select"><el-option label="全部级别" value="all" /><el-option label="警告" value="warnings" /><el-option label="错误" value="problems" /><el-option v-for="item in levelOptions" :key="item" :label="levelLabel(item)" :value="item" /></el-select>
-      <el-select v-model="categoryFilter" class="filter-select"><el-option label="全部分类" value="all" /><el-option v-for="item in categories" :key="item" :label="categoryLabel(item)" :value="item" /></el-select>
-      <el-select v-model="cameraFilter" class="camera-select"><el-option label="全部摄像头" value="all" /><el-option label="仅受影响摄像头" value="affected" /><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" /></el-select>
-      <el-button link @click="clearFilters">清除筛选</el-button>
+    <div class="filter-bar">
+      <el-input v-model="keyword" clearable :prefix-icon="Search" placeholder="搜索消息、事件码、分类、摄像头或元数据" class="search-input" />
+      <el-select v-model="levelFilter" class="filter-select" placeholder="级别">
+        <el-option label="全部级别" value="all" /><el-option label="警告类" value="warnings" /><el-option label="错误 / 严重" value="problems" />
+        <el-option v-for="level in levelOptions" :key="level" :label="levelLabel(level)" :value="level" />
+      </el-select>
+      <el-select v-model="categoryFilter" class="filter-select" placeholder="分类">
+        <el-option label="全部分类" value="all" /><el-option v-for="category in categories" :key="category" :label="categoryLabel(category)" :value="category" />
+      </el-select>
+      <el-select v-model="cameraFilter" class="camera-select" filterable placeholder="摄像头">
+        <el-option label="全部摄像头" value="all" /><el-option label="所有设备相关事件" value="affected" /><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
+      </el-select>
+      <el-button text @click="clearFilters">清除筛选</el-button><span class="result-count">{{ filteredEvents.length }} 条</span>
     </div>
 
-    <div class="event-table-shell">
-      <el-table :data="filteredEvents" row-key="id" height="calc(100vh - 350px)" empty-text="没有符合条件的事件" @row-click="openDetail">
-        <el-table-column label="级别" width="92"><template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
-        <el-table-column label="分类" width="105"><template #default="{ row }">{{ categoryLabel(row.category) }}</template></el-table-column>
-        <el-table-column prop="code" label="事件代码" min-width="170" />
-        <el-table-column label="摄像头" min-width="150"><template #default="{ row }">{{ cameraName(row.camera_id) }}</template></el-table-column>
-        <el-table-column prop="message" label="消息" min-width="330" show-overflow-tooltip />
-        <el-table-column prop="created_at" label="时间" width="175" />
-        <el-table-column label="详情" width="90" fixed="right"><template #default="{ row }"><el-button link type="primary" @click.stop="openDetail(row)">查看</el-button></template></el-table-column>
+    <div class="table-panel">
+      <el-table :data="filteredEvents" height="calc(100vh - 318px)" empty-text="暂无匹配事件" @row-click="openDetail">
+        <el-table-column prop="created_at" label="时间" width="170" />
+        <el-table-column label="级别" width="88"><template #default="{ row }"><el-tag size="small" :type="levelType(row.level)">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
+        <el-table-column label="分类" width="108"><template #default="{ row }">{{ categoryLabel(row.category) }}</template></el-table-column>
+        <el-table-column prop="code" label="事件码" min-width="150" show-overflow-tooltip />
+        <el-table-column label="摄像头" min-width="145" show-overflow-tooltip><template #default="{ row }">{{ cameraName(row.camera_id) }}</template></el-table-column>
+        <el-table-column prop="message" label="消息" min-width="320" show-overflow-tooltip />
+        <el-table-column label="关联" width="110"><template #default="{ row }"><span v-if="row.recording_id" class="relation">录像 #{{ row.recording_id }}</span><span v-else-if="row.camera_id" class="relation">摄像头 #{{ row.camera_id }}</span><span v-else class="muted">系统</span></template></el-table-column>
+        <el-table-column label="" width="52" fixed="right"><template #default><span class="open-arrow">›</span></template></el-table-column>
       </el-table>
     </div>
 
-    <el-drawer v-model="detailVisible" title="事件详情" size="520px" @closed="closeDetail">
+    <el-drawer v-model="detailVisible" title="事件详情" size="460px" @closed="closeDetail">
       <template v-if="selectedEvent">
-        <div class="detail-head"><el-tag :type="levelType(selectedEvent.level)">{{ levelLabel(selectedEvent.level) }}</el-tag><strong>{{ categoryLabel(selectedEvent.category) }}</strong><span>#{{ selectedEvent.id }}</span></div>
-        <dl class="detail-grid"><div><dt>事件代码</dt><dd>{{ selectedEvent.code }}</dd></div><div><dt>时间</dt><dd>{{ selectedEvent.created_at }}</dd></div><div><dt>摄像头</dt><dd>{{ cameraName(selectedEvent.camera_id) }}</dd></div><div><dt>录像 ID</dt><dd>{{ selectedEvent.recording_id || '-' }}</dd></div><div class="wide"><dt>消息</dt><dd>{{ selectedEvent.message }}</dd></div></dl>
-        <div v-if="metadataText(selectedEvent)" class="metadata-block"><div>元数据</div><pre>{{ metadataText(selectedEvent) }}</pre></div>
-        <div class="drawer-actions"><el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button></div>
+        <div class="detail-hero" :class="levelType(selectedEvent.level)"><WarningFilled class="detail-icon" /><div><el-tag size="small" :type="levelType(selectedEvent.level)">{{ levelLabel(selectedEvent.level) }}</el-tag><strong>{{ selectedEvent.message }}</strong><span>{{ selectedEvent.created_at }}</span></div></div>
+        <dl class="detail-list">
+          <div><dt>事件 ID</dt><dd>#{{ selectedEvent.id }}</dd></div><div><dt>分类</dt><dd>{{ categoryLabel(selectedEvent.category) }}</dd></div><div><dt>事件码</dt><dd><code>{{ selectedEvent.code }}</code></dd></div><div><dt>摄像头</dt><dd>{{ cameraName(selectedEvent.camera_id) }}</dd></div><div><dt>录像</dt><dd>{{ selectedEvent.recording_id ? `#${selectedEvent.recording_id}` : '-' }}</dd></div>
+        </dl>
+        <div v-if="selectedEvent.metadata_json" class="metadata-block"><div class="section-label">元数据</div><pre>{{ metadataText(selectedEvent) }}</pre></div>
+        <div class="drawer-actions"><el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button><el-button @click="closeDetail">关闭</el-button></div>
       </template>
     </el-drawer>
   </div>
 </template>
 
 <style scoped>
-.events-page{max-width:1650px;margin:0 auto;padding:20px 24px 30px}.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.live-note{display:flex;align-items:center;gap:7px;color:var(--nvr-muted);font-size:10px}.live-dot{width:6px;height:6px;border-radius:50%;background:var(--nvr-green)}.live-dot.offline{background:var(--nvr-yellow)}.metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}.metric-card{appearance:none;min-height:82px;display:grid;grid-template-columns:auto 1fr;align-items:end;column-gap:8px;row-gap:4px;padding:12px 14px;border:1px solid var(--nvr-border);border-radius:9px;color:var(--nvr-text);background:var(--nvr-surface);cursor:pointer;text-align:left}.metric-card:hover,.metric-card.active{border-color:color-mix(in srgb,var(--nvr-blue) 34%,var(--nvr-border));background:color-mix(in srgb,var(--nvr-blue) 5%,var(--nvr-surface))}.metric-card span{grid-column:1/-1;color:var(--nvr-muted);font-size:10px}.metric-card strong{font-size:22px;line-height:1}.metric-card small{justify-self:end;color:var(--nvr-subtle);font-size:8px}.metric-card.warning strong{color:var(--nvr-yellow)}.metric-card.danger strong{color:var(--nvr-red)}.filter-panel{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:9px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.search-box{flex:1;min-width:250px}.filter-select{width:135px}.camera-select{width:180px}.event-table-shell{overflow:hidden;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.detail-head{display:flex;align-items:center;gap:9px;padding-bottom:14px;border-bottom:1px solid var(--nvr-border)}.detail-head strong{font-size:13px}.detail-head span{margin-left:auto;color:var(--nvr-subtle);font-size:9px}.detail-grid{margin:14px 0 0}.detail-grid>div{display:grid;grid-template-columns:105px minmax(0,1fr);gap:12px;padding:9px 0;border-bottom:1px solid var(--nvr-border)}.detail-grid dt{color:var(--nvr-muted);font-size:10px}.detail-grid dd{margin:0;font-size:10px;overflow-wrap:anywhere}.metadata-block{margin-top:14px}.metadata-block>div{margin-bottom:6px;color:var(--nvr-muted);font-size:9px}.metadata-block pre{max-height:280px;overflow:auto;margin:0;padding:10px;border:1px solid var(--nvr-border);border-radius:7px;color:var(--nvr-text-soft);background:var(--nvr-bg-soft);font-size:9px;white-space:pre-wrap}.drawer-actions{display:flex;justify-content:flex-end;margin-top:16px}@media(max-width:900px){.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-panel{align-items:stretch;flex-direction:column}.search-box,.filter-select,.camera-select{width:100%}}@media(max-width:620px){.events-page{padding:14px}.metrics-grid{grid-template-columns:1fr 1fr}}
+.events-page{padding:18px 20px 28px;color:var(--nvr-text)}
+.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.live-note{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:12px}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-green);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-green) 8%,transparent)}.live-dot.offline{background:var(--nvr-yellow);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-yellow) 8%,transparent)}
+.metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.metric-card{appearance:none;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 16px;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px;cursor:pointer;text-align:left}.metric-card:hover,.metric-card.active{border-color:color-mix(in srgb,var(--nvr-blue) 45%,var(--nvr-border));background:var(--nvr-surface-2)}.metric-card span{font-size:11px;color:var(--nvr-muted)}.metric-card strong{font-size:24px;font-weight:650;line-height:1}.metric-card small{font-size:10px;color:var(--nvr-subtle)}.metric-card.warning strong{color:var(--nvr-yellow)}.metric-card.danger strong{color:var(--nvr-red)}
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:10px;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.search-input{min-width:280px;flex:1}.filter-select{width:126px}.camera-select{width:170px}.result-count{margin-left:auto;color:var(--nvr-muted);font-size:11px;white-space:nowrap}
+.table-panel{overflow:hidden;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.relation{color:color-mix(in srgb,var(--nvr-blue) 58%,var(--nvr-text));font-size:11px}.muted{color:var(--nvr-muted)}.open-arrow{color:var(--nvr-subtle);font-size:20px}.table-panel :deep(.el-table__row){cursor:pointer}
+.detail-hero{display:flex;gap:12px;padding:14px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface-2)}.detail-icon{flex:0 0 22px;width:22px;margin-top:2px;color:var(--nvr-muted)}.detail-hero.warning .detail-icon{color:var(--nvr-yellow)}.detail-hero.danger .detail-icon{color:var(--nvr-red)}.detail-hero>div{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:7px}.detail-hero strong{font-size:14px;line-height:1.55}.detail-hero span{color:var(--nvr-muted);font-size:11px}.detail-list{margin:16px 0}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);padding:9px 0;border-bottom:1px solid var(--nvr-border)}.detail-list dt{color:var(--nvr-muted);font-size:11px}.detail-list dd{margin:0;font-size:12px;word-break:break-all}.detail-list code{font-size:11px;color:color-mix(in srgb,var(--nvr-blue) 62%,var(--nvr-text))}.section-label{margin-bottom:7px;color:var(--nvr-muted);font-size:10px;font-weight:700;letter-spacing:.08em}.metadata-block pre{max-height:280px;overflow:auto;margin:0;padding:12px;color:var(--nvr-text-soft);background:var(--nvr-surface-2);border:1px solid var(--nvr-border);border-radius:8px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all}.drawer-actions{display:flex;gap:8px;margin-top:18px}
+@media(max-width:1000px){.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-bar{flex-wrap:wrap}.search-input{flex-basis:100%}.result-count{margin-left:0}}
+@media(max-width:640px){.events-page{padding:12px}.metrics-grid{grid-template-columns:1fr 1fr}.filter-select,.camera-select{width:calc(50% - 4px)}}
 </style>
