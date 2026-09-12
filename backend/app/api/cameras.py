@@ -231,9 +231,10 @@ async def preview_camera(
         camera = await _camera_or_404(camera_id, db)
         runtime = await load_runtime_settings(db)
         password = _camera_password(camera)
+        main_rtsp_path = camera.rtsp_path
         try:
             rtsp_path, selected_stream = resolve_preview_path(
-                main_path=camera.rtsp_path,
+                main_path=main_rtsp_path,
                 sub_path=camera.sub_rtsp_path,
                 stream=stream,
             )
@@ -253,7 +254,20 @@ async def preview_camera(
     try:
         session = await open_mjpeg_preview(**preview_args)
     except CameraPreviewError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        if stream != "auto" or selected_stream != "sub":
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        # AUTO is a policy, not a hard dependency on the sub stream. A stale or
+        # unsupported sub-stream path should not make detail preview unusable.
+        preview_args["rtsp_path"] = main_rtsp_path
+        try:
+            session = await open_mjpeg_preview(**preview_args)
+        except CameraPreviewError as fallback_exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"子码流预览失败，主码流回退也失败: {fallback_exc}",
+            ) from fallback_exc
+        selected_stream = "main"
 
     return StreamingResponse(
         session.stream(),
