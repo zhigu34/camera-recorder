@@ -1,47 +1,24 @@
-/* Unified recording management workspace.
- * Keep cross-component Element Plus theme overrides and wide-screen layout
- * corrections here. The playback/catalog structure lives in the Vue view.
+/* Recording management visual system.
+ * Dense, quiet and device-console oriented: soft surfaces, weak borders,
+ * precise state accents and minimal chrome.
  */
 
-.nvr-workspace-content .recording-center .el-table {
-  --el-table-bg-color: transparent;
-  --el-table-tr-bg-color: transparent;
-  --el-table-header-bg-color: var(--nvr-bg-soft);
-  --el-table-row-hover-bg-color: var(--nvr-control-hover);
-  --el-table-border-color: var(--nvr-border);
-  --el-table-text-color: var(--nvr-text-soft);
-  --el-table-header-text-color: var(--nvr-subtle);
+.nvr-workspace-content .recording-center {
+  --recording-hairline: color-mix(in srgb, var(--nvr-border) 72%, transparent);
+  --recording-soft-line: color-mix(in srgb, var(--nvr-border) 44%, transparent);
+  --recording-raised: color-mix(in srgb, var(--nvr-surface) 88%, var(--nvr-bg-soft));
+  --recording-muted-surface: color-mix(in srgb, var(--nvr-bg-soft) 62%, transparent);
+  --recording-blue-soft: color-mix(in srgb, var(--nvr-blue) 12%, transparent);
+  --recording-green-soft: color-mix(in srgb, var(--nvr-green) 10%, transparent);
+  padding-top: 14px !important;
 }
 
-.nvr-workspace-content .recording-center .el-table th.el-table__cell,
-.nvr-workspace-content .recording-center .el-table td.el-table__cell,
-.nvr-workspace-content .recording-center .el-table__fixed,
-.nvr-workspace-content .recording-center .el-table__fixed-right {
-  background: var(--nvr-surface) !important;
-}
-
-.nvr-workspace-content .recording-center .el-table th.el-table__cell {
-  background: var(--nvr-bg-soft) !important;
-}
-
-.nvr-workspace-content .recording-center .el-table__row:hover > td.el-table__cell {
-  background: var(--nvr-control-hover) !important;
-}
-
-.nvr-workspace-content .recording-center .active-recording-row > td.el-table__cell {
-  background: color-mix(in srgb, var(--nvr-blue) 10%, var(--nvr-surface)) !important;
-}
-
-/* On desktop playback and catalog are peers. 48/52 keeps the player large
- * enough to be useful without starving the management table. */
 .nvr-workspace-content .recording-center .recording-layout {
   grid-template-columns: minmax(0, 48fr) minmax(0, 52fr) !important;
   align-items: start !important;
   gap: 12px !important;
 }
 
-/* The workspace itself is the scroll container. A 70px sticky offset pushed
- * the left card visibly below the calendar; keep only a small breathing gap. */
 .nvr-workspace-content .recording-center .playback-column {
   position: sticky !important;
   top: 12px !important;
@@ -49,20 +26,326 @@
   margin-top: 0 !important;
 }
 
-.nvr-workspace-content .recording-center .player-box {
-  margin-left: 12px;
-  margin-right: 12px;
+.nvr-workspace-content .recording-center .panel {
+  border: 1px solid var(--recording-hairline) !important;
+  border-radius: 14px !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nvr-surface) 98%, white 2%), var(--nvr-surface)) !important;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, white 3%, transparent) inset,
+    0 10px 28px color-mix(in srgb, #000 14%, transparent) !important;
 }
 
-/* Split filters into two clean rows instead of squeezing six controls into one.
- * Row 1: camera + date. Row 2: storage + health + archive + search. */
+.nvr-workspace-content .recording-center .panel-head {
+  min-height: 48px !important;
+  padding: 10px 13px !important;
+  border-bottom-color: var(--recording-soft-line) !important;
+  background: transparent !important;
+}
+
+.nvr-workspace-content .recording-center .panel-head strong {
+  font-size: 12px !important;
+  font-weight: 680 !important;
+  letter-spacing: .01em;
+}
+
+.nvr-workspace-content .recording-center .panel-head span {
+  color: var(--nvr-subtle) !important;
+}
+
+/* Element Plus controls: flatter, quieter, and consistent across calendar/player/list. */
+.nvr-workspace-content .recording-center .el-input__wrapper,
+.nvr-workspace-content .recording-center .el-select__wrapper,
+.nvr-workspace-content .recording-center .el-date-editor.el-input__wrapper {
+  min-height: 34px !important;
+  border-radius: 8px !important;
+  background: color-mix(in srgb, var(--nvr-bg) 62%, var(--nvr-surface)) !important;
+  box-shadow: 0 0 0 1px var(--recording-hairline) inset !important;
+  transition: box-shadow .16s ease, background .16s ease !important;
+}
+
+.nvr-workspace-content .recording-center .el-input__wrapper:hover,
+.nvr-workspace-content .recording-center .el-select__wrapper:hover,
+.nvr-workspace-content .recording-center .el-date-editor.el-input__wrapper:hover {
+  background: color-mix(in srgb, var(--nvr-bg-soft) 76%, var(--nvr-surface)) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nvr-blue) 34%, var(--nvr-border)) inset !important;
+}
+
+.nvr-workspace-content .recording-center .el-button {
+  border-radius: 8px !important;
+}
+
+/* Playback ---------------------------------------------------------------- */
+.nvr-workspace-content .recording-center .player-panel {
+  max-height: calc(100vh - 98px) !important;
+  padding-bottom: 12px !important;
+  scrollbar-width: thin;
+}
+
+.nvr-workspace-content .recording-center .player-head {
+  border-bottom: 0 !important;
+  padding-bottom: 8px !important;
+}
+
+.nvr-workspace-content .recording-center .player-head-meta {
+  gap: 6px !important;
+}
+
+.nvr-workspace-content .recording-center .player-head-meta .el-tag {
+  height: 22px !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--recording-muted-surface) !important;
+  color: var(--nvr-text-soft) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .recording-center .player-head-meta .el-tag--success {
+  background: color-mix(in srgb, var(--nvr-green) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--nvr-green) 80%, white) !important;
+}
+
+.nvr-workspace-content .recording-center .player-box {
+  margin: 0 12px !important;
+  border: 1px solid color-mix(in srgb, var(--nvr-border) 52%, transparent) !important;
+  border-radius: 11px !important;
+  background: #020609 !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, white 2%, transparent) inset,
+    0 18px 36px color-mix(in srgb, #000 22%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .play-placeholder {
+  gap: 8px !important;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--nvr-blue) 17%, transparent), transparent 36%),
+    linear-gradient(180deg, #071019, #03070b 62%) !important;
+}
+
+.nvr-workspace-content .recording-center .play-placeholder > span {
+  width: 46px !important;
+  height: 46px !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--nvr-blue) 34%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .play-placeholder strong {
+  font-size: 12px !important;
+  font-weight: 650 !important;
+}
+
+.nvr-workspace-content .recording-center .player-nav {
+  gap: 7px !important;
+  padding: 10px 12px 0 !important;
+}
+
+.nvr-workspace-content .recording-center .player-nav .el-button {
+  min-height: 36px !important;
+  border-color: var(--recording-hairline) !important;
+  background: color-mix(in srgb, var(--nvr-bg-soft) 58%, transparent) !important;
+  color: var(--nvr-text-soft) !important;
+  font-weight: 600;
+}
+
+.nvr-workspace-content .recording-center .player-nav .el-button--primary {
+  border-color: color-mix(in srgb, var(--nvr-blue) 55%, transparent) !important;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--nvr-blue) 94%, white 6%), var(--nvr-blue)) !important;
+  color: #fff !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--nvr-blue) 22%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .auto-advance {
+  margin: 7px 12px 0 !important;
+  padding: 7px 9px !important;
+  border: 1px solid var(--recording-soft-line);
+  border-radius: 8px;
+  background: var(--recording-muted-surface);
+  justify-content: space-between !important;
+}
+
+.nvr-workspace-content .recording-center .heat-section {
+  margin: 10px 12px 0 !important;
+  padding: 10px 10px 9px !important;
+  border: 1px solid var(--recording-soft-line) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--nvr-bg) 38%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .section-head {
+  margin-bottom: 7px !important;
+}
+
+.nvr-workspace-content .recording-center .section-head strong {
+  font-weight: 650 !important;
+}
+
+/* 24 columns × 12 rows = 288 real five-minute bins. */
+.nvr-workspace-content .recording-center .heat-grid {
+  position: relative;
+  box-sizing: border-box;
+  grid-template-columns: repeat(24, minmax(0, 1fr)) !important;
+  grid-template-rows: repeat(12, 4px) !important;
+  grid-auto-flow: column !important;
+  gap: 2px 3px !important;
+  padding-left: 29px !important;
+}
+
+.nvr-workspace-content .recording-center .heat-grid::before {
+  content: ":00\A:05\A:10\A:15\A:20\A:25\A:30\A:35\A:40\A:45\A:50\A:55";
+  position: absolute;
+  top: -1px;
+  left: 0;
+  width: 24px;
+  white-space: pre;
+  color: color-mix(in srgb, var(--nvr-subtle) 82%, transparent);
+  font-size: 6px;
+  line-height: 6px;
+  text-align: right;
+  pointer-events: none;
+}
+
+.nvr-workspace-content .recording-center .heat-cell {
+  min-height: 4px !important;
+  border: 0 !important;
+  border-radius: 2px !important;
+  background: color-mix(in srgb, var(--nvr-bg) 82%, white 2%) !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nvr-border) 45%, transparent) inset;
+}
+
+.nvr-workspace-content .recording-center .heat-cell.level-1 { background: color-mix(in srgb, var(--nvr-green) 22%, var(--nvr-bg)) !important; }
+.nvr-workspace-content .recording-center .heat-cell.level-2 { background: color-mix(in srgb, var(--nvr-green) 40%, var(--nvr-bg)) !important; }
+.nvr-workspace-content .recording-center .heat-cell.level-3 { background: color-mix(in srgb, var(--nvr-green) 64%, var(--nvr-bg)) !important; }
+.nvr-workspace-content .recording-center .heat-cell.level-4 { background: color-mix(in srgb, var(--nvr-green) 88%, var(--nvr-bg)) !important; }
+
+.nvr-workspace-content .recording-center .heat-cell.warning {
+  box-shadow: 0 0 0 1px var(--nvr-yellow) inset !important;
+}
+
+.nvr-workspace-content .recording-center .heat-cell.cloud {
+  box-shadow: 0 1px 0 #8b5cf6 inset !important;
+}
+
+.nvr-workspace-content .recording-center .heat-cell.warning.cloud {
+  box-shadow: 0 0 0 1px var(--nvr-yellow) inset, 0 1px 0 #8b5cf6 inset !important;
+}
+
+.nvr-workspace-content .recording-center .heat-cell.active {
+  outline: 1px solid var(--nvr-blue) !important;
+  outline-offset: 1px !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nvr-blue) 35%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .heat-cell:not(:disabled):hover {
+  filter: brightness(1.26);
+  transform: scaleY(1.55) !important;
+  box-shadow: 0 0 0 1px var(--nvr-blue) inset, 0 3px 10px color-mix(in srgb, var(--nvr-blue) 18%, transparent) !important;
+  z-index: 4;
+}
+
+.nvr-workspace-content .recording-center .heat-axis {
+  margin-left: 29px !important;
+  margin-top: 6px !important;
+  color: color-mix(in srgb, var(--nvr-subtle) 82%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .heat-legend {
+  margin-top: 6px !important;
+  opacity: .86;
+}
+
+.nvr-workspace-content .recording-center .detail-title {
+  padding: 12px 12px 7px !important;
+  color: var(--nvr-text) !important;
+  font-size: 10px !important;
+}
+
+.nvr-workspace-content .recording-center .detail-grid {
+  grid-template-columns: 1fr 1fr !important;
+  gap: 6px !important;
+  margin: 0 12px !important;
+  border: 0 !important;
+}
+
+.nvr-workspace-content .recording-center .detail-grid > div {
+  padding: 8px 9px !important;
+  border: 1px solid var(--recording-soft-line) !important;
+  border-radius: 8px !important;
+  background: var(--recording-muted-surface) !important;
+}
+
+.nvr-workspace-content .recording-center .detail-grid > div:nth-child(odd) {
+  border-right: 1px solid var(--recording-soft-line) !important;
+}
+
+.nvr-workspace-content .recording-center .detail-grid dt {
+  letter-spacing: .04em;
+  text-transform: none;
+}
+
+.nvr-workspace-content .recording-center .detail-grid dd {
+  margin-top: 4px !important;
+  color: var(--nvr-text-soft) !important;
+  font-size: 9px !important;
+}
+
+.nvr-workspace-content .recording-center .player-actions {
+  padding: 10px 12px 0 !important;
+}
+
+.nvr-workspace-content .recording-center .position-note {
+  padding-right: 12px !important;
+  opacity: .78;
+}
+
+/* Calendar ---------------------------------------------------------------- */
+.nvr-workspace-content .recording-center .calendar-panel {
+  overflow: visible !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-head {
+  min-height: 50px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-summary {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-summary > span {
+  padding: 4px 7px;
+  border: 1px solid var(--recording-soft-line);
+  border-radius: 999px;
+  background: var(--recording-muted-surface);
+  color: var(--nvr-muted) !important;
+  font-size: 7px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-summary > span.danger {
+  border-color: color-mix(in srgb, var(--nvr-red) 24%, transparent);
+  background: color-mix(in srgb, var(--nvr-red) 8%, transparent);
+  color: var(--nvr-red) !important;
+}
+
+.nvr-workspace-content .recording-center .head-actions {
+  gap: 4px !important;
+}
+
+.nvr-workspace-content .recording-center .head-actions .el-button {
+  min-width: 30px !important;
+  height: 30px !important;
+  padding: 0 9px !important;
+  border-color: var(--recording-soft-line) !important;
+  background: var(--recording-muted-surface) !important;
+}
+
 .nvr-workspace-content .recording-center .calendar-toolbar {
   grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
   grid-template-areas:
     "camera camera camera date date date"
     "storage health upload search search search";
   gap: 7px !important;
-  padding: 9px 10px 8px !important;
+  padding: 10px 11px 8px !important;
+  border-bottom: 0 !important;
+  background: color-mix(in srgb, var(--nvr-bg) 18%, transparent) !important;
 }
 
 .nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(1) { grid-area: camera; }
@@ -73,14 +356,235 @@
 .nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(6) { grid-area: search; }
 
 .nvr-workspace-content .recording-center .calendar-actions {
-  min-height: 38px;
+  min-height: 38px !important;
+  padding: 0 11px 9px !important;
+  border-bottom: 1px solid var(--recording-soft-line) !important;
   flex-wrap: wrap;
   row-gap: 5px;
+  background: color-mix(in srgb, var(--nvr-bg) 18%, transparent) !important;
 }
 
-/* Keep the recording table fully readable inside the right column. Element Plus
- * fixed-right cells were covering archive/filename values at this width, so the
- * action column behaves like a normal final column instead of an overlay. */
+.nvr-workspace-content .recording-center .calendar-actions > span:first-child {
+  margin-right: auto;
+  padding: 4px 0;
+  color: var(--nvr-subtle) !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.nvr-workspace-content .recording-center .calendar-actions .el-button {
+  min-height: 30px !important;
+  margin: 0 !important;
+  border-color: var(--recording-soft-line) !important;
+  background: transparent !important;
+  color: var(--nvr-muted) !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-actions .el-button.is-link {
+  border: 0 !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-weekdays,
+.nvr-workspace-content .recording-center .recording-calendar {
+  gap: 6px !important;
+  padding-left: 11px !important;
+  padding-right: 11px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-weekdays {
+  padding-top: 10px !important;
+  padding-bottom: 3px !important;
+  color: color-mix(in srgb, var(--nvr-subtle) 78%, transparent) !important;
+  font-size: 7px !important;
+  letter-spacing: .05em;
+}
+
+.nvr-workspace-content .recording-center .calendar-day {
+  height: 48px !important;
+  padding: 7px 8px !important;
+  border: 1px solid var(--recording-soft-line) !important;
+  border-radius: 9px !important;
+  background: color-mix(in srgb, var(--nvr-bg) 26%, transparent) !important;
+  color: var(--nvr-muted) !important;
+  transition: border-color .15s ease, background .15s ease, transform .15s ease, box-shadow .15s ease !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-day:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 28%, var(--nvr-border)) !important;
+  background: color-mix(in srgb, var(--nvr-bg-soft) 64%, transparent) !important;
+  transform: translateY(-1px);
+}
+
+.nvr-workspace-content .recording-center .calendar-day > span {
+  align-self: start;
+  color: var(--nvr-text-soft);
+  font-size: 10px !important;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.nvr-workspace-content .recording-center .calendar-day strong {
+  align-self: start;
+  justify-self: end;
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--nvr-green) 8%, transparent);
+  color: color-mix(in srgb, var(--nvr-green) 64%, var(--nvr-text-soft)) !important;
+  font-size: 7px !important;
+  font-weight: 560;
+}
+
+.nvr-workspace-content .recording-center .calendar-day i {
+  right: 8px !important;
+  bottom: 7px !important;
+  width: 18px !important;
+  height: 3px !important;
+  border-radius: 999px !important;
+  background: color-mix(in srgb, var(--nvr-green) 76%, white 4%) !important;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--nvr-green) 24%, transparent);
+}
+
+.nvr-workspace-content .recording-center .calendar-day.has {
+  border-color: color-mix(in srgb, var(--nvr-green) 18%, var(--nvr-border)) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nvr-green) 4%, transparent), transparent 64%),
+    color-mix(in srgb, var(--nvr-bg) 28%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-day.warn {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 30%, var(--nvr-border)) !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-day.warn i {
+  background: var(--nvr-yellow) !important;
+  box-shadow: 0 0 10px color-mix(in srgb, var(--nvr-yellow) 24%, transparent);
+}
+
+.nvr-workspace-content .recording-center .calendar-day.cloud i {
+  background: #8b5cf6 !important;
+  box-shadow: 0 0 10px color-mix(in srgb, #8b5cf6 28%, transparent);
+}
+
+.nvr-workspace-content .recording-center .calendar-day.selected {
+  border-color: color-mix(in srgb, var(--nvr-blue) 76%, transparent) !important;
+  background:
+    radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--nvr-blue) 14%, transparent), transparent 38%),
+    color-mix(in srgb, var(--nvr-blue) 7%, var(--nvr-bg-soft)) !important;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--nvr-blue) 24%, transparent) inset,
+    0 6px 16px color-mix(in srgb, var(--nvr-blue) 8%, transparent) !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-legend {
+  gap: 14px !important;
+  padding: 8px 11px 10px !important;
+  opacity: .8;
+}
+
+/* Recording list ---------------------------------------------------------- */
+.nvr-workspace-content .recording-center .el-table {
+  --el-table-bg-color: transparent;
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  --el-table-row-hover-bg-color: transparent;
+  --el-table-border-color: transparent;
+  --el-table-text-color: var(--nvr-text-soft);
+  --el-table-header-text-color: var(--nvr-subtle);
+}
+
+.nvr-workspace-content .recording-center .list-panel {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nvr-surface) 98%, white 1%), var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .panel-head {
+  min-height: 46px !important;
+  padding-left: 13px !important;
+  padding-right: 13px !important;
+}
+
+.nvr-workspace-content .recording-center .list-hint {
+  padding: 4px 7px;
+  border: 1px solid var(--recording-soft-line);
+  border-radius: 999px;
+  background: var(--recording-muted-surface);
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table th.el-table__cell {
+  height: 36px !important;
+  border-bottom: 1px solid var(--recording-soft-line) !important;
+  background: color-mix(in srgb, var(--nvr-bg) 22%, transparent) !important;
+  color: color-mix(in srgb, var(--nvr-subtle) 90%, var(--nvr-text-soft)) !important;
+  font-size: 7px !important;
+  font-weight: 600 !important;
+  letter-spacing: .035em;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table td.el-table__cell {
+  height: 44px !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+  border-bottom: 1px solid var(--recording-soft-line) !important;
+  background: transparent !important;
+  transition: background .14s ease !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table__row:hover > td.el-table__cell {
+  background: color-mix(in srgb, var(--nvr-blue) 5%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .active-recording-row > td.el-table__cell {
+  background: color-mix(in srgb, var(--nvr-blue) 8%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .active-recording-row > td.el-table__cell:first-child {
+  box-shadow: 3px 0 0 var(--nvr-blue) inset !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table .cell {
+  padding-left: 7px !important;
+  padding-right: 7px !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-tag {
+  min-height: 20px !important;
+  padding: 0 7px !important;
+  border: 0 !important;
+  border-radius: 999px !important;
+  background: var(--recording-muted-surface) !important;
+  color: var(--nvr-muted) !important;
+  line-height: 20px !important;
+  font-size: 7px !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-tag--success {
+  background: color-mix(in srgb, var(--nvr-green) 12%, transparent) !important;
+  color: color-mix(in srgb, var(--nvr-green) 78%, white) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-tag--warning {
+  background: color-mix(in srgb, var(--nvr-yellow) 11%, transparent) !important;
+  color: color-mix(in srgb, var(--nvr-yellow) 78%, white) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-button--small {
+  min-height: 27px !important;
+  padding: 0 9px !important;
+  border-radius: 7px !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-button--primary.is-plain {
+  border-color: color-mix(in srgb, var(--nvr-blue) 42%, transparent) !important;
+  background: color-mix(in srgb, var(--nvr-blue) 7%, transparent) !important;
+  color: color-mix(in srgb, var(--nvr-blue) 82%, white) !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-button--danger.is-link {
+  opacity: .74;
+}
+
+/* Element Plus fixed-right overlay is unnecessary in the narrow catalog pane. */
 .nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right,
 .nvr-workspace-content .recording-center .list-panel th.el-table-fixed-column--right,
 .nvr-workspace-content .recording-center .list-panel td.el-table-fixed-column--right {
@@ -92,80 +596,30 @@
 }
 
 .nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right::before,
-.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right-patch {
-  display: none !important;
-}
-
+.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right-patch,
 .nvr-workspace-content .recording-center .list-panel .el-table__fixed-right {
   display: none !important;
 }
 
-/* Compact the explicit Element Plus column widths enough for the 52% catalog
- * pane while preserving a useful filename column. */
+/* Compact explicit widths while preserving filename breathing room. */
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(1),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(1) { width: 36px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(1) { width: 34px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(2),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(2) { width: 80px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(2) { width: 78px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(3),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(3) { width: 64px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(3) { width: 60px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(4),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(4) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(4) { width: 72px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(5),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(5) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(5) { width: 72px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(6),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(6) { width: 68px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(6) { width: 66px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(7),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(7) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(7) { width: 72px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(8),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(8) { width: 176px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(8) { width: 202px !important; }
 .nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(9),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(9) { width: 106px !important; }
-
-.nvr-workspace-content .recording-center .list-panel .el-table th.el-table__cell,
-.nvr-workspace-content .recording-center .list-panel .el-table td.el-table__cell {
-  padding-left: 2px;
-  padding-right: 2px;
-}
-
-.nvr-workspace-content .recording-center .list-panel .el-table .cell {
-  padding-left: 7px;
-  padding-right: 7px;
-}
-
-/* The heatmap is 24 columns by 6 rows: every column is one hour and every row
- * is a ten-minute slice. Add row labels without introducing extra Vue markup. */
-.nvr-workspace-content .recording-center .heat-grid {
-  position: relative;
-  box-sizing: border-box;
-  padding-left: 28px;
-}
-
-.nvr-workspace-content .recording-center .heat-grid::before {
-  content: ":00\A:10\A:20\A:30\A:40\A:50";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 23px;
-  white-space: pre;
-  color: var(--nvr-subtle);
-  font-size: 7px;
-  line-height: 10px;
-  text-align: right;
-  pointer-events: none;
-}
-
-.nvr-workspace-content .recording-center .heat-axis {
-  margin-left: 28px;
-}
-
-/* Heat cells already expose time range / segment count / coverage through their
- * native title. Strengthen the hover affordance so users discover it. */
-.nvr-workspace-content .recording-center .heat-cell:not(:disabled):hover {
-  filter: brightness(1.2);
-  transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--nvr-blue) 18%, transparent);
-  z-index: 3;
-}
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(9) { width: 102px !important; }
 
 @media (max-width: 1080px) {
   .nvr-workspace-content .recording-center .recording-layout {
@@ -175,6 +629,10 @@
   .nvr-workspace-content .recording-center .playback-column {
     position: static !important;
     top: auto !important;
+  }
+
+  .nvr-workspace-content .recording-center .player-panel {
+    max-height: none !important;
   }
 }
 
@@ -189,16 +647,32 @@
       "search search";
   }
 
+  .nvr-workspace-content .recording-center .calendar-day {
+    height: 42px !important;
+    padding: 6px !important;
+  }
+
+  .nvr-workspace-content .recording-center .calendar-day strong {
+    display: none !important;
+  }
+
   .nvr-workspace-content .recording-center .heat-grid {
-    padding-left: 26px;
+    grid-template-rows: repeat(12, 3px) !important;
+    gap: 2px !important;
+    padding-left: 27px !important;
   }
 
   .nvr-workspace-content .recording-center .heat-grid::before {
-    width: 21px;
-    line-height: 9px;
+    width: 22px;
+    font-size: 5px;
+    line-height: 5px;
   }
 
   .nvr-workspace-content .recording-center .heat-axis {
-    margin-left: 26px;
+    margin-left: 27px !important;
+  }
+
+  .nvr-workspace-content .recording-center .detail-grid {
+    grid-template-columns: 1fr !important;
   }
 }
