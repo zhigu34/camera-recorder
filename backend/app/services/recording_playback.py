@@ -77,6 +77,7 @@ class LiveProxySession:
         temp_path: Path,
         temp_file,
         stderr_task: asyncio.Task[str],
+        cacheable: bool,
     ) -> None:
         self.manager = manager
         self.recording_id = recording_id
@@ -85,6 +86,7 @@ class LiveProxySession:
         self.temp_path = temp_path
         self.temp_file = temp_file
         self.stderr_task = stderr_task
+        self.cacheable = cacheable
         self._closed = False
 
     async def _stop_process(self) -> None:
@@ -142,7 +144,12 @@ class LiveProxySession:
 
             self.temp_file.flush()
             self.temp_file.close()
-            await self.manager._finalize_live_cache(self.recording_id, self.temp_path)
+            if self.cacheable:
+                await self.manager._finalize_live_cache(self.recording_id, self.temp_path)
+            else:
+                # A resumed live proxy starts in the middle of the recording and
+                # must never replace the complete compatibility cache.
+                self.temp_path.unlink(missing_ok=True)
             self.manager._errors.pop(self.recording_id, None)
             self.manager._set_progress_complete(self.recording_id)
             completed = True
@@ -193,13 +200,18 @@ class RecordingPlaybackManager:
         recording_id: int,
         duration_seconds: float | None,
         mode: str,
+        source_offset_seconds: float = 0.0,
     ) -> None:
         duration = max(0.0, float(duration_seconds or 0))
+        source_offset = max(0.0, float(source_offset_seconds or 0))
+        if duration > 0:
+            source_offset = min(source_offset, duration)
         self._progress[recording_id] = {
             "mode": mode,
-            "elapsed_seconds": 0.0,
+            "elapsed_seconds": source_offset,
             "duration_seconds": duration,
-            "percent": 0.0 if duration > 0 else None,
+            "source_offset_seconds": source_offset,
+            "percent": round(source_offset / duration * 100, 1) if duration > 0 else None,
             "started_at_monotonic": time.monotonic(),
             "cancellable": True,
         }
@@ -208,7 +220,9 @@ class RecordingPlaybackManager:
         progress = self._progress.get(recording_id)
         if progress is None:
             return
-        elapsed = max(float(progress.get("elapsed_seconds") or 0), elapsed_seconds)
+        source_offset = float(progress.get("source_offset_seconds") or 0)
+        absolute_elapsed = source_offset + max(0.0, elapsed_seconds)
+        elapsed = max(float(progress.get("elapsed_seconds") or 0), absolute_elapsed)
         duration = float(progress.get("duration_seconds") or 0)
         progress["elapsed_seconds"] = round(elapsed, 3)
         progress["percent"] = (
@@ -232,6 +246,7 @@ class RecordingPlaybackManager:
             "mode": progress.get("mode"),
             "elapsed_seconds": progress.get("elapsed_seconds", 0.0),
             "duration_seconds": progress.get("duration_seconds", 0.0),
+            "source_offset_seconds": progress.get("source_offset_seconds", 0.0),
             "percent": progress.get("percent"),
             "running_seconds": round(
                 max(0.0, time.monotonic() - float(progress.get("started_at_monotonic") or 0)),
@@ -312,6 +327,7 @@ class RecordingPlaybackManager:
         source: MediaSource,
         audio_codec: str | None,
         duration_seconds: float | None = None,
+        start_seconds: float = 0.0,
     ) -> LiveProxySession | None:
         """Start an H.264 fragmented-MP4 proxy from a local path or remote URL."""
 
@@ -320,6 +336,12 @@ class RecordingPlaybackManager:
         target = self.proxy_path(recording_id)
         if target.exists() and target.stat().st_size > 0:
             return None
+
+        source_offset = max(0.0, float(start_seconds or 0))
+        duration = max(0.0, float(duration_seconds or 0))
+        if duration > 0:
+            source_offset = min(source_offset, max(0.0, duration - 0.25))
+        cacheable = source_offset <= 0.001
 
         self.proxy_dir.mkdir(parents=True, exist_ok=True)
         await self.cleanup_cache()
@@ -331,10 +353,19 @@ class RecordingPlaybackManager:
 
             self._errors.pop(recording_id, None)
             self._cancelled_ids.discard(recording_id)
-            self._start_progress(recording_id, duration_seconds, "live")
+            self._start_progress(
+                recording_id,
+                duration_seconds,
+                "live",
+                source_offset_seconds=source_offset,
+            )
             temp = self.live_temp_path(recording_id)
             temp.unlink(missing_ok=True)
-            command = self.build_live_proxy_command(source, audio_codec)
+            command = self.build_live_proxy_command(
+                source,
+                audio_codec,
+                start_seconds=source_offset,
+            )
             process = await asyncio.create_subprocess_exec(
                 *command,
                 stdout=asyncio.subprocess.PIPE,
@@ -377,6 +408,7 @@ class RecordingPlaybackManager:
                 temp_path=temp,
                 temp_file=temp_file,
                 stderr_task=stderr_task,
+                cacheable=cacheable,
             )
         except Exception:
             self._processes.pop(recording_id, None)
@@ -486,13 +518,25 @@ class RecordingPlaybackManager:
         return command
 
     @classmethod
-    def build_live_proxy_command(cls, source: MediaSource, audio_codec: str | None) -> list[str]:
+    def build_live_proxy_command(
+        cls,
+        source: MediaSource,
+        audio_codec: str | None,
+        start_seconds: float = 0.0,
+    ) -> list[str]:
         command = [
             settings.ffmpeg_bin,
             "-nostdin",
             "-hide_banner",
             "-loglevel",
             "error",
+        ]
+        source_offset = max(0.0, float(start_seconds or 0))
+        if source_offset > 0.001:
+            # Input seeking is accurate when transcoding: FFmpeg seeks near a
+            # keyframe, decodes forward and discards frames before this point.
+            command += ["-ss", f"{source_offset:.3f}"]
+        command += [
             "-i",
             str(source),
             "-map",
