@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Cloudy, Delete, Refresh, Search, VideoPlay, WarningFilled } from '@element-plus/icons-vue'
+import { Delete, Refresh, Search, VideoPlay } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
 import {
   PlaybackAttemptTracker,
@@ -76,12 +76,17 @@ interface CalendarDay {
 }
 interface CalendarResult { camera_id: number; month: string; timezone: string; days: CalendarDay[] }
 interface CalendarCell { key: string; date?: string; day?: number; info?: CalendarDay }
-interface TimelineGap {
-  key: string
-  durationSeconds: number
-  startLabel: string
-  endLabel: string
-  style: Record<string, string>
+interface HeatBin {
+  index: number
+  start: number
+  end: number
+  level: number
+  coverage: number
+  items: RecordingItem[]
+  warning: boolean
+  cloud: boolean
+  active: boolean
+  title: string
 }
 interface AdjacentResult { direction: 'previous' | 'next'; date?: string | null; item?: RecordingItem | null }
 interface RecordingDeleteResult {
@@ -153,6 +158,7 @@ const abnormalCount = computed(() => recordings.value.filter((item) => item.heal
 const activeIndex = computed(() => recordings.value.findIndex((item) => item.id === activeRecording.value?.id))
 const previousRecording = computed(() => findLocalAdjacent(-1))
 const nextRecording = computed(() => findLocalAdjacent(1))
+const currentCameraName = computed(() => cameras.value.find((item) => item.id === selectedCamera.value)?.name || '未选择摄像头')
 const calendarDayMap = computed(() => new Map((calendarData.value?.days || []).map((item) => [item.date, item])))
 const calendarCells = computed<CalendarCell[]>(() => {
   const [year, month] = calendarMonth.value.split('-').map(Number)
@@ -168,34 +174,40 @@ const calendarCells = computed<CalendarCell[]>(() => {
   while (cells.length % 7 !== 0) cells.push({ key: `tail-${cells.length}` })
   return cells
 })
-const timelineGaps = computed<TimelineGap[]>(() => {
-  const result: TimelineGap[] = []
-  let previousEnd: number | null = null
-  for (const item of recordings.value) {
-    const start = localSeconds(item.started_at)
-    if (start === null) continue
-    const explicitEnd = localSeconds(item.ended_at)
-    const duration = Math.max(0, Number(item.duration || 0))
-    const end = explicitEnd ?? Math.min(86400, start + duration)
-    if (previousEnd !== null && start - previousEnd >= 5) {
-      const gapStart = Math.max(0, previousEnd)
-      const gapEnd = Math.min(86400, start)
-      const gapDuration = gapEnd - gapStart
-      const left = gapStart / 86400 * 100
-      const width = Math.max(.15, gapDuration / 86400 * 100)
-      result.push({
-        key: `${gapStart}-${gapEnd}`,
-        durationSeconds: gapDuration,
-        startLabel: clockFromSeconds(gapStart),
-        endLabel: clockFromSeconds(gapEnd),
-        style: { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` },
-      })
+const heatBins = computed<HeatBin[]>(() => {
+  const binSeconds = 30 * 60
+  return Array.from({ length: 48 }, (_, index) => {
+    const start = index * binSeconds
+    const end = start + binSeconds
+    const items = recordings.value.filter((item) => {
+      const range = recordingRange(item)
+      return range ? range.start < end && range.end > start : false
+    })
+    const coverage = Math.min(binSeconds, items.reduce((total, item) => {
+      const range = recordingRange(item)
+      if (!range) return total
+      return total + Math.max(0, Math.min(end, range.end) - Math.max(start, range.start))
+    }, 0))
+    const ratio = coverage / binSeconds
+    const level = coverage <= 0 ? 0 : ratio < .25 ? 1 : ratio < .5 ? 2 : ratio < .8 ? 3 : 4
+    const warning = items.some((item) => item.health_status !== 'healthy' || item.warning_count > 0)
+    const cloud = items.some(isCloudOnly)
+    const active = activeRecording.value ? items.some((item) => item.id === activeRecording.value?.id) : false
+    return {
+      index,
+      start,
+      end,
+      level,
+      coverage,
+      items,
+      warning,
+      cloud,
+      active,
+      title: `${clockFromSeconds(start)}–${clockFromSeconds(end)} · ${items.length} 段 · ${formatDuration(coverage)}`,
     }
-    previousEnd = previousEnd === null ? end : Math.max(previousEnd, end)
-  }
-  return result
+  })
 })
-const totalGapSeconds = computed(() => timelineGaps.value.reduce((sum, item) => sum + item.durationSeconds, 0))
+const heatHourLabels = Array.from({ length: 13 }, (_, index) => index * 2)
 const activePosition = computed(() => {
   if (!activeRecording.value) return 0
   const index = playableRecordings.value.findIndex((item) => item.id === activeRecording.value?.id)
@@ -250,10 +262,6 @@ function formatDuration(seconds?: number | null) {
   if (minutes) return `${minutes}m ${secs}s`
   return `${secs}s`
 }
-function formatCalendarDuration(seconds?: number | null) {
-  const value = Math.max(0, Number(seconds || 0))
-  return value >= 3600 ? `${(value / 3600).toFixed(value >= 36000 ? 0 : 1)}h` : `${Math.round(value / 60)}m`
-}
 function formatSize(bytes?: number | null) {
   const value = Number(bytes || 0)
   if (!value) return '-'
@@ -276,6 +284,14 @@ function clockFromSeconds(seconds: number) {
   const h = Math.floor(value / 3600)
   const m = Math.floor((value % 3600) / 60)
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+}
+function recordingRange(item: RecordingItem) {
+  const start = localSeconds(item.started_at)
+  if (start === null) return null
+  const explicitEnd = localSeconds(item.ended_at)
+  const duration = Math.max(0, Number(item.duration || 0))
+  const end = Math.max(start, Math.min(86400, explicitEnd ?? start + duration))
+  return { start, end }
 }
 function storageLabel(item: RecordingItem) {
   if (item.playback?.source_kind === 'openlist_stream') return 'OpenList直连'
@@ -311,14 +327,6 @@ function isPlayable(item: RecordingItem) {
 }
 function isCloudOnly(item: RecordingItem) { return !item.playback?.original_available && Boolean(item.playback?.remote_available) }
 function canDelete(item: RecordingItem) { return item.status !== 'deleted' && item.upload_status !== 'uploading' }
-function timelineStyle(item: RecordingItem) {
-  const start = localSeconds(item.started_at)
-  if (start === null) return { display: 'none' }
-  const duration = Math.max(60, Number(item.duration || 0))
-  const left = start / 86400 * 100
-  const width = Math.max(.28, duration / 86400 * 100)
-  return { left: `${left}%`, width: `${Math.min(width, 100 - left)}%` }
-}
 function recordingRowClassName({ row }: { row: RecordingItem }) { return row.id === activeRecording.value?.id ? 'active-recording-row' : '' }
 
 async function loadInitialSelection() {
@@ -397,17 +405,15 @@ async function selectCalendarDay(cell: CalendarCell) {
   selectedDate.value = cell.date
   await handleDateChange()
 }
-async function changeDay(offset: number) {
-  const current = new Date(`${selectedDate.value}T12:00:00`)
-  current.setDate(current.getDate() + offset)
-  selectedDate.value = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`
-  await handleDateChange()
-}
 async function shiftCalendarMonth(offset: number) {
   const [year, month] = calendarMonth.value.split('-').map(Number)
   const target = new Date(year, month - 1 + offset, 1)
   calendarMonth.value = `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}`
   await loadCalendar()
+}
+async function jumpToToday() {
+  selectedDate.value = todayString()
+  await handleDateChange()
 }
 async function jumpToLatest() {
   const response = await axios.get<RecentRecording[]>('/api/recordings?limit=1')
@@ -458,7 +464,7 @@ async function refreshProxyProgress(recordingId: number) {
     activeRecording.value.playback = { ...activeRecording.value.playback, ...response.data }
     proxyProgress.value = response.data.progress || null
     if (['ready', 'error', 'needed', 'direct'].includes(response.data.state)) stopProgressPolling()
-  } catch { /* keep playback running */ }
+  } catch { /* playback keeps running */ }
 }
 function startProgressPolling(recordingId: number) {
   stopProgressPolling()
@@ -485,6 +491,7 @@ async function prepareProxy(item: RecordingItem, resumeAt = 0, reason = '') {
     await nextTick()
     startProgressPolling(item.id)
   } catch (error) {
+    preparing.value = false
     proxyError.value = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '兼容播放准备失败'
     ElMessage.error(proxyError.value)
   } finally { fallbackInProgress.value = false }
@@ -516,6 +523,10 @@ async function play(item: RecordingItem, forceCompatibility = false) {
         ? `原片音频 ${item.audio_codec || 'unknown'} 不适合 Web 直放，已切换兼容流`
         : '原片编码不适合浏览器直放，已切换兼容流'
   await prepareProxy(item, 0, reason)
+}
+async function playHeatBin(bin: HeatBin) {
+  const target = bin.items.find(isPlayable)
+  if (target) await play(target)
 }
 function currentVideo(event?: Event) { return event?.currentTarget instanceof HTMLVideoElement ? event.currentTarget : null }
 function handleLoadedMetadata(event: Event) { playbackTracker.markLoadedMetadata(); void event }
@@ -668,91 +679,34 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="recording-center">
-    <div class="summary-grid">
-      <article class="summary-card"><span class="summary-icon"><VideoPlay /></span><div><small>当日录像</small><strong>{{ browserData?.count || 0 }}</strong><em>{{ selectedDate }}</em></div></article>
-      <article class="summary-card" :class="{ danger: abnormalCount > 0 }"><span class="summary-icon"><WarningFilled /></span><div><small>异常片段</small><strong>{{ abnormalCount }}</strong><em>健康检查 / 时间戳 / 网络</em></div></article>
-      <article class="summary-card"><span class="summary-icon"><Cloudy /></span><div><small>仅云端</small><strong>{{ remoteOnlyCount }}</strong><em>OpenList 可回放</em></div></article>
-      <article class="summary-card"><span class="summary-icon duration-icon">24</span><div><small>当日总时长</small><strong>{{ formatDuration(browserData?.total_duration) }}</strong><em>{{ formatSize(browserData?.total_size) }}</em></div></article>
-    </div>
-
-    <section class="filter-panel">
-      <div class="filter-main">
-        <el-select v-model="selectedCamera" filterable placeholder="选择摄像头" class="camera-select" @change="handleCameraChange">
-          <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
-        </el-select>
-        <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="date-picker" @change="handleDateChange" />
-        <el-select v-model="storageFilter" clearable placeholder="存储位置" class="compact-select"><el-option label="本地" value="local" /><el-option label="仅云端" value="cloud" /></el-select>
-        <el-select v-model="healthFilter" clearable placeholder="健康状态" class="compact-select"><el-option label="健康" value="healthy" /><el-option label="异常" value="abnormal" /></el-select>
-        <el-select v-model="uploadFilter" clearable placeholder="归档状态" class="compact-select"><el-option label="待归档" value="pending" /><el-option label="上传中" value="uploading" /><el-option label="等待重试" value="retry_wait" /><el-option label="已归档" value="success" /><el-option label="失败" value="failed" /></el-select>
-        <el-input v-model="searchText" clearable :prefix-icon="Search" placeholder="搜索文件名或录像 ID" class="search-box" />
-      </div>
-      <div class="filter-actions">
-        <span>显示 {{ filteredRecordings.length }} / {{ recordings.length }} 段</span>
-        <el-button link @click="clearFilters">清除筛选</el-button>
-        <el-button :icon="Refresh" :loading="loading || calendarLoading" @click="reloadAll">刷新</el-button>
-        <el-button @click="jumpToLatest">最新录像</el-button>
-        <el-button @click="router.push('/uploads')">上传管理</el-button>
-        <el-button v-if="selectedRows.length" type="danger" plain :icon="Delete" :loading="deleting" @click="batchDelete">删除 {{ selectedRows.length }} 条</el-button>
-      </div>
-    </section>
-
-    <div class="workbench">
-      <div class="browser-column">
-        <section class="panel calendar-panel" v-loading="calendarLoading">
-          <div class="panel-head">
-            <div><strong>录像日历</strong><span>{{ calendarMonth }}</span></div>
-            <div class="head-actions"><el-button size="small" @click="shiftCalendarMonth(-1)">上月</el-button><el-button size="small" @click="selectedDate = todayString(); handleDateChange()">今天</el-button><el-button size="small" @click="shiftCalendarMonth(1)">下月</el-button></div>
-          </div>
-          <div class="calendar-weekdays"><span v-for="label in ['日','一','二','三','四','五','六']" :key="label">周{{ label }}</span></div>
-          <div class="recording-calendar">
-            <div v-for="cell in calendarCells" :key="cell.key" class="calendar-cell">
-              <button v-if="cell.date" class="calendar-day" :class="{ selected: cell.date === selectedDate, has: !!cell.info, cloud: (cell.info?.remote_only || 0) > 0, warn: (cell.info?.warning_count || 0) > 0 }" @click="selectCalendarDay(cell)">
-                <span>{{ cell.day }}</span><strong v-if="cell.info">{{ cell.info.count }} 段</strong><small v-if="cell.info">{{ formatCalendarDuration(cell.info.total_duration) }}</small><i v-if="cell.info"></i>
-              </button>
-            </div>
-          </div>
-          <div class="calendar-legend"><span><i class="ok"></i>有录像</span><span><i class="warn"></i>有告警</span><span><i class="cloud"></i>含云端</span></div>
-        </section>
-
-        <section class="panel timeline-panel">
-          <div class="panel-head"><div><strong>24 小时时间轴</strong><span>{{ selectedDate }} · 缺口 {{ timelineGaps.length }} 处 / {{ formatDuration(totalGapSeconds) }}</span></div><div class="head-actions"><el-button size="small" @click="changeDay(-1)">前一天</el-button><el-button size="small" @click="changeDay(1)">后一天</el-button></div></div>
-          <div class="axis-labels"><span v-for="hour in [0,3,6,9,12,15,18,21,24]" :key="hour">{{ String(hour).padStart(2,'0') }}:00</span></div>
-          <div class="timeline">
-            <div v-for="gap in timelineGaps" :key="gap.key" class="gap-marker" :style="gap.style" :title="`录像缺口 ${gap.startLabel}~${gap.endLabel}`" />
-            <button v-for="item in recordings" :key="item.id" class="segment" :class="{ bad: item.health_status !== 'healthy', warning: item.warning_count > 0, cloud: isCloudOnly(item), deleted: !isPlayable(item), active: item.id === activeRecording?.id }" :style="timelineStyle(item)" :disabled="!isPlayable(item)" :title="`${localClock(item.started_at)} · ${storageLabel(item)}`" @click="play(item)" />
-          </div>
-          <div class="timeline-legend"><span><i class="normal"></i>正常录像</span><span><i class="warning"></i>有告警</span><span><i class="cloud"></i>仅云端</span><span><i class="gap"></i>录像缺口</span></div>
-        </section>
-
-        <section class="panel list-panel" v-loading="loading">
-          <div class="panel-head"><div><strong>录像片段列表</strong><span>共 {{ filteredRecordings.length }} 条</span></div></div>
-          <el-table :data="filteredRecordings" row-key="id" max-height="420" empty-text="当前日期暂无录像" :row-class-name="recordingRowClassName" @selection-change="handleSelectionChange" @row-click="selectRecording">
-            <el-table-column type="selection" width="42" :selectable="canDelete" />
-            <el-table-column label="开始时间" width="102"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
-            <el-table-column label="时长" width="88"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
-            <el-table-column label="大小" width="92"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
-            <el-table-column label="位置" width="108"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
-            <el-table-column label="健康" width="90"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
-            <el-table-column label="归档" width="100"><template #default="{ row }">{{ uploadLabel(row.upload_status) }}</template></el-table-column>
-            <el-table-column prop="filename" label="文件名" min-width="210" show-overflow-tooltip />
-            <el-table-column label="操作" width="148" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-button size="small" type="danger" link :disabled="!canDelete(row)" @click.stop="deleteOne(row)">删除</el-button></template></el-table-column>
-          </el-table>
-        </section>
-      </div>
-
-      <aside id="playback-compatibility" class="player-column">
+    <div class="recording-layout">
+      <aside id="playback-compatibility" class="playback-column">
         <section class="panel player-panel">
-          <div class="panel-head player-head"><div><strong>片段播放</strong><span>{{ activeRecording ? `${selectedDate} ${localClock(activeRecording.started_at)}` : '选择时间轴或列表中的录像片段' }}</span></div><el-tag v-if="playbackModeLabel" :type="playbackMode === 'original' ? 'success' : 'warning'" size="small">{{ playbackModeLabel }}</el-tag></div>
+          <div class="panel-head player-head">
+            <div><strong>片段播放</strong><span>{{ activeRecording ? `${selectedDate} ${localClock(activeRecording.started_at)}` : '选择录像片段' }}</span></div>
+            <div class="player-head-meta"><el-tag size="small" type="primary">{{ currentCameraName }}</el-tag><el-tag v-if="playbackModeLabel" :type="playbackMode === 'original' ? 'success' : 'warning'" size="small">{{ playbackModeLabel }}</el-tag></div>
+          </div>
+
           <div class="player-box" v-loading="preparing || navigationLoading" :element-loading-text="playbackMode === 'proxy-live' ? '正在准备兼容流…' : '正在加载录像…'">
             <video v-if="videoSrc" :src="videoSrc" controls autoplay playsinline preload="auto" @loadedmetadata="handleLoadedMetadata" @loadeddata="handleLoadedData" @canplay="handleVideoCanPlay" @playing="handleVideoPlaying" @ended="handleVideoEnded" @error="handleVideoError" />
             <button v-else-if="activeRecording && isPlayable(activeRecording)" type="button" class="play-placeholder" @click="play(activeRecording)"><span><VideoPlay /></span><strong>播放当前片段</strong><small>{{ activeRecording.filename }}</small></button>
-            <div v-else class="player-empty"><VideoPlay /><strong>{{ activeRecording ? '当前片段不可播放' : '尚未选择录像片段' }}</strong><span>从时间轴或片段列表中选择一段录像。</span></div>
+            <div v-else class="player-empty"><VideoPlay /><strong>{{ activeRecording ? '当前片段不可播放' : '尚未选择录像片段' }}</strong><span>从右侧录像列表或热力图中选择一段录像。</span></div>
           </div>
-          <div class="player-nav"><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playPrevious">上一段</el-button><el-button type="primary" :disabled="!activeRecording || !isPlayable(activeRecording)" @click="activeRecording && play(activeRecording)">播放</el-button><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playNext">下一段</el-button></div>
+
+          <div class="player-nav"><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playPrevious">上一段</el-button><el-button type="primary" :disabled="!activeRecording || !isPlayable(activeRecording)" @click="activeRecording && play(activeRecording)"><VideoPlay class="button-icon" />播放</el-button><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playNext">下一段</el-button></div>
           <label class="auto-advance"><span>自动续播（支持跨日）</span><el-switch v-model="autoAdvance" /></label>
           <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
           <div v-if="proxyError" class="playback-error">{{ proxyError }}</div>
           <div v-if="playbackMode === 'proxy-live' && proxyProgress" class="proxy-progress"><div><strong>兼容转码</strong><span>{{ effectiveProgressPercent.toFixed(1) }}%</span></div><el-progress :percentage="effectiveProgressPercent" :stroke-width="8" /><el-button size="small" type="danger" plain :loading="cancellingProxy" @click="cancelProxy">停止转码</el-button></div>
+
+          <section class="heat-section">
+            <div class="section-head"><div><strong>24 小时录像热力图</strong><span>{{ selectedDate }}</span></div><span>{{ recordings.length }} 段 · {{ formatDuration(browserData?.total_duration) }}</span></div>
+            <div class="heat-grid">
+              <button v-for="bin in heatBins" :key="bin.index" type="button" class="heat-cell" :class="[`level-${bin.level}`, { warning: bin.warning, cloud: bin.cloud, active: bin.active }]" :disabled="!bin.items.some(isPlayable)" :title="bin.title" @click="playHeatBin(bin)" />
+            </div>
+            <div class="heat-axis"><span v-for="hour in heatHourLabels" :key="hour">{{ String(hour).padStart(2, '0') }}:00</span></div>
+            <div class="heat-legend"><span><i class="heat-normal"></i>录像覆盖</span><span><i class="heat-warning"></i>有告警</span><span><i class="heat-cloud"></i>含云端</span><span><i class="heat-empty"></i>无录像</span></div>
+          </section>
 
           <template v-if="activeRecording">
             <div class="detail-title">当前片段信息</div>
@@ -770,20 +724,62 @@ onBeforeUnmount(() => {
           </template>
         </section>
       </aside>
+
+      <div class="catalog-column">
+        <section class="panel calendar-panel" v-loading="calendarLoading">
+          <div class="panel-head calendar-head">
+            <div><strong>录像日历</strong><span>{{ calendarMonth }}</span></div>
+            <div class="calendar-summary"><span>当日 {{ recordings.length }} 段</span><span>{{ formatDuration(browserData?.total_duration) }}</span><span :class="{ danger: abnormalCount > 0 }">异常 {{ abnormalCount }}</span><span>仅云端 {{ remoteOnlyCount }}</span></div>
+            <div class="head-actions"><el-button size="small" @click="shiftCalendarMonth(-1)">‹</el-button><el-button size="small" @click="jumpToToday">今天</el-button><el-button size="small" @click="shiftCalendarMonth(1)">›</el-button></div>
+          </div>
+
+          <div class="calendar-toolbar">
+            <el-select v-model="selectedCamera" filterable placeholder="选择摄像头" class="camera-select" @change="handleCameraChange"><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" /></el-select>
+            <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="date-picker" @change="handleDateChange" />
+            <el-select v-model="storageFilter" clearable placeholder="存储位置" class="compact-select"><el-option label="本地" value="local" /><el-option label="仅云端" value="cloud" /></el-select>
+            <el-select v-model="healthFilter" clearable placeholder="健康状态" class="compact-select"><el-option label="健康" value="healthy" /><el-option label="异常" value="abnormal" /></el-select>
+            <el-select v-model="uploadFilter" clearable placeholder="归档状态" class="compact-select"><el-option label="待归档" value="pending" /><el-option label="上传中" value="uploading" /><el-option label="等待重试" value="retry_wait" /><el-option label="已归档" value="success" /><el-option label="失败" value="failed" /></el-select>
+            <el-input v-model="searchText" clearable :prefix-icon="Search" placeholder="搜索文件名或录像 ID" class="search-box" />
+          </div>
+          <div class="calendar-actions"><span>显示 {{ filteredRecordings.length }} / {{ recordings.length }} 段</span><el-button link @click="clearFilters">清除筛选</el-button><el-button :icon="Refresh" :loading="loading || calendarLoading" @click="reloadAll">刷新</el-button><el-button @click="jumpToLatest">最新录像</el-button><el-button @click="router.push('/uploads')">上传管理</el-button><el-button v-if="selectedRows.length" type="danger" plain :icon="Delete" :loading="deleting" @click="batchDelete">删除 {{ selectedRows.length }} 条</el-button></div>
+
+          <div class="calendar-weekdays"><span v-for="label in ['日','一','二','三','四','五','六']" :key="label">周{{ label }}</span></div>
+          <div class="recording-calendar">
+            <div v-for="cell in calendarCells" :key="cell.key" class="calendar-cell">
+              <button v-if="cell.date" class="calendar-day" :class="{ selected: cell.date === selectedDate, has: !!cell.info, cloud: (cell.info?.remote_only || 0) > 0, warn: (cell.info?.warning_count || 0) > 0 }" @click="selectCalendarDay(cell)"><span>{{ cell.day }}</span><strong v-if="cell.info">{{ cell.info.count }} 段</strong><i v-if="cell.info"></i></button>
+            </div>
+          </div>
+          <div class="calendar-legend"><span><i class="ok"></i>有录像</span><span><i class="warn"></i>有告警</span><span><i class="cloud"></i>含云端</span></div>
+        </section>
+
+        <section class="panel list-panel" v-loading="loading">
+          <div class="panel-head"><div><strong>录像片段列表</strong><span>共 {{ filteredRecordings.length }} 条</span></div><span class="list-hint">单击选择 · 双击播放</span></div>
+          <el-table :data="filteredRecordings" row-key="id" max-height="520" empty-text="当前日期暂无录像" :row-class-name="recordingRowClassName" @selection-change="handleSelectionChange" @row-click="selectRecording" @row-dblclick="play">
+            <el-table-column type="selection" width="42" :selectable="canDelete" />
+            <el-table-column label="开始时间" width="96"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
+            <el-table-column label="时长" width="82"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
+            <el-table-column label="大小" width="88"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
+            <el-table-column label="位置" width="104"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
+            <el-table-column label="健康" width="84"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
+            <el-table-column label="归档" width="90"><template #default="{ row }">{{ uploadLabel(row.upload_status) }}</template></el-table-column>
+            <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
+            <el-table-column label="操作" width="132" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-button size="small" type="danger" link :disabled="!canDelete(row)" @click.stop="deleteOne(row)">删除</el-button></template></el-table-column>
+          </el-table>
+        </section>
+      </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.recording-center{max-width:1760px;margin:0 auto;padding:18px 20px 28px;color:var(--nvr-text)}
-.summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:10px}.summary-card{min-height:82px;display:flex;align-items:center;gap:12px;padding:13px 14px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.summary-card.danger{border-color:color-mix(in srgb,var(--nvr-red) 28%,var(--nvr-border))}.summary-icon{width:34px;height:34px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;color:var(--nvr-blue);background:color-mix(in srgb,var(--nvr-blue) 12%,transparent);font-weight:800}.summary-icon :deep(svg){width:17px}.summary-card.danger .summary-icon{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 10%,transparent)}.summary-card>div{min-width:0;display:grid;grid-template-columns:auto 1fr;align-items:end;column-gap:8px;row-gap:4px}.summary-card small{grid-column:1/-1;color:var(--nvr-muted);font-size:10px}.summary-card strong{font-size:21px;line-height:1;font-weight:700}.summary-card em{overflow:hidden;color:var(--nvr-subtle);font-size:9px;font-style:normal;text-overflow:ellipsis;white-space:nowrap}
-.filter-panel,.panel{border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.filter-panel{padding:10px;margin-bottom:10px}.filter-main{display:grid;grid-template-columns:180px 150px 125px 125px 125px minmax(220px,1fr);gap:7px}.camera-select,.date-picker,.compact-select,.search-box{width:100%!important}.filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;margin-top:8px;color:var(--nvr-muted);font-size:10px}
-.workbench{display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:10px;align-items:start}.browser-column{min-width:0;display:flex;flex-direction:column;gap:10px}.player-column{position:sticky;top:70px;min-width:0}.panel{overflow:hidden}.panel-head{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 11px;border-bottom:1px solid var(--nvr-border)}.panel-head>div:first-child{min-width:0;display:flex;align-items:baseline;gap:8px}.panel-head strong{font-size:12px}.panel-head span{color:var(--nvr-muted);font-size:9px}.head-actions{display:flex;gap:5px}
-.calendar-panel{padding-bottom:9px}.calendar-weekdays,.recording-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;padding:0 9px}.calendar-weekdays{padding-top:8px;padding-bottom:5px;color:var(--nvr-subtle);font-size:8px;text-align:center}.calendar-cell{min-width:0}.calendar-day{position:relative;width:100%;height:45px;display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;align-items:center;gap:1px 5px;padding:5px 7px;border:1px solid var(--nvr-border);border-radius:6px;color:var(--nvr-muted);background:var(--nvr-bg-soft);cursor:pointer;text-align:left}.calendar-day>span{font-size:10px}.calendar-day strong{justify-self:end;color:var(--nvr-text-soft);font-size:8px}.calendar-day small{grid-column:1/-1;color:var(--nvr-subtle);font-size:7px}.calendar-day i{position:absolute;right:5px;bottom:5px;width:4px;height:4px;border-radius:50%;background:var(--nvr-green)}.calendar-day.has{border-color:color-mix(in srgb,var(--nvr-green) 25%,var(--nvr-border));background:color-mix(in srgb,var(--nvr-green) 5%,var(--nvr-bg-soft))}.calendar-day.cloud i{background:#8b5cf6}.calendar-day.warn{border-color:color-mix(in srgb,var(--nvr-yellow) 42%,var(--nvr-border))}.calendar-day.selected{border-color:var(--nvr-blue);box-shadow:inset 0 0 0 1px var(--nvr-blue);background:color-mix(in srgb,var(--nvr-blue) 10%,var(--nvr-bg-soft))}.calendar-legend,.timeline-legend{display:flex;align-items:center;justify-content:flex-end;gap:13px;padding:7px 11px 0;color:var(--nvr-subtle);font-size:8px}.calendar-legend span,.timeline-legend span{display:inline-flex;align-items:center;gap:4px}.calendar-legend i,.timeline-legend i{width:6px;height:6px;border-radius:50%}.calendar-legend .ok,.timeline-legend .normal{background:var(--nvr-green)}.calendar-legend .warn,.timeline-legend .warning{background:var(--nvr-yellow)}.calendar-legend .cloud,.timeline-legend .cloud{background:#8b5cf6}.timeline-legend .gap{border-radius:1px;background:repeating-linear-gradient(135deg,var(--nvr-yellow) 0 2px,transparent 2px 4px)}
-.timeline-panel{padding-bottom:9px}.axis-labels{display:flex;justify-content:space-between;padding:9px 11px 5px;color:var(--nvr-subtle);font-size:8px}.timeline{position:relative;height:48px;margin:0 11px;border:1px solid var(--nvr-border);border-radius:6px;background:var(--nvr-bg-soft);overflow:hidden}.segment{position:absolute;top:9px;height:28px;min-width:3px;border:0;border-radius:3px;background:var(--nvr-green);cursor:pointer;z-index:2}.segment.warning{background:var(--nvr-yellow)}.segment.bad{background:var(--nvr-red)}.segment.cloud{background:#8b5cf6}.segment.deleted{background:var(--nvr-subtle);cursor:not-allowed}.segment.active{box-shadow:0 0 0 2px var(--nvr-blue);transform:translateY(-1px)}.gap-marker{position:absolute;top:0;bottom:0;min-width:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--nvr-yellow) 40%,transparent) 0 4px,transparent 4px 8px);z-index:1}
-.list-panel :deep(.el-table){--el-table-bg-color:transparent;--el-table-tr-bg-color:transparent;--el-table-header-bg-color:var(--nvr-bg-soft);--el-table-border-color:var(--nvr-border);--el-table-row-hover-bg-color:var(--nvr-control-hover)}.list-panel :deep(.active-recording-row>td.el-table__cell){background:color-mix(in srgb,var(--nvr-blue) 8%,var(--nvr-surface))!important}
-.player-panel{padding-bottom:11px}.player-head{border-bottom:0}.player-box{position:relative;aspect-ratio:16/9;margin:0 10px;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-box video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.player-nav{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:6px;padding:9px 10px 0}.player-nav :deep(.el-button){margin:0}.auto-advance{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:7px 11px 0;color:var(--nvr-muted);font-size:9px}.playback-notice,.playback-error{margin:8px 10px 0;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin:8px 10px 0;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}.detail-title{padding:11px 11px 7px;color:var(--nvr-text-soft);font-size:10px;font-weight:650}.detail-grid{display:grid;grid-template-columns:1fr 1fr;margin:0 10px;border-top:1px solid var(--nvr-border)}.detail-grid>div{min-width:0;padding:7px 8px;border-bottom:1px solid var(--nvr-border)}.detail-grid>div:nth-child(odd){border-right:1px solid var(--nvr-border)}.detail-grid .wide{grid-column:1/-1;border-right:0!important}.detail-grid dt{color:var(--nvr-subtle);font-size:7px}.detail-grid dd{margin:3px 0 0;overflow-wrap:anywhere;color:var(--nvr-text-soft);font-size:8px}.player-actions{display:flex;justify-content:flex-end;gap:6px;padding:9px 10px 0}.position-note{padding:7px 10px 0;text-align:right;color:var(--nvr-subtle);font-size:8px}
-@media(max-width:1250px){.workbench{grid-template-columns:minmax(0,1fr) 340px}.filter-main{grid-template-columns:repeat(3,minmax(0,1fr))}.search-box{grid-column:span 2}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:980px){.workbench{grid-template-columns:1fr}.player-column{position:static;order:-1}.player-panel{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(280px,1fr);gap:0 8px}.player-head{grid-column:1/-1}.player-box{grid-row:2 / span 5}.detail-title,.detail-grid,.player-actions,.position-note{grid-column:2}.player-nav,.auto-advance,.playback-notice,.playback-error,.proxy-progress{grid-column:1}.filter-actions{justify-content:flex-start;flex-wrap:wrap}}
-@media(max-width:700px){.recording-center{padding:12px}.summary-grid{grid-template-columns:1fr 1fr}.filter-main{grid-template-columns:1fr 1fr}.search-box{grid-column:1/-1}.workbench{gap:8px}.player-panel{display:block}.player-box{margin-top:0}.detail-grid{grid-template-columns:1fr}.detail-grid>div:nth-child(odd){border-right:0}.detail-grid .wide{grid-column:auto}.calendar-weekdays,.recording-calendar{gap:2px;padding-left:6px;padding-right:6px}.calendar-day{height:42px;padding:4px}.calendar-day strong{display:none}.filter-actions{font-size:8px}.timeline{margin:0 8px}}
+.recording-center{max-width:1840px;margin:0 auto;padding:16px 18px 26px;color:var(--nvr-text)}
+.recording-layout{display:grid;grid-template-columns:minmax(430px,.9fr) minmax(650px,1.25fr);gap:12px;align-items:start}.playback-column{position:sticky;top:70px;min-width:0;align-self:start}.catalog-column{min-width:0;display:flex;flex-direction:column;gap:10px}.panel{overflow:hidden;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.panel-head{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 11px;border-bottom:1px solid var(--nvr-border)}.panel-head>div:first-child{min-width:0;display:flex;align-items:baseline;gap:8px}.panel-head strong{font-size:12px}.panel-head span{color:var(--nvr-muted);font-size:9px}.head-actions{display:flex;gap:5px}.head-actions :deep(.el-button){margin:0}.button-icon{width:13px;margin-right:4px}
+.player-panel{max-height:calc(100vh - 108px);overflow-y:auto;padding-bottom:12px;scrollbar-gutter:stable}.player-head{border-bottom:0}.player-head-meta{display:flex;align-items:center;gap:5px}.player-box{position:relative;aspect-ratio:16/9;margin:0 11px;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-box video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.player-nav{display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:6px;padding:9px 11px 0}.player-nav :deep(.el-button){min-height:34px;margin:0}.auto-advance{display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:7px 12px 0;color:var(--nvr-muted);font-size:9px}.playback-notice,.playback-error{margin:8px 11px 0;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin:8px 11px 0;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}
+.heat-section{margin-top:10px;padding:11px;border-top:1px solid var(--nvr-border);border-bottom:1px solid var(--nvr-border);background:color-mix(in srgb,var(--nvr-bg-soft) 55%,transparent)}.section-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.section-head>div{display:flex;align-items:baseline;gap:7px}.section-head strong{font-size:11px}.section-head span{color:var(--nvr-subtle);font-size:8px}.heat-grid{display:grid;grid-template-columns:repeat(24,minmax(0,1fr));gap:3px}.heat-cell{height:18px;border:1px solid color-mix(in srgb,var(--nvr-border) 80%,transparent);border-radius:3px;background:var(--nvr-bg);cursor:pointer;transition:filter .12s ease,transform .12s ease,box-shadow .12s ease}.heat-cell.level-1{background:color-mix(in srgb,var(--nvr-green) 24%,var(--nvr-bg))}.heat-cell.level-2{background:color-mix(in srgb,var(--nvr-green) 42%,var(--nvr-bg))}.heat-cell.level-3{background:color-mix(in srgb,var(--nvr-green) 66%,var(--nvr-bg))}.heat-cell.level-4{background:color-mix(in srgb,var(--nvr-green) 88%,var(--nvr-bg))}.heat-cell.warning{border-color:var(--nvr-yellow);box-shadow:inset 0 -2px 0 var(--nvr-yellow)}.heat-cell.cloud{box-shadow:inset 0 2px 0 #8b5cf6}.heat-cell.warning.cloud{box-shadow:inset 0 -2px 0 var(--nvr-yellow),inset 0 2px 0 #8b5cf6}.heat-cell.active{outline:2px solid var(--nvr-blue);outline-offset:1px;z-index:2}.heat-cell:not(:disabled):hover{filter:brightness(1.18);transform:translateY(-1px)}.heat-cell:disabled{cursor:default;opacity:.7}.heat-axis{display:flex;justify-content:space-between;margin-top:5px;color:var(--nvr-subtle);font-size:7px}.heat-legend{display:flex;justify-content:flex-end;gap:11px;margin-top:7px;color:var(--nvr-subtle);font-size:7px}.heat-legend span{display:inline-flex;align-items:center;gap:4px}.heat-legend i{width:6px;height:6px;border-radius:2px}.heat-normal{background:var(--nvr-green)}.heat-warning{background:var(--nvr-yellow)}.heat-cloud{background:#8b5cf6}.heat-empty{border:1px solid var(--nvr-border);background:var(--nvr-bg)}
+.detail-title{padding:11px 11px 7px;color:var(--nvr-text-soft);font-size:10px;font-weight:650}.detail-grid{display:grid;grid-template-columns:1fr 1fr;margin:0 10px;border-top:1px solid var(--nvr-border)}.detail-grid>div{min-width:0;padding:8px;border-bottom:1px solid var(--nvr-border)}.detail-grid>div:nth-child(odd){border-right:1px solid var(--nvr-border)}.detail-grid .wide{grid-column:1/-1;border-right:0!important}.detail-grid dt{color:var(--nvr-subtle);font-size:7px}.detail-grid dd{margin:3px 0 0;overflow-wrap:anywhere;color:var(--nvr-text-soft);font-size:8px}.player-actions{display:flex;justify-content:flex-end;gap:6px;padding:9px 10px 0}.position-note{padding:7px 10px 0;text-align:right;color:var(--nvr-subtle);font-size:8px}
+.calendar-head{min-height:46px}.calendar-summary{display:flex;align-items:center;gap:10px;margin-left:auto;color:var(--nvr-subtle);font-size:8px}.calendar-summary span{white-space:nowrap}.calendar-summary .danger{color:var(--nvr-red)}.calendar-toolbar{display:grid;grid-template-columns:180px 145px 110px 110px 115px minmax(180px,1fr);gap:6px;padding:9px 10px 7px;border-bottom:1px solid var(--nvr-border)}.camera-select,.date-picker,.compact-select,.search-box{width:100%!important}.calendar-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;padding:0 10px 8px;color:var(--nvr-muted);font-size:8px;border-bottom:1px solid var(--nvr-border)}.calendar-actions :deep(.el-button){margin:0}.calendar-weekdays,.recording-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;padding:0 9px}.calendar-weekdays{padding-top:7px;padding-bottom:4px;color:var(--nvr-subtle);font-size:8px;text-align:center}.calendar-cell{min-width:0}.calendar-day{position:relative;width:100%;height:35px;display:grid;grid-template-columns:auto 1fr;align-items:center;gap:4px;padding:4px 6px;border:1px solid var(--nvr-border);border-radius:5px;color:var(--nvr-muted);background:var(--nvr-bg-soft);cursor:pointer;text-align:left}.calendar-day>span{font-size:9px}.calendar-day strong{justify-self:end;color:var(--nvr-text-soft);font-size:7px}.calendar-day i{position:absolute;right:4px;bottom:4px;width:4px;height:4px;border-radius:50%;background:var(--nvr-green)}.calendar-day.has{border-color:color-mix(in srgb,var(--nvr-green) 25%,var(--nvr-border));background:color-mix(in srgb,var(--nvr-green) 5%,var(--nvr-bg-soft))}.calendar-day.cloud i{background:#8b5cf6}.calendar-day.warn{border-color:color-mix(in srgb,var(--nvr-yellow) 42%,var(--nvr-border))}.calendar-day.selected{border-color:var(--nvr-blue);box-shadow:inset 0 0 0 1px var(--nvr-blue);background:color-mix(in srgb,var(--nvr-blue) 10%,var(--nvr-bg-soft))}.calendar-legend{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:6px 10px 8px;color:var(--nvr-subtle);font-size:7px}.calendar-legend span{display:inline-flex;align-items:center;gap:4px}.calendar-legend i{width:6px;height:6px;border-radius:50%}.calendar-legend .ok{background:var(--nvr-green)}.calendar-legend .warn{background:var(--nvr-yellow)}.calendar-legend .cloud{background:#8b5cf6}
+.list-panel .panel-head{min-height:40px}.list-hint{margin-left:auto}.list-panel :deep(.el-table){--el-table-bg-color:transparent;--el-table-tr-bg-color:transparent;--el-table-header-bg-color:var(--nvr-bg-soft);--el-table-border-color:var(--nvr-border);--el-table-row-hover-bg-color:var(--nvr-control-hover);color:var(--nvr-text-soft);font-size:10px}.list-panel :deep(.el-table th.el-table__cell){height:34px;padding:4px 0;color:var(--nvr-subtle);font-size:8px;font-weight:650}.list-panel :deep(.el-table td.el-table__cell){padding:6px 0}.list-panel :deep(.el-table__row){cursor:pointer}.list-panel :deep(.active-recording-row>td.el-table__cell){background:color-mix(in srgb,var(--nvr-blue) 10%,var(--nvr-surface))!important}.list-panel :deep(.el-tag){min-height:20px;line-height:18px}.list-panel :deep(.el-button--small){min-height:26px;padding-left:8px;padding-right:8px}
+@media(max-width:1380px){.recording-layout{grid-template-columns:minmax(400px,.82fr) minmax(580px,1.18fr)}.calendar-toolbar{grid-template-columns:repeat(3,minmax(0,1fr))}.search-box{grid-column:span 2}.calendar-summary span:nth-child(4){display:none}}
+@media(max-width:1080px){.recording-layout{grid-template-columns:1fr}.playback-column{position:static}.player-panel{max-height:none}.calendar-summary{display:none}.catalog-column{order:2}.playback-column{order:1}}
+@media(max-width:700px){.recording-center{padding:10px}.calendar-toolbar{grid-template-columns:1fr 1fr}.search-box{grid-column:1/-1}.calendar-actions{justify-content:flex-start;flex-wrap:wrap}.heat-grid{gap:2px}.heat-cell{height:16px}.heat-axis span:nth-child(even){display:none}.detail-grid{grid-template-columns:1fr}.detail-grid>div:nth-child(odd){border-right:0}.detail-grid .wide{grid-column:auto}.calendar-day{height:32px}.calendar-day strong{display:none}.player-head-meta .el-tag:first-child{display:none}}
 </style>
