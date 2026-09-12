@@ -40,9 +40,11 @@ async function openPlaybackCompatibility() {
   <PreviewView v-else-if="renderKey === 'preview'" />
   <template v-else-if="renderKey === 'playback'">
     <RecordingBrowserView />
+    <section class="playback-legend-strip" aria-label="录像浏览图例">
+      <RecordingCalendarLegend />
+      <RecordingTimelineLegend />
+    </section>
     <PlaybackMetricsPanel />
-    <RecordingCalendarLegend />
-    <RecordingTimelineLegend />
   </template>
   <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
   <template v-else-if="renderKey === 'health'">
@@ -51,3 +53,25 @@ async function openPlaybackCompatibility() {
   </template>
   <SystemSettingsWorkspace v-else-if="renderKey === 'settings'" @open-events="go('/events')" />
 </template>
+
+<style scoped>
+.playback-legend-strip {
+  max-width: 1720px;
+  margin: -18px auto 12px;
+  padding: 10px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 24px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  background: var(--nvr-surface);
+}
+@media (max-width: 720px) {
+  .playback-legend-strip {
+    margin: -8px 14px 10px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+</style>

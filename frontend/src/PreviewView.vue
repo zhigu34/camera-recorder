@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import {
@@ -10,29 +12,13 @@ import {
   VideoCamera,
   VideoPlay,
 } from '@element-plus/icons-vue'
+import { useCameraStore } from './stores/cameras'
+import { useRuntimeStore } from './stores/runtime'
 
 type LayoutCount = 1 | 4 | 9
 type PreviewStream = 'auto' | 'sub' | 'main'
 type ActivePreviewStream = 'sub' | 'main'
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'retrying'
-
-interface Camera {
-  id: number
-  name: string
-  ip: string
-  rtsp_path: string
-  sub_rtsp_path?: string | null
-  enabled: boolean
-}
-
-interface RecorderRuntime {
-  camera_id: number
-  state: string
-}
-
-interface SystemStatus {
-  recorders?: RecorderRuntime[]
-}
 
 interface WallSlot {
   cameraId: number | null
@@ -50,14 +36,15 @@ interface SavedWall {
 }
 
 const STORAGE_KEY = 'nvr-video-wall-v1'
-const cameras = ref<Camera[]>([])
-const systemStatus = ref<SystemStatus | null>(null)
+const router = useRouter()
+const cameraStore = useCameraStore()
+const runtimeStore = useRuntimeStore()
+const { cameras } = storeToRefs(cameraStore)
 const loading = ref(false)
 const layoutCount = ref<LayoutCount>(4)
 const wallPaused = ref(false)
 const draggingCameraId = ref<number | null>(null)
 const connectionState = ref<ConnectionState>('idle')
-let statusTimer: number | null = null
 let reconnectTimer: number | null = null
 let connectTimer: number | null = null
 let socket: WebSocket | null = null
@@ -84,12 +71,11 @@ const previewProfile = computed(() => {
 
 function cameraById(cameraId: number | null) {
   if (cameraId === null) return null
-  return cameras.value.find((camera) => camera.id === cameraId) || null
+  return cameraStore.byId.get(cameraId) || null
 }
 
 function runtimeState(cameraId: number | null) {
-  if (cameraId === null) return 'STOPPED'
-  return systemStatus.value?.recorders?.find((item) => item.camera_id === cameraId)?.state || 'STOPPED'
+  return runtimeStore.recorderState(cameraId)
 }
 
 function stateLabel(cameraId: number | null) {
@@ -299,36 +285,30 @@ function scheduleConnect() {
   }, 80)
 }
 
-async function loadData() {
+function reconcileSlots() {
+  const validIds = new Set(cameras.value.map((camera) => camera.id))
+  let changed = false
+  slots.value.forEach((slot) => {
+    if (slot.cameraId !== null && !validIds.has(slot.cameraId)) {
+      revokeFrame(slot)
+      Object.assign(slot, emptySlot())
+      changed = true
+    }
+  })
+  if (changed) persistWall()
+}
+
+async function loadData(force = false) {
   loading.value = true
   try {
-    const [cameraRes, statusRes] = await Promise.all([
-      axios.get<Camera[]>('/api/cameras'),
-      axios.get<SystemStatus>('/api/system/status'),
-    ])
-    cameras.value = cameraRes.data
-    systemStatus.value = statusRes.data
-    const validIds = new Set(cameraRes.data.map((camera) => camera.id))
-    slots.value.forEach((slot) => {
-      if (slot.cameraId !== null && !validIds.has(slot.cameraId)) {
-        revokeFrame(slot)
-        Object.assign(slot, emptySlot())
-      }
-    })
+    await cameraStore.load(force)
+    reconcileSlots()
     if (!slots.value.some((slot) => slot.cameraId !== null)) autoFill(false)
     scheduleConnect()
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '实时监控加载失败')
   } finally {
     loading.value = false
-  }
-}
-
-async function refreshStatus() {
-  try {
-    systemStatus.value = (await axios.get<SystemStatus>('/api/system/status')).data
-  } catch {
-    // Keep last known recorder state.
   }
 }
 
@@ -436,14 +416,12 @@ async function enterFullscreen(index: number) {
 }
 
 function openPlayback() {
-  window.history.pushState({}, '', '/recordings/browser')
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  void router.push('/recordings/browser')
 }
 
 function openCameraConfig(cameraId: number | null) {
   if (cameraId === null) return
-  window.history.pushState({}, '', `/cameras?camera_id=${encodeURIComponent(String(cameraId))}`)
-  window.dispatchEvent(new PopStateEvent('popstate'))
+  void router.push({ path: '/cameras', query: { camera_id: String(cameraId) } })
 }
 
 function togglePause() {
@@ -465,18 +443,18 @@ function onVisibilityChange() {
   }
 }
 
+watch(cameras, () => reconcileSlots())
+
 onMounted(() => {
   mounted = true
   loadSavedWall()
   void loadData()
-  statusTimer = window.setInterval(refreshStatus, 5000)
   document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
   mounted = false
   closeSocket()
-  if (statusTimer !== null) window.clearInterval(statusTimer)
   if (connectTimer !== null) window.clearTimeout(connectTimer)
   slots.value.forEach(revokeFrame)
   document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -489,7 +467,7 @@ onBeforeUnmount(() => {
       <div>
         <div class="eyebrow">LIVE MONITORING</div>
         <h2>实时监控</h2>
-        <p>多画面通过单条 WebSocket 复用 JPEG 帧，避免 MJPEG 长连接数量限制；录像主链路不受影响。</p>
+        <p>多画面通过单条 WebSocket 复用 JPEG 帧，设备与录像状态复用全局实时状态；录像主链路不受影响。</p>
       </div>
       <div class="header-actions">
         <div class="connection-pill" :class="connectionState">
@@ -618,37 +596,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.wall-page { min-height: 100%; padding: 20px 22px 26px; background: #080c11; }
-.wall-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 15px; }
-.eyebrow { color: #506079; font-size: 9px; font-weight: 800; letter-spacing: .18em; }
-h2 { margin: 3px 0 3px; font-size: 21px; font-weight: 650; }
-p { margin: 0; color: #6f7c8d; font-size: 11px; }
-.header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
-.profile-pill, .connection-pill { height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 9px; color: #7f8da0; border: 1px solid var(--nvr-border); border-radius: 6px; background: #0e141b; font-size: 10px; }
-.connection-dot { width: 6px; height: 6px; border-radius: 50%; background: #526073; }
-.connection-pill.connected { color: #93ddb9; }.connection-pill.connected .connection-dot { background: var(--nvr-green); box-shadow: 0 0 0 3px rgba(46,204,138,.1); }
-.connection-pill.connecting, .connection-pill.retrying { color: #e6bb68; }.connection-pill.connecting .connection-dot, .connection-pill.retrying .connection-dot { background: var(--nvr-yellow); }
-.wall-toolbar { display: flex; align-items: center; gap: 12px; min-height: 52px; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--nvr-border); border-radius: 8px; background: #0d1218; }
-.layout-switcher { flex: 0 0 auto; display: flex; gap: 2px; padding: 3px; border: 1px solid var(--nvr-border); border-radius: 6px; background: #080c11; }
-.layout-switcher button { width: 30px; height: 26px; border: 0; border-radius: 4px; color: #718095; background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; }
-.layout-switcher button.active { color: white; background: #2768d8; }
-.camera-tray { min-width: 0; display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: thin; }
-.tray-label { flex: 0 0 auto; margin: 0 3px 0 2px; color: #536276; font-size: 9px; font-weight: 700; text-transform: uppercase; }
-.camera-chip { flex: 0 0 auto; min-width: 104px; height: 34px; display: grid; grid-template-columns: 7px auto; grid-template-rows: 16px 12px; column-gap: 6px; padding: 3px 8px; color: #9ba8b7; border: 1px solid var(--nvr-border); border-radius: 6px; background: #10161e; cursor: grab; text-align: left; }
-.camera-chip:hover { border-color: rgba(76,141,255,.42); background: #141c26; }.camera-chip.assigned { border-color: rgba(76,141,255,.22); }.camera-chip.disabled { opacity: .4; cursor: not-allowed; }
-.chip-dot { grid-row: 1 / 3; align-self: center; width: 6px; height: 6px; border-radius: 50%; background: #526073; }.chip-dot.recording { background: var(--nvr-green); }.chip-dot.warning { background: var(--nvr-yellow); }.camera-chip > span:not(.chip-dot) { align-self: end; font-size: 10px; font-weight: 650; }.camera-chip small { color: #526073; font-size: 8px; }
-.video-wall { display: grid; gap: 3px; width: 100%; background: #05080c; }.video-wall.grid-1 { grid-template-columns: 1fr; }.video-wall.grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }.video-wall.grid-9 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.wall-slot { position: relative; aspect-ratio: 16/9; min-width: 0; overflow: hidden; background: #070a0e; box-shadow: inset 0 0 0 1px rgba(255,255,255,.045); }.wall-slot:after { content:''; position:absolute; inset:0; pointer-events:none; box-shadow: inset 0 0 42px rgba(0,0,0,.22); }.wall-slot.failed { box-shadow: inset 0 0 0 1px rgba(240,93,94,.35); }
-.preview-image { width: 100%; height: 100%; object-fit: contain; display: block; background: black; }
-.slot-topbar { position: absolute; z-index: 4; inset: 0 0 auto 0; display: flex; justify-content: space-between; gap: 8px; align-items: center; padding: 7px 8px 16px; background: linear-gradient(to bottom, rgba(0,0,0,.68), transparent); pointer-events: none; }.camera-title { min-width: 0; display: flex; align-items: center; gap: 6px; }.camera-title strong { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #eef3f8; font-size: 10px; }.camera-title > span:last-child { color: rgba(255,255,255,.42); font-size: 8px; }.live-dot { width: 6px; height: 6px; border-radius: 50%; }.live-dot.live { background: #29d98c; box-shadow: 0 0 0 3px rgba(41,217,140,.12); }.live-dot.waiting { background: var(--nvr-yellow); }.live-dot.error { background: var(--nvr-red); }
-.slot-badges { display:flex; align-items:center; gap:5px; pointer-events:auto; }.rec-badge, .active-stream-badge, .stream-button { padding: 3px 5px; border-radius: 4px; font-size: 7px; font-weight:800; letter-spacing:.04em; }.rec-badge { color:#8491a1; background:rgba(15,20,27,.7); }.rec-badge.recording { color:#87e5b7; background:rgba(46,204,138,.12); }.rec-badge.warning { color:#ffd37b; background:rgba(245,185,66,.12); }.active-stream-badge { border:1px solid transparent; }.active-stream-badge.sub { color:#86d7ff; border-color:rgba(80,178,255,.22); background:rgba(47,139,218,.14); }.active-stream-badge.main { color:#e8c879; border-color:rgba(230,185,66,.24); background:rgba(196,145,38,.15); }.active-stream-badge.pending { color:#748398; border-color:rgba(255,255,255,.07); background:rgba(15,20,27,.64); }.stream-button { border:1px solid rgba(255,255,255,.1); color:#aab5c2; background:rgba(10,14,19,.78); cursor:pointer; }
-.slot-actions { position:absolute; z-index:5; top:50%; left:50%; display:flex; gap:4px; opacity:0; transform:translate(-50%,-50%); transition:opacity .15s ease; }.wall-slot:hover .slot-actions { opacity:1; }.slot-actions button { width:30px; height:30px; display:grid; place-items:center; border:1px solid rgba(255,255,255,.11); border-radius:6px; color:#d5dde6; background:rgba(7,10,14,.78); backdrop-filter:blur(5px); cursor:pointer; }.slot-actions button:hover { color:white; background:rgba(38,104,216,.88); }.slot-actions :deep(svg) { width:14px; }
-.slot-footer { position:absolute; z-index:4; inset:auto 0 0; display:flex; justify-content:space-between; padding:14px 8px 6px; color:rgba(255,255,255,.42); background:linear-gradient(to top,rgba(0,0,0,.58),transparent); font-size:8px; opacity:0; transition:.15s ease; }.wall-slot:hover .slot-footer { opacity:1; }
-.slot-loading-ws, .slot-state-message { position:absolute; z-index:2; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#66768a; background:#070a0e; font-size:10px; text-align:center; }.loader-ring { width:20px; height:20px; border:2px solid #202a36; border-top-color:var(--nvr-blue); border-radius:50%; animation:spin .8s linear infinite; }.slot-state-message :deep(svg) { width:26px; color:#435267; }.slot-state-message strong { color:#8b98a8; font-size:11px; }.slot-state-message span { max-width:75%; color:#526073; font-size:9px; }.slot-state-message.error strong { color:#f48c8d; }.slot-state-message.error :deep(svg) { color:#b54648; }
-.empty-slot { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; border:1px dashed transparent; color:#3f4b5b; background:transparent; cursor:pointer; }.empty-slot:hover { color:#75859a; border-color:rgba(76,141,255,.2); background:rgba(76,141,255,.025); }.empty-slot :deep(svg) { width:24px; }.empty-slot strong { font-size:10px; }.empty-slot span { font-size:8px; }
-.wall-note { display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:10px; color:#556477; font-size:9px; }.wall-note span { display:flex; align-items:center; gap:5px; }.note-dot { width:6px; height:6px; border-radius:50%; }.note-dot.green { background:var(--nvr-green); }.note-dot.yellow { background:var(--nvr-yellow); }.note-dot.gray { background:#526073; }
-.wall-slot:fullscreen { width:100vw; height:100vh; aspect-ratio:auto; border-radius:0; background:black; }.wall-slot:fullscreen .preview-image { object-fit:contain; }.wall-slot:fullscreen .slot-actions,.wall-slot:fullscreen .slot-footer { opacity:1; }
-@keyframes spin { to { transform:rotate(360deg); } }
-@media(max-width:960px) { .wall-page{padding:16px}.wall-header{flex-direction:column;align-items:flex-start}.header-actions{justify-content:flex-start}.video-wall.grid-9{grid-template-columns:repeat(2,minmax(0,1fr))} }
-@media(max-width:620px) { .wall-page{padding:10px}.wall-toolbar{align-items:flex-start;flex-direction:column}.camera-tray{width:100%}.video-wall.grid-4,.video-wall.grid-9{grid-template-columns:1fr}.wall-slot{aspect-ratio:16/10} }
+.wall-page{min-height:100%;padding:20px 22px 26px;background:#080c11}.wall-header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:15px}.eyebrow{color:#506079;font-size:9px;font-weight:800;letter-spacing:.18em}h2{margin:3px 0;font-size:21px;font-weight:650}p{margin:0;color:#6f7c8d;font-size:11px}.header-actions{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.profile-pill,.connection-pill{height:28px;display:flex;align-items:center;gap:6px;padding:0 9px;color:#7f8da0;border:1px solid var(--nvr-border);border-radius:6px;background:#0e141b;font-size:10px}.connection-dot{width:6px;height:6px;border-radius:50%;background:#526073}.connection-pill.connected{color:#93ddb9}.connection-pill.connected .connection-dot{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.1)}.connection-pill.connecting,.connection-pill.retrying{color:#e6bb68}.connection-pill.connecting .connection-dot,.connection-pill.retrying .connection-dot{background:var(--nvr-yellow)}
+.wall-toolbar{display:flex;align-items:center;gap:12px;min-height:52px;margin-bottom:10px;padding:8px 10px;border:1px solid var(--nvr-border);border-radius:8px;background:#0d1218}.layout-switcher{flex:0 0 auto;display:flex;gap:2px;padding:3px;border:1px solid var(--nvr-border);border-radius:6px;background:#080c11}.layout-switcher button{width:30px;height:26px;border:0;border-radius:4px;color:#718095;background:transparent;cursor:pointer;font-size:11px;font-weight:700}.layout-switcher button.active{color:#fff;background:#2768d8}.camera-tray{min-width:0;display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:thin}.tray-label{flex:0 0 auto;margin:0 3px 0 2px;color:#536276;font-size:9px;font-weight:700;text-transform:uppercase}.camera-chip{flex:0 0 auto;min-width:104px;height:34px;display:grid;grid-template-columns:7px auto;grid-template-rows:16px 12px;column-gap:6px;padding:3px 8px;color:#9ba8b7;border:1px solid var(--nvr-border);border-radius:6px;background:#10161e;cursor:grab;text-align:left}.camera-chip:hover{border-color:rgba(76,141,255,.42);background:#141c26}.camera-chip.assigned{border-color:rgba(76,141,255,.22)}.camera-chip.disabled{opacity:.4;cursor:not-allowed}.chip-dot{grid-row:1/3;align-self:center;width:6px;height:6px;border-radius:50%;background:#526073}.chip-dot.recording{background:var(--nvr-green)}.chip-dot.warning{background:var(--nvr-yellow)}.camera-chip>span:not(.chip-dot){align-self:end;font-size:10px;font-weight:650}.camera-chip small{color:#526073;font-size:8px}
+.video-wall{display:grid;gap:3px;width:100%;background:#05080c}.video-wall.grid-1{grid-template-columns:1fr}.video-wall.grid-4{grid-template-columns:repeat(2,minmax(0,1fr))}.video-wall.grid-9{grid-template-columns:repeat(3,minmax(0,1fr))}.wall-slot{position:relative;aspect-ratio:16/9;min-width:0;overflow:hidden;background:#070a0e;box-shadow:inset 0 0 0 1px rgba(255,255,255,.045)}.wall-slot:after{content:'';position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 42px rgba(0,0,0,.22)}.wall-slot.failed{box-shadow:inset 0 0 0 1px rgba(240,93,94,.35)}.preview-image{width:100%;height:100%;object-fit:contain;display:block;background:#000}.slot-topbar{position:absolute;z-index:4;inset:0 0 auto;display:flex;justify-content:space-between;gap:8px;align-items:center;padding:7px 8px 16px;background:linear-gradient(to bottom,rgba(0,0,0,.68),transparent);pointer-events:none}.camera-title{min-width:0;display:flex;align-items:center;gap:6px}.camera-title strong{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eef3f8;font-size:10px}.camera-title>span:last-child{color:rgba(255,255,255,.42);font-size:8px}.live-dot{width:6px;height:6px;border-radius:50%}.live-dot.live{background:#29d98c;box-shadow:0 0 0 3px rgba(41,217,140,.12)}.live-dot.waiting{background:var(--nvr-yellow)}.live-dot.error{background:var(--nvr-red)}
+.slot-badges{display:flex;align-items:center;gap:5px;pointer-events:auto}.rec-badge,.active-stream-badge,.stream-button{padding:3px 5px;border-radius:4px;font-size:7px;font-weight:800;letter-spacing:.04em}.rec-badge{color:#8491a1;background:rgba(15,20,27,.7)}.rec-badge.recording{color:#87e5b7;background:rgba(46,204,138,.12)}.rec-badge.warning{color:#ffd37b;background:rgba(245,185,66,.12)}.active-stream-badge{border:1px solid transparent}.active-stream-badge.sub{color:#86d7ff;border-color:rgba(80,178,255,.22);background:rgba(47,139,218,.14)}.active-stream-badge.main{color:#e8c879;border-color:rgba(230,185,66,.24);background:rgba(196,145,38,.15)}.active-stream-badge.pending{color:#748398;border-color:rgba(255,255,255,.07);background:rgba(15,20,27,.64)}.stream-button{border:1px solid rgba(255,255,255,.1);color:#aab5c2;background:rgba(10,14,19,.78);cursor:pointer}.slot-actions{position:absolute;z-index:5;top:50%;left:50%;display:flex;gap:4px;opacity:0;transform:translate(-50%,-50%);transition:opacity .15s ease}.wall-slot:hover .slot-actions{opacity:1}.slot-actions button{width:30px;height:30px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.11);border-radius:6px;color:#d5dde6;background:rgba(7,10,14,.78);backdrop-filter:blur(5px);cursor:pointer}.slot-actions button:hover{color:#fff;background:rgba(38,104,216,.88)}.slot-actions :deep(svg){width:14px}.slot-footer{position:absolute;z-index:4;inset:auto 0 0;display:flex;justify-content:space-between;padding:14px 8px 6px;color:rgba(255,255,255,.42);background:linear-gradient(to top,rgba(0,0,0,.58),transparent);font-size:8px;opacity:0;transition:.15s ease}.wall-slot:hover .slot-footer{opacity:1}
+.slot-loading-ws,.slot-state-message{position:absolute;z-index:2;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#66768a;background:#070a0e;font-size:10px;text-align:center}.loader-ring{width:20px;height:20px;border:2px solid #202a36;border-top-color:var(--nvr-blue);border-radius:50%;animation:spin .8s linear infinite}.slot-state-message :deep(svg){width:26px;color:#435267}.slot-state-message strong{color:#8b98a8;font-size:11px}.slot-state-message span{max-width:75%;color:#526073;font-size:9px}.slot-state-message.error strong{color:#f48c8d}.slot-state-message.error :deep(svg){color:#b54648}.empty-slot{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px dashed transparent;color:#3f4b5b;background:transparent;cursor:pointer}.empty-slot:hover{color:#75859a;border-color:rgba(76,141,255,.2);background:rgba(76,141,255,.025)}.empty-slot :deep(svg){width:24px}.empty-slot strong{font-size:10px}.empty-slot span{font-size:8px}.wall-note{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px;color:#556477;font-size:9px}.wall-note span{display:flex;align-items:center;gap:5px}.note-dot{width:6px;height:6px;border-radius:50%}.note-dot.green{background:var(--nvr-green)}.note-dot.yellow{background:var(--nvr-yellow)}.note-dot.gray{background:#526073}.wall-slot:fullscreen{width:100vw;height:100vh;aspect-ratio:auto;border-radius:0;background:#000}.wall-slot:fullscreen .preview-image{object-fit:contain}.wall-slot:fullscreen .slot-actions,.wall-slot:fullscreen .slot-footer{opacity:1}@keyframes spin{to{transform:rotate(360deg)}}
+@media(max-width:960px){.wall-page{padding:16px}.wall-header{flex-direction:column;align-items:flex-start}.header-actions{justify-content:flex-start}.video-wall.grid-9{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:620px){.wall-page{padding:10px}.wall-toolbar{align-items:flex-start;flex-direction:column}.camera-tray{width:100%}.video-wall.grid-4,.video-wall.grid-9{grid-template-columns:1fr}.wall-slot{aspect-ratio:16/10}}
 </style>

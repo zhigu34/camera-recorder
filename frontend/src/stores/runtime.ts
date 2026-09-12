@@ -73,10 +73,38 @@ export interface HealthSnapshot {
   camera_health: CameraHealth[]
 }
 
+export interface RecorderRuntime {
+  camera_id: number
+  state: string
+  pid?: number | null
+  restart_count?: number
+  warning_count?: number
+  timestamp_warning_count?: number
+  network_warning_count?: number
+  last_error?: string | null
+}
+
+export interface ScheduleRuntime {
+  camera_id: number
+  schedule_enabled?: boolean
+  schedule?: string
+  schedule_state?: string
+  in_window?: boolean
+  auto_eligible?: boolean
+  running?: boolean
+  mode?: string
+}
+
 export interface SystemStatus {
   ffmpeg?: { setts_available?: boolean; ffmpeg_version?: string | null }
-  recorders?: Array<{ camera_id: number; state: string }>
-  recording_schedule?: { cameras?: Array<{ camera_id: number }> }
+  recorders?: RecorderRuntime[]
+  recording_schedule?: {
+    running?: boolean
+    poll_interval_seconds?: number
+    last_check_at?: string | null
+    last_error?: string | null
+    cameras?: ScheduleRuntime[]
+  }
   upload?: { enabled: boolean; configured: boolean; active: boolean; provider?: string }
   storage_cleanup?: { last_error?: string | null }
   storage?: { used_percent: number; state: 'healthy' | 'warning' | 'critical' }
@@ -105,6 +133,18 @@ export const useRuntimeStore = defineStore('runtime', () => {
   function wsUrl() {
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     return `${scheme}//${window.location.host}/ws/status`
+  }
+
+  function recorderState(cameraId: number | null | undefined) {
+    if (!cameraId) return 'STOPPED'
+    const health = healthSnapshot.value?.camera_health.find((item) => item.camera_id === cameraId)
+    if (health?.recorder_state) return health.recorder_state
+    return systemStatus.value?.recorders?.find((item) => item.camera_id === cameraId)?.state || 'STOPPED'
+  }
+
+  function scheduleRuntime(cameraId: number | null | undefined) {
+    if (!cameraId) return undefined
+    return systemStatus.value?.recording_schedule?.cameras?.find((item) => item.camera_id === cameraId)
   }
 
   async function refreshSystem() {
@@ -192,7 +232,7 @@ export const useRuntimeStore = defineStore('runtime', () => {
     started = true
     void refreshInitial()
     connectSocket()
-    systemTimer = window.setInterval(() => void refreshSystem(), 30_000)
+    systemTimer = window.setInterval(() => void refreshSystem(), 10_000)
     fallbackTimer = window.setInterval(() => void refreshFallback(), 10_000)
   }
 
@@ -218,6 +258,8 @@ export const useRuntimeStore = defineStore('runtime', () => {
     cameraCount,
     storageState,
     systemHealthy,
+    recorderState,
+    scheduleRuntime,
     refreshSystem,
     refreshHealth,
     refreshInitial,

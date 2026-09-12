@@ -1,12 +1,11 @@
 <template>
-  <Teleport to=".page-shell > .el-card:nth-child(3) .el-card__body" defer>
-    <div class="calendar-legend" aria-label="录像日历图例">
-      <span><i class="calendar-swatch has-recordings" />有录像</span>
-      <span><i class="calendar-swatch cloud" />含云端归档</span>
-      <span><i class="calendar-swatch warning" />有告警 / 异常</span>
-      <span><i class="calendar-swatch selected" />当前选中日期</span>
-    </div>
-  </Teleport>
+  <div class="calendar-legend" aria-label="录像日历图例">
+    <strong>日历</strong>
+    <span><i class="calendar-swatch has-recordings" />有录像</span>
+    <span><i class="calendar-swatch cloud" />含云端归档</span>
+    <span><i class="calendar-swatch warning" />有告警 / 异常</span>
+    <span><i class="calendar-swatch selected" />当前选中日期</span>
+  </div>
 </template>
 
 <style scoped>
@@ -15,9 +14,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
-  margin-top: 12px;
   color: var(--nvr-muted);
   font-size: 10px;
+}
+.calendar-legend strong {
+  color: var(--nvr-text-soft);
+  font-size: 10px;
+  font-weight: 650;
 }
 .calendar-legend span {
   display: inline-flex;

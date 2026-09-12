@@ -1,15 +1,14 @@
 <template>
-  <Teleport to=".page-shell > .el-card:nth-child(4) .el-card__body" defer>
-    <div class="timeline-legend" aria-label="时间轴图例">
-      <span><i class="legend-dot healthy" />健康录像</span>
-      <span><i class="legend-dot warning" />有警告</span>
-      <span><i class="legend-dot unhealthy" />异常录像</span>
-      <span><i class="legend-dot cloud" />仅云端</span>
-      <span><i class="legend-dot gap" />录像缺口</span>
-      <span><i class="legend-dot deleted" />不可播放</span>
-      <span><i class="legend-dot active" />当前播放</span>
-    </div>
-  </Teleport>
+  <div class="timeline-legend" aria-label="时间轴图例">
+    <strong>时间轴</strong>
+    <span><i class="legend-dot healthy" />健康录像</span>
+    <span><i class="legend-dot warning" />有警告</span>
+    <span><i class="legend-dot unhealthy" />异常录像</span>
+    <span><i class="legend-dot cloud" />仅云端</span>
+    <span><i class="legend-dot gap" />录像缺口</span>
+    <span><i class="legend-dot deleted" />不可播放</span>
+    <span><i class="legend-dot active" />当前播放</span>
+  </div>
 </template>
 
 <style scoped>
@@ -18,9 +17,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
-  margin-top: 12px;
   color: var(--nvr-muted);
   font-size: 10px;
+}
+.timeline-legend strong {
+  color: var(--nvr-text-soft);
+  font-size: 10px;
+  font-weight: 650;
 }
 .timeline-legend span {
   display: inline-flex;
