@@ -78,8 +78,49 @@
   row-gap: 5px;
 }
 
-/* More width now reaches the flexible filename column; keep neighboring fields
- * compact so filenames remain readable before the fixed action column. */
+/* Keep the recording table fully readable inside the right column. Element Plus
+ * fixed-right cells were covering archive/filename values at this width, so the
+ * action column behaves like a normal final column instead of an overlay. */
+.nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right,
+.nvr-workspace-content .recording-center .list-panel th.el-table-fixed-column--right,
+.nvr-workspace-content .recording-center .list-panel td.el-table-fixed-column--right {
+  position: static !important;
+  right: auto !important;
+  left: auto !important;
+  z-index: auto !important;
+  box-shadow: none !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right::before,
+.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right-patch {
+  display: none !important;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right {
+  display: none !important;
+}
+
+/* Compact the explicit Element Plus column widths enough for the 52% catalog
+ * pane while preserving a useful filename column. */
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(1),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(1) { width: 36px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(2),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(2) { width: 80px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(3),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(3) { width: 64px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(4),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(4) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(5),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(5) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(6),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(6) { width: 68px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(7),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(7) { width: 76px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(8),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(8) { width: 176px !important; }
+.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(9),
+.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(9) { width: 106px !important; }
+
 .nvr-workspace-content .recording-center .list-panel .el-table th.el-table__cell,
 .nvr-workspace-content .recording-center .list-panel .el-table td.el-table__cell {
   padding-left: 2px;
@@ -89,6 +130,32 @@
 .nvr-workspace-content .recording-center .list-panel .el-table .cell {
   padding-left: 7px;
   padding-right: 7px;
+}
+
+/* The heatmap is 24 columns by 6 rows: every column is one hour and every row
+ * is a ten-minute slice. Add row labels without introducing extra Vue markup. */
+.nvr-workspace-content .recording-center .heat-grid {
+  position: relative;
+  box-sizing: border-box;
+  padding-left: 28px;
+}
+
+.nvr-workspace-content .recording-center .heat-grid::before {
+  content: ":00\A:10\A:20\A:30\A:40\A:50";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 23px;
+  white-space: pre;
+  color: var(--nvr-subtle);
+  font-size: 7px;
+  line-height: 10px;
+  text-align: right;
+  pointer-events: none;
+}
+
+.nvr-workspace-content .recording-center .heat-axis {
+  margin-left: 28px;
 }
 
 /* Heat cells already expose time range / segment count / coverage through their
@@ -120,5 +187,18 @@
       "storage health"
       "upload upload"
       "search search";
+  }
+
+  .nvr-workspace-content .recording-center .heat-grid {
+    padding-left: 26px;
+  }
+
+  .nvr-workspace-content .recording-center .heat-grid::before {
+    width: 21px;
+    line-height: 9px;
+  }
+
+  .nvr-workspace-content .recording-center .heat-axis {
+    margin-left: 26px;
   }
 }
