@@ -202,6 +202,30 @@ function todayString() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 function recordingDate(value?: string | null) { return value && value.length >= 10 ? value.slice(0, 10) : null }
+function positiveQueryInt(params: URLSearchParams, key: string) {
+  const value = Number(params.get(key) || 0)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+function playbackDeepLink() {
+  const params = new URLSearchParams(window.location.search)
+  const rawDate = params.get('date')
+  return {
+    cameraId: positiveQueryInt(params, 'camera_id'),
+    recordingId: positiveQueryInt(params, 'recording_id'),
+    date: rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null,
+  }
+}
+function syncPlaybackUrl(item: RecordingItem | null = null) {
+  if (window.location.pathname !== '/recordings/browser') return
+  const params = new URLSearchParams(window.location.search)
+  const cameraId = item?.camera_id || selectedCamera.value
+  const date = recordingDate(item?.started_at) || selectedDate.value
+  if (cameraId) params.set('camera_id', String(cameraId)); else params.delete('camera_id')
+  if (date) params.set('date', date); else params.delete('date')
+  if (item) params.set('recording_id', String(item.id)); else params.delete('recording_id')
+  const query = params.toString()
+  window.history.replaceState({}, '', `/recordings/browser${query ? `?${query}` : ''}`)
+}
 function codecName(value?: string | null) { return (value || '').toLowerCase() }
 function isH264(value?: string | null) { return ['h264', 'avc', 'avc1'].includes(codecName(value)) }
 function isHevc(value?: string | null) { return ['hevc', 'h265', 'hvc1', 'hev1'].includes(codecName(value)) }
@@ -318,8 +342,11 @@ function startProgressPolling(recordingId: number) {
 async function loadInitialSelection() {
   const [cameraResponse, recordingResponse] = await Promise.all([axios.get<Camera[]>('/api/cameras'), axios.get<RecentRecording[]>('/api/recordings?limit=1')])
   cameras.value = cameraResponse.data; latestRecording.value = recordingResponse.data[0] || null
+  const deepLink = playbackDeepLink()
+  const deepLinkedCamera = deepLink.cameraId && cameras.value.some((camera) => camera.id === deepLink.cameraId) ? deepLink.cameraId : null
   const latest = latestRecording.value
-  if (latest && cameras.value.some((camera) => camera.id === latest.camera_id)) { selectedCamera.value = latest.camera_id; selectedDate.value = recordingDate(latest.started_at) || todayString() }
+  if (deepLinkedCamera) { selectedCamera.value = deepLinkedCamera; selectedDate.value = deepLink.date || todayString() }
+  else if (latest && cameras.value.some((camera) => camera.id === latest.camera_id)) { selectedCamera.value = latest.camera_id; selectedDate.value = recordingDate(latest.started_at) || todayString() }
   else if (cameras.value.length) selectedCamera.value = cameras.value[0].id
   calendarMonth.value = selectedDate.value.slice(0, 7)
 }
@@ -344,8 +371,9 @@ async function loadCalendar() {
 async function selectDay(date: string) {
   const previousMonth = calendarMonth.value; selectedDate.value = date; calendarMonth.value = date.slice(0, 7)
   if (calendarMonth.value !== previousMonth) await Promise.all([loadRecordings(), loadCalendar()]); else await loadRecordings()
+  syncPlaybackUrl(null)
 }
-async function handleCameraChange() { await Promise.all([loadRecordings(), loadCalendar()]) }
+async function handleCameraChange() { await Promise.all([loadRecordings(), loadCalendar()]); syncPlaybackUrl(null) }
 async function handleDateChange() { if (selectedDate.value) await selectDay(selectedDate.value) }
 async function changeDay(offset: number) {
   const current = new Date(`${selectedDate.value}T12:00:00`); current.setDate(current.getDate() + offset)
@@ -360,7 +388,7 @@ async function jumpToLatest() {
   const response = await axios.get<RecentRecording[]>('/api/recordings?limit=1'); latestRecording.value = response.data[0] || null
   if (!latestRecording.value) return ElMessage.info('数据库里还没有录像记录')
   selectedCamera.value = latestRecording.value.camera_id; const date = recordingDate(latestRecording.value.started_at) || todayString()
-  selectedDate.value = date; calendarMonth.value = date.slice(0, 7); await Promise.all([loadRecordings(), loadCalendar()])
+  selectedDate.value = date; calendarMonth.value = date.slice(0, 7); await Promise.all([loadRecordings(), loadCalendar()]); syncPlaybackUrl(null)
 }
 
 async function prepareProxy(
@@ -400,7 +428,7 @@ async function prepareProxy(
 }
 async function play(item: RecordingItem) {
   if (!isPlayable(item)) return ElMessage.warning('这段录像本地已清理且没有可用云端归档')
-  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume(); playbackTracker.reset()
+  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume(); playbackTracker.reset(); syncPlaybackUrl(item)
 
   if (!item.playback.original_available && !item.playback.remote_available) { preparing.value = false; proxyError.value = '本地原录像已清理，且没有成功归档记录'; return }
 
@@ -579,11 +607,23 @@ async function cancelProxy() {
 }
 function closePlayer() {
   const id = activeRecording.value?.id; const shouldCancel = playbackMode.value === 'proxy-live'
-  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume()
+  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume(); syncPlaybackUrl(null)
   if (id && shouldCancel) void axios.post(`/api/recordings/${id}/playback/cancel`).catch(() => undefined)
 }
 
-onMounted(async () => { browserHevcHint.value = hevcSupportHint(); try { await loadInitialSelection(); await Promise.all([loadRecordings(), loadCalendar()]) } catch (error: any) { ElMessage.error(error?.response?.data?.detail || '初始化失败') } })
+onMounted(async () => {
+  browserHevcHint.value = hevcSupportHint()
+  try {
+    const targetRecordingId = playbackDeepLink().recordingId
+    await loadInitialSelection()
+    await Promise.all([loadRecordings(), loadCalendar()])
+    if (targetRecordingId) {
+      const target = recordings.value.find((item) => item.id === targetRecordingId)
+      if (target) await play(target)
+      else ElMessage.warning('指定录像不在当前摄像头和日期的录像列表中')
+    }
+  } catch (error: any) { ElMessage.error(error?.response?.data?.detail || '初始化失败') }
+})
 onBeforeUnmount(() => { stopProgressPolling(); playbackTracker.reset() })
 </script>
 
