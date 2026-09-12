@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.api import recording_management as recording_management_api
+import app.api.recording_management as recording_management_api
 from app.models.recording import Recording
 
 
