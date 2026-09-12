@@ -18,6 +18,7 @@ class SystemSettingsRead(BaseModel):
     webdav_username: str
     webdav_password_set: bool
     local_retention_hours: int
+    openlist_management_port: int
 
 
 class SystemSettingsUpdate(BaseModel):
