@@ -1,0 +1,567 @@
+/* Camera detail drawer v2.
+ * Operational details stay compact while live preview is explicitly opt-in.
+ */
+
+/* Keep the selected device visible when the drawer is open. */
+.nvr-workspace-content .camera-page .camera-card.selected {
+  border-color: color-mix(in srgb, var(--nvr-accent) 48%, var(--nvr-border-strong)) !important;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--nvr-accent) 8%, transparent), 0 7px 22px rgba(0,0,0,.055) !important;
+}
+
+.camera-detail-drawer.el-drawer {
+  width: min(680px, 100vw) !important;
+  background: var(--nvr-bg) !important;
+  border-left: 1px solid var(--nvr-border) !important;
+  box-shadow: -18px 0 48px rgba(0,0,0,.18) !important;
+}
+.camera-detail-drawer .el-drawer__header {
+  min-height: 66px;
+  margin: 0 !important;
+  padding: 14px 16px 12px !important;
+  border-bottom: 1px solid var(--nvr-border);
+  color: var(--nvr-text);
+  background: color-mix(in srgb, var(--nvr-surface) 92%, var(--nvr-bg));
+}
+.camera-detail-drawer .el-drawer__body {
+  padding: 14px 16px 20px !important;
+  background: var(--nvr-bg);
+}
+.camera-detail-drawer .el-drawer__close-btn {
+  width: 30px;
+  height: 30px;
+  margin-left: 8px;
+  border-radius: 7px;
+  color: var(--nvr-muted);
+}
+.camera-detail-drawer .el-drawer__close-btn:hover {
+  color: var(--nvr-text);
+  background: var(--nvr-hover);
+}
+
+.camera-detail-drawer .drawer-title {
+  width: 100%;
+  min-width: 0;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between;
+  gap: 14px;
+  padding-right: 2px !important;
+}
+.camera-detail-drawer .drawer-title-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.camera-detail-drawer .drawer-title-copy strong {
+  overflow: hidden;
+  color: var(--nvr-text);
+  font-size: 15px !important;
+  font-weight: 690 !important;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-detail-drawer .drawer-title-copy > span {
+  margin-top: 3px !important;
+  overflow: hidden;
+  color: var(--nvr-muted) !important;
+  font-size: 10px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-detail-drawer .drawer-title-states {
+  flex: 0 0 auto;
+  display: flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+.camera-detail-drawer .health-badge,
+.camera-detail-drawer .record-badge {
+  min-height: 21px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 999px;
+  color: var(--nvr-muted);
+  background: var(--nvr-pill-bg);
+  font-size: 9px;
+  line-height: 19px;
+  white-space: nowrap;
+}
+.camera-detail-drawer .health-badge i,
+.camera-detail-drawer .record-badge i {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
+  border-radius: 50%;
+  background: var(--nvr-subtle);
+}
+.camera-detail-drawer .health-badge.online i { background: var(--nvr-green); }
+.camera-detail-drawer .health-badge.offline i { background: var(--nvr-red); }
+.camera-detail-drawer .health-badge.unknown i { background: var(--nvr-yellow); }
+.camera-detail-drawer .record-badge.active i { background: var(--nvr-red); }
+
+.camera-detail-drawer .drawer-body-v2 {
+  display: flex !important;
+  flex-direction: column;
+  gap: 12px !important;
+}
+
+.camera-detail-drawer .device-overview {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 78px minmax(0,1fr);
+  gap: 13px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--nvr-surface-2), var(--nvr-surface));
+}
+.camera-detail-drawer .device-overview-visual {
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 16px;
+  color: var(--nvr-muted);
+  background: var(--nvr-input);
+}
+.camera-detail-drawer .device-overview-visual.online {
+  color: var(--nvr-green);
+  border-color: color-mix(in srgb, var(--nvr-green) 20%, var(--nvr-border));
+}
+.camera-detail-drawer .device-overview-visual.offline {
+  color: var(--nvr-red);
+  border-color: color-mix(in srgb, var(--nvr-red) 22%, var(--nvr-border));
+}
+.camera-detail-drawer .device-overview-visual.unknown {
+  color: var(--nvr-yellow);
+  border-color: color-mix(in srgb, var(--nvr-yellow) 22%, var(--nvr-border));
+}
+.camera-detail-drawer .device-overview-visual.disabled { opacity: .56; }
+.camera-detail-drawer .device-overview-main { min-width: 0; }
+.camera-detail-drawer .device-overview-heading {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.camera-detail-drawer .device-overview-heading > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.camera-detail-drawer .device-overview-heading strong {
+  overflow: hidden;
+  color: var(--nvr-text);
+  font-size: 13px;
+  font-weight: 680;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-detail-drawer .device-overview-heading > div > span {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--nvr-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.camera-detail-drawer .device-overview-type {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 5px;
+  color: var(--nvr-muted);
+  background: var(--nvr-pill-bg);
+  font-size: 8px;
+}
+.camera-detail-drawer .device-overview-facts {
+  display: grid;
+  grid-template-columns: .9fr 1.2fr 1fr;
+  gap: 12px;
+  margin: 10px 0 0;
+}
+.camera-detail-drawer .device-overview-facts div { min-width: 0; }
+.camera-detail-drawer .device-overview-facts dt {
+  margin-bottom: 3px;
+  color: var(--nvr-subtle);
+  font-size: 8px;
+}
+.camera-detail-drawer .device-overview-facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--nvr-text-soft);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-detail-drawer .preview-section {
+  padding: 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 11px;
+  background: var(--nvr-surface);
+}
+.camera-detail-drawer .preview-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+.camera-detail-drawer .preview-section-heading > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.camera-detail-drawer .preview-section-heading strong {
+  color: var(--nvr-text);
+  font-size: 11px;
+  font-weight: 660;
+}
+.camera-detail-drawer .preview-section-heading span {
+  margin-top: 3px;
+  color: var(--nvr-muted);
+  font-size: 9px;
+}
+.camera-detail-drawer .preview-live-badge {
+  flex: 0 0 auto;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+  margin: 0 !important;
+  padding: 3px 7px;
+  border: 1px solid color-mix(in srgb, var(--nvr-green) 22%, var(--nvr-border));
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--nvr-green) 82%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-green) 6%, var(--nvr-surface));
+  font-size: 8px !important;
+}
+.camera-detail-drawer .preview-live-badge i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--nvr-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nvr-green) 10%, transparent);
+}
+.camera-detail-drawer .preview-panel-v2 {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08) !important;
+  border-radius: 10px !important;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(76,100,128,.14), transparent 42%),
+    #05080c !important;
+}
+.camera-detail-drawer .preview-panel-v2.idle {
+  border-color: color-mix(in srgb, var(--nvr-border-strong) 68%, transparent) !important;
+}
+.camera-detail-drawer .preview-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #05080c;
+}
+.camera-detail-drawer .preview-play-control {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  color: #dce6f2;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.camera-detail-drawer .preview-play-control::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 58%, rgba(0,0,0,.18));
+  pointer-events: none;
+}
+.camera-detail-drawer .preview-play-control:hover .preview-play-icon {
+  transform: scale(1.05);
+  border-color: rgba(255,255,255,.28);
+  background: rgba(255,255,255,.15);
+}
+.camera-detail-drawer .preview-play-control:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nvr-accent) 72%, white);
+  outline-offset: -3px;
+}
+.camera-detail-drawer .preview-play-icon {
+  position: relative;
+  z-index: 1;
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.20);
+  border-radius: 50%;
+  background: rgba(255,255,255,.10);
+  box-shadow: 0 10px 30px rgba(0,0,0,.24);
+  backdrop-filter: blur(8px);
+  transition: transform .15s ease, border-color .15s ease, background-color .15s ease;
+}
+.camera-detail-drawer .preview-play-icon svg {
+  width: 25px;
+  height: 25px;
+  margin-left: 3px;
+}
+.camera-detail-drawer .preview-play-control strong {
+  position: relative;
+  z-index: 1;
+  margin-top: 10px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.camera-detail-drawer .preview-play-control small {
+  position: relative;
+  z-index: 1;
+  margin-top: 4px;
+  color: #8290a1;
+  font-size: 9px;
+}
+.camera-detail-drawer .preview-state-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #617083;
+}
+.camera-detail-drawer .preview-state-panel svg {
+  width: 34px;
+  margin-bottom: 9px;
+}
+.camera-detail-drawer .preview-state-panel strong {
+  color: #aab6c4;
+  font-size: 12px;
+}
+.camera-detail-drawer .preview-state-panel span {
+  max-width: 340px;
+  margin-top: 5px;
+  color: #6f7d8e;
+  font-size: 9px;
+  text-align: center;
+}
+.camera-detail-drawer .preview-state-panel .el-button {
+  margin-top: 12px;
+}
+.camera-detail-drawer .preview-overlay-v2 {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 34px 10px 8px;
+  color: #c4ced8;
+  background: linear-gradient(transparent, rgba(0,0,0,.78));
+  font-size: 9px;
+}
+.camera-detail-drawer .preview-overlay-status {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.camera-detail-drawer .preview-overlay-status > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.camera-detail-drawer .preview-overlay-status i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6a7787;
+}
+.camera-detail-drawer .preview-overlay-status i.active { background: var(--nvr-red); }
+.camera-detail-drawer .preview-stream-chip {
+  padding: 2px 5px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px;
+  background: rgba(5,8,12,.48);
+}
+.camera-detail-drawer .preview-stream-chip.fallback { color: #ffd58a; }
+.camera-detail-drawer .preview-overlay-actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.camera-detail-drawer .preview-overlay-actions button {
+  appearance: none;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 4px;
+  color: #c4ced8;
+  background: transparent;
+  cursor: pointer;
+  font-size: 9px;
+}
+.camera-detail-drawer .preview-overlay-actions button:hover { background: rgba(255,255,255,.09); }
+.camera-detail-drawer .preview-overlay-actions button.stop { color: #ffb0b0; }
+
+.camera-detail-drawer .drawer-operation-panel-v2 {
+  padding: 11px 12px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--nvr-surface) 90%, var(--nvr-surface-2)) !important;
+}
+.camera-detail-drawer .drawer-operation-copy {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 9px;
+}
+.camera-detail-drawer .drawer-operation-copy strong {
+  color: var(--nvr-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.camera-detail-drawer .drawer-operation-copy span {
+  margin-top: 3px;
+  color: var(--nvr-muted);
+  font-size: 9px;
+}
+.camera-detail-drawer .drawer-actions-v2 {
+  display: flex !important;
+  align-items: center;
+  gap: 6px !important;
+  flex-wrap: wrap;
+}
+.camera-detail-drawer .drawer-actions-v2 .el-button {
+  height: 31px;
+  margin-left: 0 !important;
+  padding: 0 10px;
+  font-size: 10px;
+}
+
+.camera-detail-drawer .detail-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0,1fr));
+  gap: 10px;
+}
+.camera-detail-drawer .detail-section-v2 {
+  padding: 11px 12px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--nvr-surface) 90%, var(--nvr-surface-2)) !important;
+}
+.camera-detail-drawer .detail-heading {
+  margin-bottom: 9px;
+}
+.camera-detail-drawer .detail-heading strong {
+  color: var(--nvr-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+.camera-detail-drawer .detail-grid-v2 {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0,1fr)) !important;
+  gap: 9px 13px !important;
+  margin: 0 !important;
+}
+.camera-detail-drawer .detail-grid-v2 .wide { grid-column: 1 / -1; }
+.camera-detail-drawer .detail-grid-v2 dt {
+  margin-bottom: 3px;
+  color: var(--nvr-subtle);
+  font-size: 8px;
+}
+.camera-detail-drawer .detail-grid-v2 dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--nvr-text-soft);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.camera-detail-drawer .runtime-grid {
+  grid-template-columns: repeat(3, minmax(0,1fr)) !important;
+}
+
+.camera-detail-drawer .drawer-danger-zone {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--nvr-red) 18%, var(--nvr-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--nvr-red) 3%, var(--nvr-surface));
+}
+.camera-detail-drawer .drawer-danger-zone > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.camera-detail-drawer .drawer-danger-zone strong {
+  color: var(--nvr-text-soft);
+  font-size: 10px;
+  font-weight: 630;
+}
+.camera-detail-drawer .drawer-danger-zone span {
+  margin-top: 3px;
+  color: var(--nvr-muted);
+  font-size: 8px;
+}
+.camera-detail-drawer .drawer-danger-zone .el-button {
+  flex: 0 0 auto;
+  height: 30px;
+  margin: 0;
+  font-size: 9px;
+}
+
+@media (max-width: 720px) {
+  .camera-detail-drawer.el-drawer { width: 100vw !important; }
+  .camera-detail-drawer .el-drawer__header { padding: 12px 12px 10px !important; }
+  .camera-detail-drawer .el-drawer__body { padding: 12px !important; }
+  .camera-detail-drawer .drawer-title { align-items: flex-start !important; }
+  .camera-detail-drawer .drawer-title-states { flex-direction: column; align-items: flex-end !important; }
+  .camera-detail-drawer .device-overview {
+    grid-template-columns: 64px minmax(0,1fr);
+    gap: 10px;
+    padding: 10px;
+  }
+  .camera-detail-drawer .device-overview-visual {
+    width: 64px;
+    height: 64px;
+    padding: 9px;
+    border-radius: 13px;
+  }
+  .camera-detail-drawer .device-overview-facts {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .camera-detail-drawer .detail-columns { grid-template-columns: 1fr; }
+  .camera-detail-drawer .runtime-grid { grid-template-columns: repeat(2, minmax(0,1fr)) !important; }
+  .camera-detail-drawer .drawer-danger-zone { align-items: flex-start; }
+}
+
+@media (max-width: 460px) {
+  .camera-detail-drawer .drawer-title-copy > span { max-width: 210px; }
+  .camera-detail-drawer .device-overview-heading { gap: 7px; }
+  .camera-detail-drawer .preview-section { padding: 9px; }
+  .camera-detail-drawer .preview-section-heading > div > span { display: none; }
+  .camera-detail-drawer .preview-play-icon { width: 52px; height: 52px; }
+  .camera-detail-drawer .runtime-grid { grid-template-columns: 1fr !important; }
+  .camera-detail-drawer .drawer-danger-zone { flex-direction: column; }
+}
