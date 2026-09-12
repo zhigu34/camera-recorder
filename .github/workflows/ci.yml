@@ -62,13 +62,26 @@ jobs:
       - name: Wait for backend health
         run: |
           for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8000/health >/dev/null; then
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' camera-recorder-backend 2>/dev/null || true)"
+            if [ "$status" = "healthy" ]; then
               exit 0
             fi
             sleep 2
           done
           docker compose logs backend
           exit 1
+      - name: Verify backend is internal only
+        run: |
+          if docker compose port backend 8000 2>/dev/null | grep -q .; then
+            echo "backend port 8000 must not be published to the host"
+            docker compose port backend 8000 || true
+            exit 1
+          fi
+          docker compose exec -T backend python - <<'PY'
+          import urllib.request
+          with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
+              assert response.status == 200
+          PY
       - name: Wait for frontend
         run: |
           for i in $(seq 1 30); do
@@ -79,6 +92,8 @@ jobs:
           done
           docker compose logs frontend
           exit 1
+      - name: Verify frontend proxies backend health
+        run: curl -fsS http://127.0.0.1:8080/health >/dev/null
       - name: Verify upload websocket proxy
         run: |
           docker compose exec -T backend python - <<'PY'
