@@ -17,6 +17,7 @@ services:
       CAMREC_STAGING_DIR: /app/staging
       CAMREC_FAILED_DIR: /app/failed
       CAMREC_LOGS_DIR: /app/logs
+      CAMREC_OPENLIST_PUBLIC_PORT: ${OPENLIST_PORT:-5244}
     volumes:
       - ./data:/app/data
       - ./recordings:/app/recordings
