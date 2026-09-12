@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { TopRight } from '@element-plus/icons-vue'
 
 interface SystemSettings {
   app_name: string
@@ -20,10 +21,12 @@ interface SystemSettings {
   webdav_username: string
   webdav_password_set: boolean
   local_retention_hours: number
+  openlist_management_port: number
 }
 
 const loading = ref(false)
 const saving = ref(false)
+const openListManagementPort = ref(5244)
 const form = reactive({
   app_name: 'Camera Recorder',
   segment_duration_seconds: 600,
@@ -74,12 +77,42 @@ const segmentDurationOptions = computed(() => {
 })
 const retentionLabel = computed(() => form.local_retention_hours < 0 ? '永久保留' : `${form.local_retention_hours} 小时`)
 const rtspTimeoutSeconds = computed(() => `${(form.rtsp_timeout_us / 1_000_000).toFixed(1)} 秒`)
+const openListManagementUrl = computed(() => {
+  const raw = form.webdav_url.trim()
+  try {
+    const target = new URL(raw || 'http://openlist:5244/dav')
+    const internalHosts = new Set(['openlist', 'localhost', '127.0.0.1', '::1'])
+    if (internalHosts.has(target.hostname.toLowerCase())) {
+      target.hostname = window.location.hostname
+      target.port = String(openListManagementPort.value || 5244)
+    }
+    target.pathname = '/'
+    target.search = ''
+    target.hash = ''
+    target.username = ''
+    target.password = ''
+    return target.toString()
+  } catch {
+    const target = new URL(window.location.origin)
+    target.port = String(openListManagementPort.value || 5244)
+    target.pathname = '/'
+    target.search = ''
+    target.hash = ''
+    return target.toString()
+  }
+})
 
 function apply(data: SystemSettings) {
-  Object.assign(form, data, {
+  const { openlist_management_port, ...runtime } = data
+  openListManagementPort.value = openlist_management_port || 5244
+  Object.assign(form, runtime, {
     webdav_password: '',
     clear_webdav_password: false,
   })
+}
+
+function openOpenList() {
+  window.open(openListManagementUrl.value, '_blank', 'noopener,noreferrer')
 }
 
 async function load() {
@@ -245,7 +278,13 @@ onMounted(load)
       <article class="settings-panel archive-panel">
         <div class="settings-panel-head">
           <div><strong>OpenList / WebDAV 归档</strong><span>统一远端存储入口，不绑定具体网盘品牌</span></div>
-          <el-tag size="small" type="success" effect="plain">ARCHIVE</el-tag>
+          <div class="settings-panel-actions">
+            <el-button size="small" plain @click="openOpenList">
+              打开 OpenList
+              <el-icon class="external-link-icon"><TopRight /></el-icon>
+            </el-button>
+            <el-tag size="small" type="success" effect="plain">ARCHIVE</el-tag>
+          </div>
         </div>
 
         <div class="archive-banner">
