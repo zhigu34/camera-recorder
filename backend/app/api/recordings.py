@@ -358,13 +358,18 @@ async def prepare_playback(recording_id: int, db: AsyncSession = Depends(get_db)
             media_source,
             recording.video_codec,
             recording.audio_codec,
+            duration_seconds=recording.duration,
         )
     except FileNotFoundError:
         raise HTTPException(status_code=410, detail="playback source is not available")
 
 
 @router.get("/{recording_id}/proxy-live.mp4")
-async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db)):
+async def stream_live_proxy(
+    recording_id: int,
+    start_seconds: float = Query(default=0.0, ge=0.0, le=86400.0),
+    db: AsyncSession = Depends(get_db),
+):
     recording = await db.get(Recording, recording_id)
     if recording is None:
         raise HTTPException(status_code=404, detail="recording not found")
@@ -378,6 +383,10 @@ async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db
         else:
             raise HTTPException(status_code=410, detail="playback source is not available")
 
+    duration = max(0.0, float(recording.duration or 0))
+    if duration > 0:
+        start_seconds = min(start_seconds, max(0.0, duration - 0.25))
+
     state = recording_playback_manager.status(recording.id, recording.video_codec)
     if state["state"] == "ready":
         proxy = recording_playback_manager.proxy_path(recording.id)
@@ -389,6 +398,8 @@ async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db
             recording.id,
             media_source,
             recording.audio_codec,
+            duration_seconds=recording.duration,
+            start_seconds=start_seconds,
         )
     except PlaybackProxyError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -408,6 +419,7 @@ async def stream_live_proxy(recording_id: int, db: AsyncSession = Depends(get_db
             "Pragma": "no-cache",
             "X-Accel-Buffering": "no",
             "X-Playback-Mode": "live-proxy",
+            "X-Playback-Start-Seconds": f"{start_seconds:.3f}",
         },
     )
 
