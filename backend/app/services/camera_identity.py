@@ -43,6 +43,24 @@ def _brand(manufacturer: str | None) -> str:
     return value.lower()
 
 
+def _brand_from_model(compact_model: str) -> str | None:
+    """Infer vendor only when the model prefix is vendor-specific enough.
+
+    This intentionally avoids ambiguous short consumer model names such as
+    ``C200`` unless the manufacturer already identifies the vendor.
+    """
+
+    if compact_model.startswith(("DS2CD", "DS2DE")):
+        return "hikvision"
+    if compact_model.startswith(("IPCHFW", "IPCHDBW", "IPCHDW")) or re.match(r"^SD[0-9A-Z]", compact_model):
+        return "dahua"
+    if compact_model.startswith(("RLC", "VIDEODOORBELL", "TRACKMIX")) or compact_model in {"E1", "E1PRO", "E1ZOOM"}:
+        return "reolink"
+    if compact_model.startswith("UVC"):
+        return "unifi"
+    return None
+
+
 def infer_camera_form_factor(
     manufacturer: str | None,
     model: str | None,
@@ -51,7 +69,8 @@ def infer_camera_form_factor(
 
     Rules intentionally favor precision over recall. Unknown or ambiguous models
     return None so callers can preserve a manually selected form factor instead
-    of guessing incorrectly.
+    of guessing incorrectly. Recognizable vendor-specific model prefixes can be
+    used even when the manufacturer field was never filled in.
     """
 
     raw_model = (model or "").strip()
@@ -61,6 +80,8 @@ def infer_camera_form_factor(
     upper_model = raw_model.upper()
     compact_model = _compact(raw_model)
     brand = _brand(manufacturer)
+    if brand not in {"hikvision", "dahua", "reolink", "unifi", "tplink"}:
+        brand = _brand_from_model(compact_model) or brand
 
     # Explicit product-family words are the safest cross-vendor signal.
     generic_words: tuple[tuple[str, CameraFormFactor], ...] = (
