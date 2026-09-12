@@ -85,6 +85,44 @@ async def probe_media(path: Path) -> dict:
     }
 
 
+async def scan_media_packets(path: Path) -> tuple[bool, str | None]:
+    """Read the complete video packet stream without decoding it.
+
+    ffprobe only validates headers/metadata and can report a file as healthy even
+    when later packets are truncated or structurally broken. A stream-copy pass
+    through FFmpeg is cheap compared with full HEVC decoding, while still forcing
+    the demuxer to read the whole MP4 and surface packet/container errors.
+    """
+
+    command = [
+        settings.ffmpeg_bin,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-xerror",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-c:v",
+        "copy",
+        "-f",
+        "null",
+        "-",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    detail = stderr.decode(errors="replace").strip()
+    if process.returncode != 0 or detail:
+        return False, detail[-1000:] or f"packet scan exited with {process.returncode}"
+    return True, None
+
+
 async def remux_to_mp4(source: Path, target: Path, video_codec: str | None) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.part.mp4")
@@ -96,6 +134,8 @@ async def remux_to_mp4(source: Path, target: Path, video_codec: str | None) -> N
         "-hide_banner",
         "-loglevel",
         "warning",
+        "-fflags",
+        "+genpts",
         "-i",
         str(source),
         "-map",
@@ -109,7 +149,14 @@ async def remux_to_mp4(source: Path, target: Path, video_codec: str | None) -> N
     ]
     if video_codec == "hevc":
         command += ["-tag:v", "hvc1"]
-    command += ["-movflags", "+faststart", "-y", str(temporary)]
+    command += [
+        "-avoid_negative_ts",
+        "make_zero",
+        "-movflags",
+        "+faststart",
+        "-y",
+        str(temporary),
+    ]
 
     process = await asyncio.create_subprocess_exec(
         *command,
@@ -235,9 +282,13 @@ class SegmentProcessor:
                 target.unlink(missing_ok=True)
                 raise RuntimeError("final MP4 has no video stream")
 
+            packet_ok, packet_error = await scan_media_packets(target)
             health = "healthy"
             if camera.audio_codec and not media["has_audio"]:
                 health = "warning"
+            if not packet_ok:
+                health = "warning"
+                logger.warning("recording packet scan warning for %s: %s", target, packet_error)
 
             duration = media["duration"]
             ended_at = started_at + timedelta(seconds=duration) if duration else None
@@ -257,6 +308,8 @@ class SegmentProcessor:
             recording.ffprobe_ok = 1
             recording.has_video = int(media["has_video"])
             recording.has_audio = int(media["has_audio"])
+            if not packet_ok:
+                recording.warning_count = int(recording.warning_count or 0) + 1
 
             if existing is None:
                 session.add(recording)
