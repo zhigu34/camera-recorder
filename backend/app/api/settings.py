@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.system_settings import SystemSettings
 from app.schemas.system_settings import SystemSettingsRead, SystemSettingsUpdate
@@ -32,6 +33,7 @@ def _serialize(row: SystemSettings) -> SystemSettingsRead:
         webdav_username=row.webdav_username,
         webdav_password_set=bool(row.webdav_password_encrypted),
         local_retention_hours=row.local_retention_hours,
+        openlist_management_port=settings.openlist_public_port,
     )
 
 
