@@ -175,8 +175,8 @@ const calendarCells = computed<CalendarCell[]>(() => {
   return cells
 })
 const heatBins = computed<HeatBin[]>(() => {
-  const binSeconds = 10 * 60
-  return Array.from({ length: 144 }, (_, index) => {
+  const binSeconds = 5 * 60
+  return Array.from({ length: 288 }, (_, index) => {
     const start = index * binSeconds
     const end = start + binSeconds
     const items = recordings.value.filter((item) => {
@@ -700,7 +700,7 @@ onBeforeUnmount(() => {
           <div v-if="playbackMode === 'proxy-live' && proxyProgress" class="proxy-progress"><div><strong>兼容转码</strong><span>{{ effectiveProgressPercent.toFixed(1) }}%</span></div><el-progress :percentage="effectiveProgressPercent" :stroke-width="8" /><el-button size="small" type="danger" plain :loading="cancellingProxy" @click="cancelProxy">停止转码</el-button></div>
 
           <section class="heat-section">
-            <div class="section-head"><div><strong>24 小时录像热力图</strong><span>10 分钟/格 · {{ selectedDate }}</span></div><span>{{ recordings.length }} 段 · {{ formatDuration(browserData?.total_duration) }}</span></div>
+            <div class="section-head"><div><strong>24 小时录像热力图</strong><span>5 分钟/格 · {{ selectedDate }}</span></div><span>{{ recordings.length }} 段 · {{ formatDuration(browserData?.total_duration) }}</span></div>
             <div class="heat-grid">
               <button v-for="bin in heatBins" :key="bin.index" type="button" class="heat-cell" :class="[`level-${bin.level}`, { warning: bin.warning, cloud: bin.cloud, active: bin.active }]" :disabled="!bin.items.some(isPlayable)" :title="bin.title" @click="playHeatBin(bin)" />
             </div>
