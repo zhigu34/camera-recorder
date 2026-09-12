@@ -16,6 +16,10 @@ import {
 import CameraDeviceGlyph from './CameraDeviceGlyph.vue'
 
 type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor'
+type PreviewSource = 'main' | 'sub'
+type FilterKey = 'all' | 'online' | 'issue' | 'recording'
+type CameraHealth = 'online' | 'offline' | 'unknown' | 'disabled'
+type HistoryMode = 'push' | 'replace'
 
 interface Camera {
   id: number
@@ -47,10 +51,6 @@ interface Camera {
   last_online_at?: string | null
 }
 
-type FilterKey = 'all' | 'online' | 'issue' | 'recording'
-type CameraHealth = 'online' | 'offline' | 'unknown' | 'disabled'
-type HistoryMode = 'push' | 'replace'
-
 const emit = defineEmits<{
   (event: 'open-batch'): void
   (event: 'open-preview'): void
@@ -64,6 +64,8 @@ const drawerVisible = ref(false)
 const selectedCamera = ref<Camera | null>(null)
 const previewFailed = ref(false)
 const previewNonce = ref(Date.now())
+const previewSource = ref<PreviewSource>('main')
+const previewFallbackUsed = ref(false)
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
@@ -192,6 +194,42 @@ function formatTime(value?: string | null) {
   return date.toLocaleString()
 }
 
+function inferSubstreamPath(mainPath: string) {
+  if (mainPath.includes('/main')) {
+    const index = mainPath.lastIndexOf('/main')
+    return `${mainPath.slice(0, index)}/sub${mainPath.slice(index + 5)}`
+  }
+  if (mainPath.endsWith('main')) return `${mainPath.slice(0, -4)}sub`
+  return null
+}
+
+function preferredPreviewSource(camera: Camera): PreviewSource {
+  return camera.sub_rtsp_path?.trim() || inferSubstreamPath(camera.rtsp_path) ? 'sub' : 'main'
+}
+
+function resetPreview(camera: Camera) {
+  previewSource.value = preferredPreviewSource(camera)
+  previewFallbackUsed.value = false
+  previewFailed.value = false
+  previewNonce.value = Date.now()
+}
+
+function handlePreviewLoad() {
+  previewFailed.value = false
+}
+
+function handlePreviewError() {
+  if (!selectedCamera.value) return
+  if (previewSource.value === 'sub') {
+    previewSource.value = 'main'
+    previewFallbackUsed.value = true
+    previewFailed.value = false
+    previewNonce.value = Date.now()
+    return
+  }
+  previewFailed.value = true
+}
+
 function deepLinkedCameraId() {
   const raw = new URLSearchParams(window.location.search).get('camera_id')
   if (!raw) return null
@@ -225,10 +263,7 @@ function syncDrawerFromLocation(showMissing = false) {
   }
   const openingDifferentCamera = !drawerVisible.value || selectedCamera.value?.id !== camera.id
   selectedCamera.value = camera
-  if (openingDifferentCamera) {
-    previewFailed.value = false
-    previewNonce.value = Date.now()
-  }
+  if (openingDifferentCamera) resetPreview(camera)
   drawerVisible.value = true
 }
 
@@ -263,7 +298,7 @@ const filteredCameras = computed(() => {
 })
 
 const previewSrc = computed(() => selectedCamera.value
-  ? `/api/cameras/${selectedCamera.value.id}/preview.mjpeg?stream=auto&fps=6&width=960&_=${previewNonce.value}`
+  ? `/api/cameras/${selectedCamera.value.id}/preview.mjpeg?stream=${previewSource.value}&fps=6&width=960&_=${previewNonce.value}`
   : '')
 
 async function loadData(showLoading = true) {
@@ -418,21 +453,20 @@ async function removeCamera(camera: Camera) {
 
 function openDetails(camera: Camera, syncUrl = true) {
   selectedCamera.value = camera
-  previewFailed.value = false
-  previewNonce.value = Date.now()
+  resetPreview(camera)
   drawerVisible.value = true
   if (syncUrl && deepLinkedCameraId() !== camera.id) writeCameraDeepLink(camera.id, 'push')
 }
 
 function refreshPreview() {
-  previewFailed.value = false
-  previewNonce.value = Date.now()
+  if (selectedCamera.value) resetPreview(selectedCamera.value)
 }
 
 function closeDrawer() {
   const selectedId = selectedCamera.value?.id || null
   selectedCamera.value = null
   previewFailed.value = false
+  previewFallbackUsed.value = false
   if (selectedId !== null && deepLinkedCameraId() === selectedId) writeCameraDeepLink(null, 'replace')
 }
 
@@ -502,36 +536,15 @@ onBeforeUnmount(() => {
 
         <div class="camera-signals">
           <div><span>计划状态</span><b>{{ scheduleStateLabel(camera) }}</b></div>
-          <div><span>子码流</span><b>{{ camera.sub_rtsp_path ? '已配置' : '未配置' }}</b></div>
+          <div><span>子码流</span><b>{{ camera.sub_rtsp_path ? '已配置' : inferSubstreamPath(camera.rtsp_path) ? '可推测' : '未配置' }}</b></div>
           <div><span>时间戳</span><b>{{ camera.timestamp_mode }}</b></div>
         </div>
 
         <div class="camera-actions" @dblclick.stop>
           <el-button size="small" @click="openDetails(camera)">详情 / 预览</el-button>
-          <el-button
-            size="small"
-            :icon="Connection"
-            :loading="actionCameraId === camera.id"
-            @click="runAction(camera, 'probe')"
-          >检测</el-button>
-          <el-button
-            v-if="!isRecording(camera.id)"
-            size="small"
-            type="primary"
-            plain
-            :icon="VideoPlay"
-            :loading="actionCameraId === camera.id"
-            @click="runAction(camera, 'start')"
-          >录像</el-button>
-          <el-button
-            v-else
-            size="small"
-            type="danger"
-            plain
-            :icon="VideoPause"
-            :loading="actionCameraId === camera.id"
-            @click="runAction(camera, 'stop')"
-          >停止</el-button>
+          <el-button size="small" :icon="Connection" :loading="actionCameraId === camera.id" @click="runAction(camera, 'probe')">检测</el-button>
+          <el-button v-if="!isRecording(camera.id)" size="small" type="primary" plain :icon="VideoPlay" :loading="actionCameraId === camera.id" @click="runAction(camera, 'start')">录像</el-button>
+          <el-button v-else size="small" type="danger" plain :icon="VideoPause" :loading="actionCameraId === camera.id" @click="runAction(camera, 'stop')">停止</el-button>
           <el-dropdown trigger="click" @command="(command: string) => command === 'edit' ? openEdit(camera) : removeCamera(camera)">
             <el-button size="small">更多</el-button>
             <template #dropdown>
@@ -552,7 +565,7 @@ onBeforeUnmount(() => {
       <el-button v-if="!cameras.length" type="primary" :icon="Plus" @click="openCreate">添加摄像头</el-button>
     </div>
 
-    <el-drawer v-model="drawerVisible" size="540px" class="camera-detail-drawer" @closed="closeDrawer">
+    <el-drawer v-model="drawerVisible" size="600px" class="camera-detail-drawer" @closed="closeDrawer">
       <template #header>
         <div v-if="selectedCamera" class="drawer-title">
           <div>
@@ -584,15 +597,22 @@ onBeforeUnmount(() => {
             class="preview-image"
             :src="previewSrc"
             :alt="`${selectedCamera.name} 实时预览`"
-            @error="previewFailed = true"
+            @load="handlePreviewLoad"
+            @error="handlePreviewError"
           />
           <div v-else class="preview-empty">
             <VideoCamera />
             <strong>{{ selectedCamera.enabled ? '实时预览暂不可用' : '摄像头已禁用' }}</strong>
-            <span v-if="selectedCamera.enabled">可先执行连接检测，或重新加载预览。</span>
+            <span v-if="selectedCamera.enabled">子码流与主码流均无法打开，可执行连接检测后重试。</span>
           </div>
           <div class="preview-overlay">
-            <span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span>
+            <div class="preview-overlay-status">
+              <span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span>
+              <span class="preview-stream-chip">策略：AUTO</span>
+              <span class="preview-stream-chip" :class="{ fallback: previewFallbackUsed }">
+                实际：{{ previewSource === 'sub' ? '子码流' : '主码流' }}<template v-if="previewFallbackUsed"> · 回退</template>
+              </span>
+            </div>
             <button @click="refreshPreview">重新加载</button>
           </div>
         </div>
@@ -614,7 +634,7 @@ onBeforeUnmount(() => {
             <div><dt>RTSP 端口</dt><dd>{{ selectedCamera.rtsp_port }}</dd></div>
             <div><dt>用户名</dt><dd>{{ selectedCamera.username || '-' }}</dd></div>
             <div><dt>主码流</dt><dd>{{ selectedCamera.rtsp_path }}</dd></div>
-            <div class="wide"><dt>子码流</dt><dd>{{ selectedCamera.sub_rtsp_path || '未配置' }}</dd></div>
+            <div class="wide"><dt>子码流</dt><dd>{{ selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置' }}</dd></div>
           </dl>
         </div>
 
@@ -664,9 +684,7 @@ onBeforeUnmount(() => {
           <el-form-item label="IP 地址"><el-input v-model="form.ip" placeholder="192.168.1.101" /></el-form-item>
           <el-form-item label="RTSP 端口"><el-input-number v-model="form.rtsp_port" :min="1" :max="65535" controls-position="right" /></el-form-item>
           <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
-          <el-form-item label="密码">
-            <el-input v-model="form.password" type="password" show-password :placeholder="editingId === null ? '必填' : '留空保持原密码'" />
-          </el-form-item>
+          <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password :placeholder="editingId === null ? '必填' : '留空保持原密码'" /></el-form-item>
           <el-form-item label="主码流" class="wide"><el-input v-model="form.rtsp_path" placeholder="/ch1/main" /></el-form-item>
           <el-form-item label="子码流" class="wide"><el-input v-model="form.sub_rtsp_path" placeholder="可选，例如 /ch1/sub" /></el-form-item>
           <el-form-item label="时间戳">
@@ -697,8 +715,8 @@ onBeforeUnmount(() => {
 .toolbar{min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.search-box{width:min(470px,100%)}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
 .camera-list{display:flex;flex-direction:column;gap:8px}.camera-card{display:grid;grid-template-columns:minmax(390px,1.65fr) minmax(300px,1fr) auto;align-items:center;gap:16px;padding:14px 15px;border:1px solid var(--nvr-border);border-radius:12px;background:var(--nvr-surface);transition:border-color .15s ease,background-color .15s ease,transform .15s ease}.camera-card:hover{border-color:var(--nvr-border-strong);background:var(--nvr-surface-2);transform:translateY(-1px)}.camera-main{min-width:0;display:flex;align-items:center;gap:14px}.camera-icon{flex:0 0 62px;width:62px;height:62px;display:grid;place-items:center;padding:9px;border-radius:14px;color:var(--nvr-muted);background:linear-gradient(145deg,var(--nvr-input),var(--nvr-surface-2));border:1px solid var(--nvr-border)}.camera-icon.online{color:var(--nvr-green);background:linear-gradient(145deg,rgba(46,204,138,.09),var(--nvr-surface-2))}.camera-icon.offline{color:var(--nvr-red);background:linear-gradient(145deg,rgba(240,93,94,.09),var(--nvr-surface-2))}.camera-icon.unknown{color:var(--nvr-yellow);background:linear-gradient(145deg,rgba(245,185,66,.08),var(--nvr-surface-2))}.camera-icon.disabled{opacity:.62}.camera-copy{min-width:0;flex:1}.camera-name-row{display:flex;align-items:center;flex-wrap:wrap;gap:6px 7px;min-width:0}.camera-name-row strong{min-width:0;max-width:100%;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;font-size:13px;line-height:1.35}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border:1px solid var(--nvr-border);border-radius:5px;color:var(--nvr-muted);background:var(--nvr-input);font-size:10px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.health-badge.online i{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.08)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active{color:var(--nvr-red);border-color:rgba(240,93,94,.18);background:rgba(240,93,94,.055)}.record-badge.active i{background:var(--nvr-red);box-shadow:0 0 0 3px rgba(240,93,94,.08)}.camera-identity{margin-top:5px;color:var(--nvr-text-soft);font-size:10px}.camera-address{margin-top:5px;color:var(--nvr-muted);font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-video{margin-top:4px;color:var(--nvr-subtle);font-size:10px}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(80px,1fr));gap:8px}.camera-signals div{min-width:0}.camera-signals span,.camera-signals b{display:block}.camera-signals span{margin-bottom:4px;color:var(--nvr-subtle);font-size:9px}.camera-signals b{color:var(--nvr-text-soft);font-size:10px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;white-space:nowrap}
 .empty-state{min-height:330px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--nvr-border-strong);border-radius:11px;color:var(--nvr-muted);background:var(--nvr-surface)}.empty-state :deep(svg){width:34px;margin-bottom:12px;color:var(--nvr-subtle)}.empty-state strong{color:var(--nvr-text-soft);font-size:13px}.empty-state span{margin:6px 0 16px;font-size:11px}
-.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px;white-space:normal;overflow-wrap:anywhere}.drawer-title span:not(.health-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-body{display:flex;flex-direction:column;gap:13px}.device-hero{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid var(--nvr-border);border-radius:12px;background:linear-gradient(135deg,var(--nvr-surface-2),var(--nvr-surface))}.device-hero-visual{flex:0 0 108px;width:108px;height:82px;display:grid;place-items:center;padding:13px;border:1px solid var(--nvr-border);border-radius:14px;color:var(--nvr-muted);background:var(--nvr-input)}.device-hero-visual.online{color:var(--nvr-green)}.device-hero-visual.offline{color:var(--nvr-red)}.device-hero-visual.unknown{color:var(--nvr-yellow)}.device-hero-visual.disabled{opacity:.6}.device-hero-copy{min-width:0;display:flex;flex-direction:column}.device-hero-copy>span{color:var(--nvr-subtle);font-size:8px;font-weight:800;letter-spacing:.16em}.device-hero-copy strong{margin-top:5px;font-size:15px;font-weight:680;overflow-wrap:anywhere}.device-hero-copy b{margin-top:3px;color:var(--nvr-text-soft);font-size:11px;font-weight:560;overflow-wrap:anywhere}.device-hero-copy small{margin-top:7px;color:var(--nvr-muted);font-size:9px}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:26px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.72));font-size:10px}.preview-overlay span{display:flex;align-items:center;gap:6px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.detail-section{padding:13px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.detail-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}.detail-heading strong{font-size:11px}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid div{min-width:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.drawer-actions{position:sticky;bottom:0;display:flex;gap:7px;flex-wrap:wrap;padding:11px 0 2px;background:linear-gradient(transparent 0,var(--nvr-bg) 18px)}
+.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px;white-space:normal;overflow-wrap:anywhere}.drawer-title span:not(.health-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-body{display:flex;flex-direction:column;gap:13px}.device-hero{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid var(--nvr-border);border-radius:12px;background:linear-gradient(135deg,var(--nvr-surface-2),var(--nvr-surface))}.device-hero-visual{flex:0 0 108px;width:108px;height:82px;display:grid;place-items:center;padding:13px;border:1px solid var(--nvr-border);border-radius:14px;color:var(--nvr-muted);background:var(--nvr-input)}.device-hero-visual.online{color:var(--nvr-green)}.device-hero-visual.offline{color:var(--nvr-red)}.device-hero-visual.unknown{color:var(--nvr-yellow)}.device-hero-visual.disabled{opacity:.6}.device-hero-copy{min-width:0;display:flex;flex-direction:column}.device-hero-copy>span{color:var(--nvr-subtle);font-size:8px;font-weight:800;letter-spacing:.16em}.device-hero-copy strong{margin-top:5px;font-size:15px;font-weight:680;overflow-wrap:anywhere}.device-hero-copy b{margin-top:3px;color:var(--nvr-text-soft);font-size:11px;font-weight:560;overflow-wrap:anywhere}.device-hero-copy small{margin-top:7px;color:var(--nvr-muted);font-size:9px}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:space-between;padding:26px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.72));font-size:10px}.preview-overlay-status{display:flex;align-items:center;gap:6px;min-width:0}.preview-overlay span{display:flex;align-items:center;gap:6px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-stream-chip{height:20px;padding:0 6px;border:1px solid rgba(255,255,255,.14);border-radius:5px;background:rgba(5,8,12,.42);white-space:nowrap}.preview-stream-chip.fallback{color:#f4c563;border-color:rgba(244,197,99,.32)}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px;white-space:nowrap}.detail-section{padding:13px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.detail-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}.detail-heading strong{font-size:11px}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid div{min-width:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.drawer-actions{position:sticky;bottom:0;display:flex;gap:7px;flex-wrap:wrap;padding:11px 0 2px;background:linear-gradient(transparent 0,var(--nvr-bg) 18px)}
 .camera-form{padding-top:4px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-grid .wide{grid-column:1/-1}.form-grid :deep(.el-input-number){width:100%}.switch-group{display:flex;align-items:center;gap:20px;min-height:32px;padding:0 0 18px 88px}.switch-group label{display:flex;align-items:center;gap:9px;color:var(--nvr-muted);font-size:11px}
 @media (max-width:1180px){.camera-card{grid-template-columns:minmax(300px,1fr) auto}.camera-signals{display:none}.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.summary-grid{grid-template-columns:1fr 1fr}.camera-card{grid-template-columns:1fr}.camera-actions{justify-content:flex-start;flex-wrap:wrap}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}.device-hero-visual{flex-basis:88px;width:88px;height:70px}}
+@media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.summary-grid{grid-template-columns:1fr 1fr}.camera-card{grid-template-columns:1fr}.camera-actions{justify-content:flex-start;flex-wrap:wrap}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}.device-hero-visual{flex-basis:88px;width:88px;height:70px}.preview-overlay-status{gap:4px}.preview-stream-chip{padding:0 5px;font-size:9px}}
 </style>
