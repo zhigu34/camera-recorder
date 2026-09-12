@@ -63,6 +63,16 @@ def test_camera_form_factor_catalog_is_conservative() -> None:
     assert infer_camera_form_factor("Unknown", "ABC-123") is None
 
 
+def test_ezviz_cs_families_are_inferred_from_model() -> None:
+    assert infer_camera_form_factor("Hikvision", "CS-C6c-V101-8G8WF").form_factor == "ptz"
+    assert infer_camera_form_factor("Hikvision", "CS-C6C-3H3WFRV").form_factor == "ptz"
+    assert infer_camera_form_factor("Hikvision", "CS-C60p-V100-8G55WFL").form_factor == "ptz"
+    assert infer_camera_form_factor("Hikvision", "CS-C8c-V100-8H8WKFL").form_factor == "ptz"
+    assert infer_camera_form_factor("Hikvision", "CS-E4p-V100-8C6WKF").form_factor == "panoramic"
+    assert infer_camera_form_factor(None, "CS-C6c-V101-8G8WF").form_factor == "ptz"
+    assert infer_camera_form_factor("EZVIZ", "CS-E4p-V100-8C6WKF").form_factor == "panoramic"
+
+
 def test_camera_form_factor_is_inferred_when_unspecified_and_manual_choice_wins() -> None:
     with TestClient(app) as client:
         created = client.post(
