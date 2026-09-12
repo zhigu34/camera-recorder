@@ -14,6 +14,7 @@ import './styles/recording-management.css'
 import './styles/playback-metrics.css'
 import './styles/system-settings.css'
 import './styles/camera-device-center.css'
+import './styles/camera-device-layout.css'
 
 import Root from './Root.vue'
 
