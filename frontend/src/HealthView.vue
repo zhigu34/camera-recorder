@@ -13,6 +13,11 @@ interface RecordingStats {
   network_warning_count: number
 }
 
+interface TimestampGuidance {
+  suggested_mode: string | null
+  message: string
+}
+
 interface CameraHealth {
   camera_id: number
   name: string
@@ -24,6 +29,9 @@ interface CameraHealth {
   schedule_state: string
   abnormal: boolean
   restart_count: number
+  timestamp_mode: string
+  timestamp_warning_count: number
+  timestamp_guidance?: TimestampGuidance | null
   started_at?: string | null
   last_error?: string | null
   recordings_24h: RecordingStats
@@ -330,6 +338,14 @@ onBeforeUnmount(() => {
           <el-table-column label="计划状态" min-width="150">
             <template #default="{ row }"><el-tag :type="scheduleType(row.schedule_state)" effect="plain">{{ scheduleLabel(row.schedule_state) }}</el-tag></template>
           </el-table-column>
+          <el-table-column label="时间戳" min-width="230">
+            <template #default="{ row }">
+              <div class="timestamp-cell">
+                <el-tag :type="row.timestamp_warning_count ? 'warning' : 'info'" effect="plain">{{ row.timestamp_mode }} · {{ row.timestamp_warning_count || 0 }}</el-tag>
+                <span v-if="row.timestamp_guidance" :title="row.timestamp_guidance.message">{{ row.timestamp_guidance.message }}</span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="期望录像" width="90"><template #default="{ row }">{{ row.expected_recording ? '是' : '否' }}</template></el-table-column>
           <el-table-column prop="restart_count" label="重连" width="75" sortable />
           <el-table-column label="24h片段" width="90"><template #default="{ row }">{{ row.recordings_24h.segments }}</template></el-table-column>
@@ -392,7 +408,7 @@ onBeforeUnmount(() => {
 .health-v2{max-width:1760px;margin:0 auto;padding:22px;color:var(--nvr-text)}
 .page-head{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-bottom:14px}.realtime-pill{display:flex;align-items:center;gap:7px;margin-right:auto;color:var(--nvr-yellow);font-size:10px}.realtime-pill i{width:7px;height:7px;border-radius:50%;background:currentColor}.realtime-pill.online{color:var(--nvr-green)}
 .metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:9px;margin-bottom:10px}.metrics article{min-height:102px;padding:14px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.metrics article.alert{border-color:rgba(240,93,94,.35)}.metrics span,.metrics em{display:block;color:var(--nvr-muted);font-size:10px;font-style:normal}.metrics strong{display:block;margin:9px 0 7px;font-size:25px;line-height:1}.metrics small{margin-left:4px;color:#66758a;font-size:12px;font-weight:500}.metrics article.alert strong{color:var(--nvr-red)}
-.panel{margin-top:10px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);overflow:hidden}.panel-head{min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 15px;border-bottom:1px solid var(--nvr-border)}.panel-head>div:first-child{display:flex;flex-direction:column;gap:4px}.panel-head strong{font-size:12px}.panel-head span{color:var(--nvr-muted);font-size:9px}.panel-actions{display:flex!important;flex-direction:row!important;align-items:center;gap:8px}.state-table{width:100%}
+.panel{margin-top:10px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);overflow:hidden}.panel-head{min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 15px;border-bottom:1px solid var(--nvr-border)}.panel-head>div:first-child{display:flex;flex-direction:column;gap:4px}.panel-head strong{font-size:12px}.panel-head span{color:var(--nvr-muted);font-size:9px}.panel-actions{display:flex!important;flex-direction:row!important;align-items:center;gap:8px}.state-table{width:100%}.timestamp-cell{display:flex;align-items:center;gap:7px;min-width:0}.timestamp-cell>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--nvr-yellow);font-size:9px}
 .two-column{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(300px,.6fr);gap:10px}.reliability-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--nvr-border);border-bottom:1px solid var(--nvr-border)}.reliability-grid>div{padding:14px;background:var(--nvr-surface);display:flex;flex-direction:column;gap:7px}.reliability-grid span{color:var(--nvr-muted);font-size:9px}.reliability-grid strong{font-size:18px}.storage-panel{padding-bottom:16px}.storage-number{padding:18px 16px 8px;font-size:30px;font-weight:680}.storage-panel :deep(.el-progress){margin:0 16px 16px}.storage-detail{display:flex;gap:18px;flex-wrap:wrap;padding:0 16px;color:var(--nvr-muted);font-size:10px}.error-box{display:flex;align-items:flex-start;gap:8px;margin:14px 16px 0;padding:9px;color:var(--nvr-red);background:rgba(240,93,94,.06);border:1px solid rgba(240,93,94,.16);border-radius:7px;font-size:10px}.error-box :deep(svg){flex:0 0 14px;width:14px}
 .stability-summary{display:flex;gap:24px;flex-wrap:wrap;padding:12px 15px;border-bottom:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:10px}.stability-summary b{color:var(--nvr-text);font-weight:600}.snapshot-time{padding:12px 2px 0;text-align:right;color:#5f6d7e;font-size:9px}
 :deep(.el-table){--el-table-bg-color:var(--nvr-surface);--el-table-tr-bg-color:var(--nvr-surface);--el-table-header-bg-color:#111820;--el-table-row-hover-bg-color:var(--nvr-surface-2);--el-table-border-color:var(--nvr-border);--el-table-text-color:#aeb9c6;--el-table-header-text-color:#718095;background:transparent}:deep(.el-table th.el-table__cell){font-size:10px}:deep(.el-table td.el-table__cell){font-size:10px}
