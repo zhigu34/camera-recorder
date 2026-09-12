@@ -79,6 +79,12 @@ env_set() {
   mv "$tmp" "$ENV_FILE"
 }
 
+env_delete() {
+  local key="$1" tmp="${ENV_FILE}.tmp.$$"
+  awk -v key="$key" 'index($0, key "=") != 1 {print}' "$ENV_FILE" > "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
 ensure_env_key() {
   local key="$1" value="$2"
   grep -q "^${key}=" "$ENV_FILE" || env_set "$key" "$value"
@@ -106,11 +112,9 @@ ensure_image() {
     ok "本地基础镜像可用: $image"
     return 0
   fi
-
   if [ "${DEPLOY_AUTO_PULL:-1}" = "0" ]; then
     fail "缺少可用镜像 $image，请先 docker pull 或 docker load"
   fi
-
   warn "本地缺少可用镜像: $image"
   info "尝试拉取: $image"
   docker pull "$image" || fail "无法拉取 $image；网络受限时请在其他机器 docker save 后在本机 docker load"
@@ -148,12 +152,10 @@ prepare_ffmpeg() {
     ok "FFmpeg 本地包有效: vendor/ffmpeg/$archive"
     return 0
   fi
-
   if [ -e "$expected" ]; then
     warn "FFmpeg 包损坏，移动为 ${expected}.invalid"
     mv -f "$expected" "${expected}.invalid"
   fi
-
   for candidate in "$ROOT_DIR/$original" "$ROOT_DIR/vendor/ffmpeg/$original"; do
     if validate_archive "$candidate"; then
       mv "$candidate" "$expected"
@@ -165,18 +167,15 @@ prepare_ffmpeg() {
   [ "$NO_FFMPEG_DOWNLOAD" = "0" ] || fail "缺少 FFmpeg 本地包: vendor/ffmpeg/$archive"
   [ -f "$ROOT_DIR/scripts/download-ffmpeg.sh" ] || fail "缺少 scripts/download-ffmpeg.sh"
   command_exists curl || fail "需要 curl 下载 FFmpeg，或手工放置 $expected"
-
   info "FFmpeg 本地包缺失，准备从 GitHub 下载..."
-  if ! bash "$ROOT_DIR/scripts/download-ffmpeg.sh" "$arch"; then
-    fail "FFmpeg 下载失败；也可手工下载 $original 后放到 $expected"
-  fi
+  bash "$ROOT_DIR/scripts/download-ffmpeg.sh" "$arch" || fail "FFmpeg 下载失败"
   validate_archive "$expected" || fail "FFmpeg 包校验失败: $expected"
   ok "FFmpeg 本地包准备完成"
 }
 
 project_owns_port() {
   local port="$1" container
-  for container in camera-recorder-backend camera-recorder-web camera-recorder-openlist; do
+  for container in camera-recorder-web camera-recorder-openlist; do
     if docker inspect "$container" >/dev/null 2>&1 && docker port "$container" 2>/dev/null | grep -Eq ":${port}$"; then
       return 0
     fi
@@ -237,20 +236,13 @@ http_ok() {
 
 show_build_errors() {
   local log_file="$1" errors
-  errors="$(grep -Ein \
-    '(^|[^[:alpha:]])(error|fatal|failed|failure|timeout|timed out|exit code|non-zero|unable to|could not|connection refused|network is unreachable)([^[:alpha:]]|$)' \
-    "$log_file" 2>/dev/null | tail -n 80 || true)"
-
+  errors="$(grep -Ein '(^|[^[:alpha:]])(error|fatal|failed|failure|timeout|timed out|exit code|non-zero|unable to|could not|connection refused|network is unreachable)([^[:alpha:]]|$)' "$log_file" 2>/dev/null | tail -n 80 || true)"
   if [ -n "$errors" ]; then
-    printf '\n' >&2
     warn "构建错误摘要："
     printf '%s\n' "$errors" >&2
-    printf '\n' >&2
   else
-    printf '\n' >&2
     warn "未匹配到标准错误行，显示构建日志最后 60 行："
     tail -n 60 "$log_file" >&2 2>/dev/null || true
-    printf '\n' >&2
   fi
 }
 
@@ -269,7 +261,6 @@ compose_up_with_network_recovery() {
   local rc
   mkdir -p logs
   : > "$UP_LOG"
-
   set +e
   "${COMPOSE[@]}" up -d 2>&1 | tee "$UP_LOG"
   rc=${PIPESTATUS[0]}
@@ -277,41 +268,16 @@ compose_up_with_network_recovery() {
   [ "$rc" -eq 0 ] && return 0
 
   if grep -q "all predefined address pools have been fully subnetted" "$UP_LOG"; then
-    warn "检测到 Docker 默认地址池已耗尽。"
-    warn "将清理所有当前未被容器使用的 Docker 网络，然后自动重试一次。"
+    warn "检测到 Docker 默认地址池已耗尽，将清理未使用网络并重试一次。"
     show_docker_networks
-
     docker network prune -f || fail "docker network prune 执行失败"
-    ok "未使用 Docker 网络清理完成"
-
     : > "$UP_LOG"
     set +e
     "${COMPOSE[@]}" up -d 2>&1 | tee "$UP_LOG"
     rc=${PIPESTATUS[0]}
     set -e
     [ "$rc" -eq 0 ] && return 0
-
-    if grep -q "all predefined address pools have been fully subnetted" "$UP_LOG"; then
-      show_docker_networks
-      cat >&2 <<'EOF'
-
-Docker 默认网络地址池在清理未使用网络后仍然耗尽。
-说明当前仍在使用的 Docker bridge 网络已经占满 daemon 的默认地址池。
-
-请检查 /etc/docker/daemon.json，为 Docker 配置更大的 default-address-pools，例如：
-{
-  "default-address-pools": [
-    {"base": "172.20.0.0/14", "size": 24},
-    {"base": "10.240.0.0/12", "size": 24}
-  ]
-}
-
-注意：修改前请确认这些网段不与宿主机 LAN、VPN、摄像头网段冲突。
-修改后需要重启 Docker daemon，现有容器网络会受影响，建议安排维护窗口执行。
-EOF
-    fi
   fi
-
   return "$rc"
 }
 
@@ -322,10 +288,7 @@ command_exists docker || fail "未安装 Docker"
 docker version >/dev/null 2>&1 || fail "Docker daemon 不可用"
 docker compose version >/dev/null 2>&1 || fail "需要 Docker Compose v2"
 docker buildx version >/dev/null 2>&1 || fail "需要 Docker Buildx"
-command_exists awk || fail "缺少 awk"
-command_exists grep || fail "缺少 grep"
-command_exists tar || fail "缺少 tar"
-command_exists tee || fail "缺少 tee"
+for cmd in awk grep tar tee; do command_exists "$cmd" || fail "缺少 $cmd"; done
 
 DOCKER_ARCH_RAW="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
 DOCKER_ARCH="$(normalize_arch "$DOCKER_ARCH_RAW" 2>/dev/null || true)"
@@ -345,11 +308,14 @@ fi
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 ensure_env_key CAMREC_WEB_PORT 8080
-ensure_env_key CAMREC_API_PORT 8000
 ensure_env_key OPENLIST_PORT 5244
 ensure_env_key TZ Asia/Shanghai
 ensure_env_key OPENLIST_UID 0
 ensure_env_key OPENLIST_GID 0
+if grep -q '^CAMREC_API_PORT=' "$ENV_FILE"; then
+  env_delete CAMREC_API_PORT
+  ok "已移除废弃的 CAMREC_API_PORT；后端 API 仅在 Docker 内网监听"
+fi
 
 SECRET_KEY="$(env_get CAMREC_SECRET_KEY || true)"
 if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "replace-with-a-long-random-secret" ] || [ "$SECRET_KEY" = "camera-recorder-local-change-me" ]; then
@@ -385,17 +351,14 @@ elif [ -n "$FREE_KB" ]; then
 fi
 
 WEB_PORT="$(env_get CAMREC_WEB_PORT)"
-API_PORT="$(env_get CAMREC_API_PORT)"
 OPENLIST_PORT="$(env_get OPENLIST_PORT)"
-for item in "CAMREC_WEB_PORT:$WEB_PORT" "CAMREC_API_PORT:$API_PORT" "OPENLIST_PORT:$OPENLIST_PORT"; do
+for item in "CAMREC_WEB_PORT:$WEB_PORT" "OPENLIST_PORT:$OPENLIST_PORT"; do
   key="${item%%:*}"; value="${item#*:}"
   case "$value" in ''|*[!0-9]*) fail "$key 不是有效端口: $value" ;; esac
   [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "$key 超出端口范围: $value"
 done
-[ "$WEB_PORT" != "$API_PORT" ] && [ "$WEB_PORT" != "$OPENLIST_PORT" ] && [ "$API_PORT" != "$OPENLIST_PORT" ] || fail "三个服务端口不能重复"
-
+[ "$WEB_PORT" != "$OPENLIST_PORT" ] || fail "Web 与 OpenList 端口不能重复"
 check_port Web "$WEB_PORT"
-check_port API "$API_PORT"
 check_port OpenList "$OPENLIST_PORT"
 
 prepare_ffmpeg "$DOCKER_ARCH"
@@ -419,7 +382,6 @@ if [ "$NO_BUILD" = "0" ]; then
     BUILD_CMD+=(--builder default)
   fi
   BUILD_CMD+=(backend frontend)
-
   mkdir -p logs
   : > "$BUILD_LOG"
   info "开始构建 backend/frontend（默认静默，完整日志: $BUILD_LOG）..."
@@ -433,8 +395,6 @@ if [ "$NO_BUILD" = "0" ]; then
   fi
   set -e
   if [ "$BUILD_RC" -ne 0 ]; then
-    grep -q "auth.docker.io" "$BUILD_LOG" 2>/dev/null && warn "检测到 Docker Hub 网络错误"
-    grep -Eq "mirrors\.tuna|npmmirror|pypi" "$BUILD_LOG" 2>/dev/null && warn "构建失败发生在依赖源阶段"
     show_build_errors "$BUILD_LOG"
     fail "镜像构建失败，完整日志: $BUILD_LOG"
   fi
@@ -451,17 +411,17 @@ if ! wait_for_health camera-recorder-backend 150; then
   "${COMPOSE[@]}" logs --tail=120 backend || true
   fail "backend 未通过健康检查"
 fi
-ok "backend healthy"
+ok "backend healthy（仅 Docker 内网可达）"
 
 info "检查 frontend..."
 if ! wait_for_health camera-recorder-web 60; then
   "${COMPOSE[@]}" logs --tail=80 frontend || true
   fail "frontend 容器未正常运行"
 fi
-set +e; http_ok "http://127.0.0.1:${WEB_PORT}/"; HTTP_RC=$?; set -e
+set +e; http_ok "http://127.0.0.1:${WEB_PORT}/health"; HTTP_RC=$?; set -e
 case "$HTTP_RC" in
-  0) ok "frontend HTTP 可访问" ;;
-  1) warn "frontend 已运行，但 HTTP 检测暂未通过" ;;
+  0) ok "Web 入口与后端 API 反代正常" ;;
+  1) warn "frontend 已运行，但 /health 反代检测暂未通过" ;;
   2) warn "没有 curl/wget，跳过 HTTP 检测" ;;
 esac
 
@@ -477,8 +437,8 @@ printf '\n'
 printf '\n'
 ok "部署完成"
 printf 'Camera Recorder Web: http://127.0.0.1:%s\n' "$WEB_PORT"
-printf 'FastAPI:             http://127.0.0.1:%s\n' "$API_PORT"
-printf 'OpenList:            http://127.0.0.1:%s\n' "$OPENLIST_PORT"
+printf 'Backend API:        internal only (backend:8000, via Web /api and /ws)\n'
+printf 'OpenList:           http://127.0.0.1:%s\n' "$OPENLIST_PORT"
 printf '\n常用命令:\n'
 printf '  查看后端日志: docker compose logs -f backend\n'
 printf '  查看全部状态: docker compose ps\n'
