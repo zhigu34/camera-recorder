@@ -1,15 +1,19 @@
+import asyncio
 from datetime import date as Date, datetime, time, timedelta
+from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
-from sqlalchemy import case, func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.camera import Camera
 from app.models.recording import Recording
+from app.models.upload import UploadTask
 from app.schemas.recording import RecordingRead
+from app.services.recording_playback import recording_playback_manager
 
 router = APIRouter(prefix="/api/recording-management", tags=["recording-management"])
 
@@ -28,6 +32,26 @@ class RecordingManagementPage(BaseModel):
     offset: int
     limit: int
     stats: RecordingManagementStats
+
+
+class RecordingBatchDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class RecordingDeleteFailure(BaseModel):
+    id: int
+    error: str
+
+
+class RecordingDeleteResult(BaseModel):
+    requested: int
+    deleted_local: int
+    archived_remote_only: int
+    removed_records: int
+    skipped_uploading: list[int]
+    already_remote_only: list[int]
+    not_found: list[int]
+    failed: list[RecordingDeleteFailure]
 
 
 def _filters(
@@ -56,6 +80,83 @@ def _filters(
     if date_to is not None:
         filters.append(Recording.started_at < datetime.combine(date_to + timedelta(days=1), time.min))
     return filters
+
+
+async def _unlink_if_exists(path: Path | None) -> bool:
+    if path is None or not path.exists():
+        return False
+    await asyncio.to_thread(path.unlink)
+    return True
+
+
+async def _purge_playback_cache(recording_id: int) -> None:
+    await recording_playback_manager.cancel(recording_id)
+    for path in (
+        recording_playback_manager.proxy_path(recording_id),
+        recording_playback_manager.live_temp_path(recording_id),
+    ):
+        try:
+            await _unlink_if_exists(path)
+        except OSError:
+            # Playback compatibility cache is best-effort cleanup and must not
+            # block deletion of the authoritative recording asset.
+            pass
+
+
+async def _delete_recordings(ids: list[int], db: AsyncSession) -> RecordingDeleteResult:
+    unique_ids = list(dict.fromkeys(int(value) for value in ids if int(value) > 0))
+    result = RecordingDeleteResult(
+        requested=len(unique_ids),
+        deleted_local=0,
+        archived_remote_only=0,
+        removed_records=0,
+        skipped_uploading=[],
+        already_remote_only=[],
+        not_found=[],
+        failed=[],
+    )
+
+    for recording_id in unique_ids:
+        recording = await db.get(Recording, recording_id)
+        if recording is None:
+            result.not_found.append(recording_id)
+            continue
+        if recording.upload_status == "uploading":
+            result.skipped_uploading.append(recording_id)
+            continue
+        if recording.status == "deleted" and recording.upload_status == "success":
+            result.already_remote_only.append(recording_id)
+            continue
+
+        try:
+            await _purge_playback_cache(recording.id)
+
+            local_path = Path(recording.mp4_path)
+            source_path = Path(recording.source_mkv_path) if recording.source_mkv_path else None
+            local_deleted = await _unlink_if_exists(local_path)
+            if source_path is not None and source_path != local_path:
+                await _unlink_if_exists(source_path)
+            if local_deleted:
+                result.deleted_local += 1
+
+            if recording.upload_status == "success":
+                # Preserve the successful archive record and remote playback path.
+                # Manual deletion only removes the local asset; it never deletes
+                # the OpenList/WebDAV copy.
+                recording.status = "deleted"
+                result.archived_remote_only += 1
+            else:
+                # There is no safe remote copy. Once the local asset is removed,
+                # remove upload bookkeeping and the recording row so the UI does
+                # not retain a dead, unplayable shell.
+                await db.execute(delete(UploadTask).where(UploadTask.recording_id == recording.id))
+                await db.delete(recording)
+                result.removed_records += 1
+        except OSError as exc:
+            result.failed.append(RecordingDeleteFailure(id=recording_id, error=str(exc)))
+
+    await db.commit()
+    return result
 
 
 @router.get("", response_model=RecordingManagementPage)
@@ -135,3 +236,28 @@ async def recording_management(
             abnormal=int(stats_row[4] or 0),
         ),
     )
+
+
+@router.delete("/{recording_id}", response_model=RecordingDeleteResult)
+async def delete_recording(
+    recording_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> RecordingDeleteResult:
+    result = await _delete_recordings([recording_id], db)
+    if result.not_found:
+        raise HTTPException(status_code=404, detail="recording not found")
+    if result.skipped_uploading:
+        raise HTTPException(status_code=409, detail="录像正在上传，请等待上传结束后再删除")
+    if result.already_remote_only:
+        raise HTTPException(status_code=409, detail="录像已无本地文件，云端归档未删除")
+    if result.failed:
+        raise HTTPException(status_code=500, detail=result.failed[0].error)
+    return result
+
+
+@router.post("/batch-delete", response_model=RecordingDeleteResult)
+async def batch_delete_recordings(
+    payload: RecordingBatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+) -> RecordingDeleteResult:
+    return await _delete_recordings(payload.ids, db)
