@@ -12,6 +12,7 @@ def _config(*, enabled: bool = True, recovery: bool = True) -> EmailNotification
         smtp_host="smtp.example.com",
         smtp_from="camera@example.com",
         smtp_to="ops@example.com",
+        smtp_auth_enabled=False,
     )
 
 
