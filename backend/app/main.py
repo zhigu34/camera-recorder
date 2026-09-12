@@ -22,6 +22,7 @@ from app.core.database import SessionLocal, close_db, init_db
 from app.core.migrations import upgrade_database
 from app.services.alert_dispatcher import alert_dispatcher
 from app.services.alert_monitor import alert_monitor
+from app.services.camera_identity_reconcile import reconcile_camera_form_factors
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
@@ -50,6 +51,7 @@ async def lifespan(_: FastAPI):
 
     async with SessionLocal() as session:
         await get_or_create_system_settings(session)
+        await reconcile_camera_form_factors(session)
         await session.commit()
 
     # Start the alert observer before background workers/recorders so new failure
