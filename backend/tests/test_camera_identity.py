@@ -53,10 +53,12 @@ def test_camera_identity_metadata_round_trip_and_clear() -> None:
 
 def test_camera_form_factor_catalog_is_conservative() -> None:
     assert infer_camera_form_factor("Hikvision", "DS-2CD2347G2-LU").form_factor == "turret"
+    assert infer_camera_form_factor(None, "DS-2CD2347G2-LU").form_factor == "turret"
+    assert infer_camera_form_factor("Unknown", "DS-2CD2T47G2-L").form_factor == "bullet"
     assert infer_camera_form_factor("Dahua", "IPC-HFW3849T1-AS-PV").form_factor == "bullet"
-    assert infer_camera_form_factor("Dahua", "IPC-HDW3849H-AS-PV").form_factor == "turret"
+    assert infer_camera_form_factor(None, "IPC-HDW3849H-AS-PV").form_factor == "turret"
     assert infer_camera_form_factor("Reolink", "RLC-810A").form_factor == "bullet"
-    assert infer_camera_form_factor("Reolink", "RLC-833A").form_factor == "turret"
+    assert infer_camera_form_factor(None, "RLC-833A").form_factor == "turret"
     assert infer_camera_form_factor("Ubiquiti", "G4 Doorbell Pro").form_factor == "doorbell"
     assert infer_camera_form_factor("Unknown", "ABC-123") is None
 
@@ -99,6 +101,30 @@ def test_camera_form_factor_is_inferred_when_unspecified_and_manual_choice_wins(
         )
         assert renamed.status_code == 200
         assert renamed.json()["form_factor"] == "dome"
+
+        deleted = client.delete(f"/api/cameras/{camera_id}")
+        assert deleted.status_code == 204
+
+
+def test_camera_form_factor_is_inferred_from_model_without_manufacturer() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras",
+            json={
+                "name": "pytest-camera-model-only-form-factor",
+                "model": "DS-2CD2347G2-LU",
+                "form_factor": "unknown",
+                "ip": "192.0.2.122",
+                "username": "admin",
+                "password": "test-secret",
+                "rtsp_path": "/ch1/main",
+                "timestamp_mode": "native",
+            },
+        )
+        assert created.status_code == 201
+        body = created.json()
+        camera_id = body["id"]
+        assert body["form_factor"] == "turret"
 
         deleted = client.delete(f"/api/cameras/{camera_id}")
         assert deleted.status_code == 204
