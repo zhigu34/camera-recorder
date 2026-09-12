@@ -71,6 +71,8 @@ type PlaybackMode = '' | 'original' | 'proxy' | 'proxy-live'
 type ActivePlaybackMode = Exclude<PlaybackMode, ''>
 type AdjacentDirection = 'previous' | 'next'
 
+const MAX_ORIGINAL_RECOVERY_ATTEMPTS = 2
+
 const cameras = ref<Camera[]>([])
 const selectedCamera = ref<number | null>(null)
 const selectedDate = ref(todayString())
@@ -94,6 +96,11 @@ const proxyProgress = ref<ProxyProgress | null>(null)
 const cancellingProxy = ref(false)
 const browserHevcHint = ref(hevcSupportHint())
 const originalPlaybackConfirmed = ref(false)
+const recoveringOriginal = ref(false)
+const originalRecoveryAttempts = ref(0)
+const pendingOriginalSeek = ref<number | null>(null)
+const originalRecoveryPoint = ref(0)
+const lastPlaybackTime = ref(0)
 const playbackTracker = new PlaybackAttemptTracker()
 let progressTimer: number | null = null
 
@@ -180,6 +187,7 @@ const showProxyProgress = computed(() =>
 )
 const playerLoadingText = computed(() => {
   if (navigationLoading.value) return '正在定位相邻录像…'
+  if (recoveringOriginal.value) return '正在恢复原片播放…'
   if (playbackMode.value === 'proxy-live') return '正在启动 H.264 兼容流…'
   if (playbackMode.value === 'proxy') return '正在加载 H.264 兼容缓存…'
   if (activeRecording.value && isCloudOnly(activeRecording.value)) return '正在连接 OpenList 云端流…'
@@ -253,10 +261,18 @@ function metricSourceKind(item: RecordingItem, mode: ActivePlaybackMode) {
   if (item.playback?.source_kind) return item.playback.source_kind
   return isCloudOnly(item) ? 'openlist_stream' : 'local'
 }
+function resetOriginalRecovery() {
+  recoveringOriginal.value = false
+  originalRecoveryAttempts.value = 0
+  pendingOriginalSeek.value = null
+  originalRecoveryPoint.value = 0
+  lastPlaybackTime.value = 0
+}
 function beginPlaybackSource(item: RecordingItem, mode: ActivePlaybackMode, src: string, notice: string) {
   playbackMode.value = mode
   playbackNotice.value = notice
   originalPlaybackConfirmed.value = false
+  if (mode !== 'original') resetOriginalRecovery()
   playbackTracker.start({
     recordingId: item.id,
     codec: codecName(item.video_codec) || 'unknown',
@@ -344,7 +360,7 @@ async function prepareProxy(
   compatibilityReason = '',
 ) {
   if (fallbackInProgress.value) return
-  fallbackInProgress.value = true; preparing.value = true; proxyError.value = ''; videoSrc.value = ''; proxyProgress.value = null; playbackTracker.reset()
+  fallbackInProgress.value = true; preparing.value = true; proxyError.value = ''; videoSrc.value = ''; proxyProgress.value = null; playbackTracker.reset(); recoveringOriginal.value = false; pendingOriginalSeek.value = null
   try {
     const state = (await axios.get<PlaybackState>(`/api/recordings/${item.id}/playback`)).data
     item.playback = { ...item.playback, ...state }
@@ -365,7 +381,7 @@ async function prepareProxy(
 }
 async function play(item: RecordingItem) {
   if (!isPlayable(item)) return ElMessage.warning('这段录像本地已清理且没有可用云端归档')
-  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; playbackTracker.reset()
+  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); playbackTracker.reset()
 
   if (!item.playback.original_available && !item.playback.remote_available) { preparing.value = false; proxyError.value = '本地原录像已清理，且没有成功归档记录'; return }
 
@@ -382,8 +398,8 @@ async function play(item: RecordingItem) {
   const cloudStream = isCloudOnly(item)
   if (isH264(item.video_codec) || isHevc(item.video_codec)) {
     const notice = isHevc(item.video_codec)
-      ? (cloudStream ? '优先播放 OpenList 云端 HEVC 原片；只有首帧前确认解码失败才自动切换兼容流' : '优先播放 HEVC 原片；只有首帧前确认解码失败才自动切换兼容流')
-      : (cloudStream ? 'OpenList 云端 H.264 原片直放；失败后自动切换 H.264 兼容转码' : 'H.264 原片原画质直放；失败后自动切换兼容转码')
+      ? (cloudStream ? '优先播放 OpenList 云端 HEVC 原片；播放中异常会先自动恢复原片，连续失败才切兼容流' : '优先播放 HEVC 原片；播放中异常会先自动恢复原片，连续失败才切兼容流')
+      : (cloudStream ? 'OpenList 云端 H.264 原片直放；播放中异常会先自动恢复' : 'H.264 原片原画质直放；播放中异常会先自动恢复')
     beginPlaybackSource(item, 'original', streamUrl(item.id, 'original'), notice)
     await nextTick(); return
   }
@@ -419,38 +435,106 @@ async function playNext() { await navigateAdjacent('next') }
 function currentVideo(event?: Event) {
   return (event?.currentTarget instanceof HTMLVideoElement ? event.currentTarget : null)
 }
-function handleLoadedMetadata(event: Event) { playbackTracker.markLoadedMetadata(); void event }
+function handleLoadedMetadata(event: Event) {
+  playbackTracker.markLoadedMetadata()
+  const video = currentVideo(event)
+  if (!video || playbackMode.value !== 'original' || pendingOriginalSeek.value === null) return
+  let target = Math.max(0, pendingOriginalSeek.value)
+  if (Number.isFinite(video.duration) && video.duration > 0) target = Math.min(target, Math.max(0, video.duration - 0.25))
+  pendingOriginalSeek.value = null
+  try { video.currentTime = target } catch { /* Browser may defer seeking until loadeddata. */ }
+}
 function handleLoadedData(event: Event) { playbackTracker.markLoadedData(); void event }
 function handleVideoCanPlay(event: Event) {
   playbackTracker.markCanPlay(currentVideo(event))
   preparing.value = false
-  if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) playbackNotice.value = '浏览器已直接解码 HEVC 原片，保持原始画质'
+  if (recoveringOriginal.value) playbackNotice.value = `原片已重新连接，正在从 ${formatDuration(originalRecoveryPoint.value)} 继续播放`
+  else if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) playbackNotice.value = '浏览器已直接解码 HEVC 原片，保持原始画质'
   else if (playbackMode.value === 'original') playbackNotice.value = '原片直放，保持原始画质'
   else if (playbackMode.value === 'proxy-live') playbackNotice.value = isCloudOnly(activeRecording.value!) ? 'OpenList 原片正在实时转为 H.264 1080p + AAC-LC；完成后缓存兼容版本' : '正在边转边播 H.264 1080p + AAC-LC；完成后缓存兼容版本'
   else if (playbackMode.value === 'proxy') playbackNotice.value = '正在播放已缓存的 H.264 1080p + AAC-LC 兼容版本'
 }
 function handleVideoPlaying(event: Event) {
-  playbackTracker.markPlaying(currentVideo(event))
-  if (playbackMode.value === 'original') originalPlaybackConfirmed.value = true
+  const video = currentVideo(event)
+  playbackTracker.markPlaying(video)
+  if (playbackMode.value === 'original') {
+    originalPlaybackConfirmed.value = true
+    recoveringOriginal.value = false
+    if (video && Number.isFinite(video.currentTime)) lastPlaybackTime.value = video.currentTime
+  }
+}
+function handleVideoTimeUpdate(event: Event) {
+  const video = currentVideo(event)
+  if (video && Number.isFinite(video.currentTime)) lastPlaybackTime.value = video.currentTime
 }
 async function handleVideoEnded() {
   stopProgressPolling(); proxyProgress.value = null
   if (!autoAdvance.value) { preparing.value = false; playbackNotice.value = '当前片段播放完成，自动续播已关闭'; return }
   if (!await navigateAdjacent('next', true)) { preparing.value = false; playbackNotice.value = '已播放到该摄像头最后一个可播放片段' }
 }
+async function restartOriginalAfterError(item: RecordingItem, video: HTMLVideoElement | null, mediaErrorCode: number) {
+  let errorAt = Math.max(0, Number(video?.currentTime || 0), lastPlaybackTime.value)
+  if (originalRecoveryAttempts.value > 0 && errorAt - originalRecoveryPoint.value > 10) originalRecoveryAttempts.value = 0
+  const attempt = originalRecoveryAttempts.value + 1
+  originalRecoveryAttempts.value = attempt
+  const decodeError = mediaErrorCode === 3 || mediaErrorCode === 4
+  const skipSeconds = decodeError ? (attempt === 1 ? 2 : 5) : 0
+  let resumeAt = errorAt + skipSeconds
+  const duration = Number(item.duration || video?.duration || 0)
+  if (Number.isFinite(duration) && duration > 0) resumeAt = Math.min(resumeAt, Math.max(0, duration - 0.25))
+
+  originalRecoveryPoint.value = resumeAt
+  pendingOriginalSeek.value = resumeAt
+  recoveringOriginal.value = true
+  originalPlaybackConfirmed.value = false
+  preparing.value = true
+  proxyError.value = ''
+  const reason = mediaErrorCode === 2 ? '网络读取异常' : decodeError ? '解码异常' : '媒体读取异常'
+  const skipText = skipSeconds ? `，跳过疑似损坏区间 ${skipSeconds}s` : ''
+  playbackNotice.value = `${reason}（${formatDuration(errorAt)}），正在第 ${attempt}/${MAX_ORIGINAL_RECOVERY_ATTEMPTS} 次恢复原片${skipText}…`
+  playbackTracker.reset()
+  playbackTracker.start({
+    recordingId: item.id,
+    codec: codecName(item.video_codec) || 'unknown',
+    playbackMode: 'original',
+    sourceKind: metricSourceKind(item, 'original'),
+    hevcHint: browserHevcHint.value,
+  })
+  videoSrc.value = streamUrl(item.id, 'original')
+  await nextTick()
+}
 async function handleVideoError(event: Event) {
   const item = activeRecording.value; if (!playerVisible.value || !item) return
   const video = currentVideo(event)
   playbackTracker.markError(video)
+  const mediaErrorCode = video?.error?.code || 0
+  const errorAt = Math.max(0, Number(video?.currentTime || 0), lastPlaybackTime.value)
+
   if (playbackMode.value === 'original' && !fallbackInProgress.value) {
-    if (originalPlaybackConfirmed.value) {
-      stopProgressPolling(); preparing.value = false
-      const mediaErrorCode = video?.error?.code || 0
-      const reason = mediaErrorCode === 2 ? '原片读取过程中发生网络错误' : mediaErrorCode === 3 ? '原片播放过程中发生解码错误' : '原片播放过程中发生媒体错误'
-      playbackNotice.value = `${reason}。本次已经验证浏览器能够播放该 HEVC 原片，因此不会自动降级到 H.264 转码；可重新点击当前片段重试原片。`
+    if (originalPlaybackConfirmed.value || recoveringOriginal.value || originalRecoveryAttempts.value > 0) {
+      if (originalRecoveryAttempts.value > 0 && errorAt - originalRecoveryPoint.value > 10) originalRecoveryAttempts.value = 0
+      if (originalRecoveryAttempts.value < MAX_ORIGINAL_RECOVERY_ATTEMPTS) {
+        await restartOriginalAfterError(item, video, mediaErrorCode)
+        return
+      }
+
+      if (mediaErrorCode === 3 || mediaErrorCode === 4) {
+        await prepareProxy(
+          item,
+          true,
+          true,
+          `原片在 ${formatDuration(errorAt)} 附近连续出现解码异常，原片自动恢复两次仍失败；已切换 H.264 兼容流以继续播放`,
+        )
+        return
+      }
+
+      stopProgressPolling(); preparing.value = false; recoveringOriginal.value = false
+      const reason = mediaErrorCode === 2 ? '原片网络读取连续失败' : '原片媒体读取连续失败'
+      playbackNotice.value = `${reason}（${formatDuration(errorAt)}）。已自动重连两次但仍未恢复，没有因网络错误启动转码；可重新点击当前片段重试。`
       return
     }
-    await prepareProxy(item, true, true)
+
+    await prepareProxy(item, true, true, mediaErrorCode === 3 || mediaErrorCode === 4 ? '原片首帧前确认解码失败，已切换 H.264 兼容模式' : '')
     return
   }
   stopProgressPolling(); preparing.value = false
@@ -468,7 +552,7 @@ async function cancelProxy() {
 }
 function closePlayer() {
   const id = activeRecording.value?.id; const shouldCancel = playbackMode.value === 'proxy-live'
-  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false
+  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false; resetOriginalRecovery()
   if (id && shouldCancel) void axios.post(`/api/recordings/${id}/playback/cancel`).catch(() => undefined)
 }
 
@@ -515,7 +599,7 @@ onBeforeUnmount(() => { stopProgressPolling(); playbackTracker.reset() })
       <div class="player-controls"><div><el-button :loading="navigationLoading" :disabled="preparing || !activeRecording" @click="playPrevious">上一段</el-button><el-button :loading="navigationLoading" :disabled="preparing || !activeRecording" @click="playNext">下一段</el-button></div><label class="auto-control"><span>自动续播（可跨日）</span><el-switch v-model="autoAdvance" /></label></div>
       <div v-if="playbackNotice" class="notice">{{ playbackNotice }}</div>
       <div v-if="showProxyProgress" class="proxy-progress"><div class="progress-head"><strong>H.264 兼容转码进度</strong><span>{{ proxyProgressText }}</span></div><el-progress :percentage="effectiveProgressPercent" :stroke-width="10" /><div class="progress-actions"><span>{{ effectiveProgressPercent.toFixed(1) }}%</span><el-button size="small" type="danger" plain :loading="cancellingProxy" @click="cancelProxy">停止转码</el-button></div></div>
-      <div class="player-box" v-loading="preparing || navigationLoading" :element-loading-text="playerLoadingText"><video v-if="videoSrc" :src="videoSrc" controls autoplay playsinline preload="auto" @loadedmetadata="handleLoadedMetadata" @loadeddata="handleLoadedData" @canplay="handleVideoCanPlay" @playing="handleVideoPlaying" @ended="handleVideoEnded" @error="handleVideoError" /><el-empty v-else-if="!preparing && proxyError" :description="proxyError" /><div v-else-if="preparing || navigationLoading" class="prepare-note">正在准备播放源…</div></div>
+      <div class="player-box" v-loading="preparing || navigationLoading" :element-loading-text="playerLoadingText"><video v-if="videoSrc" :src="videoSrc" controls autoplay playsinline preload="auto" @loadedmetadata="handleLoadedMetadata" @loadeddata="handleLoadedData" @canplay="handleVideoCanPlay" @playing="handleVideoPlaying" @timeupdate="handleVideoTimeUpdate" @ended="handleVideoEnded" @error="handleVideoError" /><el-empty v-else-if="!preparing && proxyError" :description="proxyError" /><div v-else-if="preparing || navigationLoading" class="prepare-note">正在准备播放源…</div></div>
     </el-dialog>
   </div>
 </template>
