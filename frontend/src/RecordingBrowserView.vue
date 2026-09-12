@@ -14,6 +14,7 @@ interface ProxyProgress {
   mode?: 'live' | 'generate' | string
   elapsed_seconds?: number
   duration_seconds?: number
+  source_offset_seconds?: number
   percent?: number | null
   running_seconds?: number
   cancellable?: boolean
@@ -99,6 +100,8 @@ const originalPlaybackConfirmed = ref(false)
 const recoveringOriginal = ref(false)
 const originalRecoveryAttempts = ref(0)
 const pendingOriginalSeek = ref<number | null>(null)
+const pendingCompatibilitySeek = ref<number | null>(null)
+const compatibilityResumeAt = ref(0)
 const originalRecoveryPoint = ref(0)
 const lastPlaybackTime = ref(0)
 const playbackTracker = new PlaybackAttemptTracker()
@@ -180,7 +183,7 @@ const proxyProgressText = computed(() => {
   const elapsed = formatDuration(progress.elapsed_seconds)
   const total = formatDuration(activeRecording.value?.duration || progress.duration_seconds)
   const runtime = progress.running_seconds ? ` · 已运行 ${formatDuration(progress.running_seconds)}` : ''
-  return `已转 ${elapsed} / ${total}${runtime}`
+  return `已转至原片 ${elapsed} / ${total}${runtime}`
 })
 const showProxyProgress = computed(() =>
   playbackMode.value === 'proxy-live' && Boolean(proxyProgress.value),
@@ -188,8 +191,8 @@ const showProxyProgress = computed(() =>
 const playerLoadingText = computed(() => {
   if (navigationLoading.value) return '正在定位相邻录像…'
   if (recoveringOriginal.value) return '正在恢复原片播放…'
-  if (playbackMode.value === 'proxy-live') return '正在启动 H.264 兼容流…'
-  if (playbackMode.value === 'proxy') return '正在加载 H.264 兼容缓存…'
+  if (playbackMode.value === 'proxy-live') return compatibilityResumeAt.value > 0 ? `正在从 ${formatDuration(compatibilityResumeAt.value)} 启动 H.264 兼容流…` : '正在启动 H.264 兼容流…'
+  if (playbackMode.value === 'proxy') return compatibilityResumeAt.value > 0 ? `正在从 ${formatDuration(compatibilityResumeAt.value)} 加载 H.264 兼容缓存…` : '正在加载 H.264 兼容缓存…'
   if (activeRecording.value && isCloudOnly(activeRecording.value)) return '正在连接 OpenList 云端流…'
   return '正在加载原始录像…'
 })
@@ -255,7 +258,10 @@ function findLocalAdjacent(step: -1 | 1) {
   return null
 }
 function streamUrl(id: number, source: 'original' | 'proxy') { return `/api/recordings/${id}/stream?source=${source}&v=${Date.now()}` }
-function liveProxyUrl(id: number) { return `/api/recordings/${id}/proxy-live.mp4?v=${Date.now()}` }
+function liveProxyUrl(id: number, startSeconds = 0) {
+  const start = Math.max(0, Number(startSeconds || 0))
+  return `/api/recordings/${id}/proxy-live.mp4?v=${Date.now()}&start_seconds=${encodeURIComponent(start.toFixed(3))}`
+}
 function metricSourceKind(item: RecordingItem, mode: ActivePlaybackMode) {
   if (mode === 'proxy') return 'proxy_cache'
   if (item.playback?.source_kind) return item.playback.source_kind
@@ -267,6 +273,10 @@ function resetOriginalRecovery() {
   pendingOriginalSeek.value = null
   originalRecoveryPoint.value = 0
   lastPlaybackTime.value = 0
+}
+function resetCompatibilityResume() {
+  pendingCompatibilitySeek.value = null
+  compatibilityResumeAt.value = 0
 }
 function beginPlaybackSource(item: RecordingItem, mode: ActivePlaybackMode, src: string, notice: string) {
   playbackMode.value = mode
@@ -358,30 +368,39 @@ async function prepareProxy(
   automaticFallback = false,
   forceCompatibility = false,
   compatibilityReason = '',
+  resumeAt = 0,
 ) {
   if (fallbackInProgress.value) return
+  let resumePosition = Math.max(0, Number(resumeAt || 0))
+  const duration = Number(item.duration || 0)
+  if (Number.isFinite(duration) && duration > 0) resumePosition = Math.min(resumePosition, Math.max(0, duration - 0.25))
+  compatibilityResumeAt.value = resumePosition
+  pendingCompatibilitySeek.value = null
   fallbackInProgress.value = true; preparing.value = true; proxyError.value = ''; videoSrc.value = ''; proxyProgress.value = null; playbackTracker.reset(); recoveringOriginal.value = false; pendingOriginalSeek.value = null
   try {
     const state = (await axios.get<PlaybackState>(`/api/recordings/${item.id}/playback`)).data
     item.playback = { ...item.playback, ...state }
     if (state.state === 'ready') {
+      pendingCompatibilitySeek.value = resumePosition > 0 ? resumePosition : null
       beginPlaybackSource(item, 'proxy', streamUrl(item.id, 'proxy'), compatibilityReason || '正在播放已缓存的 H.264 1080p 兼容版本')
       await nextTick(); return
     }
     if (state.state === 'direct' && !forceCompatibility) {
+      resetCompatibilityResume()
       beginPlaybackSource(item, 'original', streamUrl(item.id, 'original'), '原片可直接播放，无需转码')
       await nextTick(); return
     }
     const fallbackText = automaticFallback ? '原片在当前浏览器解码失败，已自动切换 H.264 1080p 兼容流' : '正在生成 H.264 1080p 浏览器兼容流'
     const cloudText = isCloudOnly(item) ? 'FFmpeg 正直接读取 OpenList 远程流并转为 H.264 1080p 兼容流' : fallbackText
-    beginPlaybackSource(item, 'proxy-live', liveProxyUrl(item.id), compatibilityReason || cloudText)
+    const resumeText = resumePosition > 0 ? `；将从原片 ${formatDuration(resumePosition)} 继续` : ''
+    beginPlaybackSource(item, 'proxy-live', liveProxyUrl(item.id, resumePosition), (compatibilityReason || cloudText) + resumeText)
     await nextTick(); startProgressPolling(item.id)
   } catch (error: any) { proxyError.value = error?.response?.data?.detail || error?.message || '播放准备失败'; ElMessage.error(proxyError.value) }
   finally { fallbackInProgress.value = false }
 }
 async function play(item: RecordingItem) {
   if (!isPlayable(item)) return ElMessage.warning('这段录像本地已清理且没有可用云端归档')
-  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); playbackTracker.reset()
+  stopProgressPolling(); proxyProgress.value = null; activeRecording.value = item; playerVisible.value = true; videoSrc.value = ''; proxyError.value = ''; playbackNotice.value = ''; fallbackInProgress.value = false; preparing.value = true; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume(); playbackTracker.reset()
 
   if (!item.playback.original_available && !item.playback.remote_available) { preparing.value = false; proxyError.value = '本地原录像已清理，且没有成功归档记录'; return }
 
@@ -438,10 +457,15 @@ function currentVideo(event?: Event) {
 function handleLoadedMetadata(event: Event) {
   playbackTracker.markLoadedMetadata()
   const video = currentVideo(event)
-  if (!video || playbackMode.value !== 'original' || pendingOriginalSeek.value === null) return
-  let target = Math.max(0, pendingOriginalSeek.value)
+  if (!video) return
+  let pending: number | null = null
+  if (playbackMode.value === 'original') pending = pendingOriginalSeek.value
+  else if (playbackMode.value === 'proxy') pending = pendingCompatibilitySeek.value
+  if (pending === null) return
+  let target = Math.max(0, pending)
   if (Number.isFinite(video.duration) && video.duration > 0) target = Math.min(target, Math.max(0, video.duration - 0.25))
-  pendingOriginalSeek.value = null
+  if (playbackMode.value === 'original') pendingOriginalSeek.value = null
+  else pendingCompatibilitySeek.value = null
   try { video.currentTime = target } catch { /* Browser may defer seeking until loadeddata. */ }
 }
 function handleLoadedData(event: Event) { playbackTracker.markLoadedData(); void event }
@@ -451,7 +475,9 @@ function handleVideoCanPlay(event: Event) {
   if (recoveringOriginal.value) playbackNotice.value = `原片已重新连接，正在从 ${formatDuration(originalRecoveryPoint.value)} 继续播放`
   else if (playbackMode.value === 'original' && isHevc(activeRecording.value?.video_codec)) playbackNotice.value = '浏览器已直接解码 HEVC 原片，保持原始画质'
   else if (playbackMode.value === 'original') playbackNotice.value = '原片直放，保持原始画质'
+  else if (playbackMode.value === 'proxy-live' && compatibilityResumeAt.value > 0) playbackNotice.value = `${isCloudOnly(activeRecording.value!) ? 'OpenList 原片' : '原片'}已从 ${formatDuration(compatibilityResumeAt.value)} 继续边转边播 H.264 1080p + AAC-LC；该断点流仅用于本次续播，不会保存成半截兼容缓存`
   else if (playbackMode.value === 'proxy-live') playbackNotice.value = isCloudOnly(activeRecording.value!) ? 'OpenList 原片正在实时转为 H.264 1080p + AAC-LC；完成后缓存兼容版本' : '正在边转边播 H.264 1080p + AAC-LC；完成后缓存兼容版本'
+  else if (playbackMode.value === 'proxy' && compatibilityResumeAt.value > 0) playbackNotice.value = `已切换 H.264 1080p + AAC-LC 兼容缓存，并从 ${formatDuration(compatibilityResumeAt.value)} 继续播放`
   else if (playbackMode.value === 'proxy') playbackNotice.value = '正在播放已缓存的 H.264 1080p + AAC-LC 兼容版本'
 }
 function handleVideoPlaying(event: Event) {
@@ -524,6 +550,7 @@ async function handleVideoError(event: Event) {
           true,
           true,
           `原片在 ${formatDuration(errorAt)} 附近连续出现解码异常，原片自动恢复两次仍失败；已切换 H.264 兼容流以继续播放`,
+          errorAt,
         )
         return
       }
@@ -534,7 +561,7 @@ async function handleVideoError(event: Event) {
       return
     }
 
-    await prepareProxy(item, true, true, mediaErrorCode === 3 || mediaErrorCode === 4 ? '原片首帧前确认解码失败，已切换 H.264 兼容模式' : '')
+    await prepareProxy(item, true, true, mediaErrorCode === 3 || mediaErrorCode === 4 ? '原片首帧前确认解码失败，已切换 H.264 兼容模式' : '', errorAt)
     return
   }
   stopProgressPolling(); preparing.value = false
@@ -546,13 +573,13 @@ async function cancelProxy() {
   try {
     const response = await axios.post(`/api/recordings/${item.id}/playback/cancel`)
     proxyProgress.value = null; preparing.value = false; playbackMode.value = ''; playbackNotice.value = response.data.cancelled ? 'H.264 兼容转码已停止，未完成缓存已清理' : '当前没有正在运行的兼容转码'
-    item.playback.state = 'needed'; item.playback.progress = null
+    item.playback.state = 'needed'; item.playback.progress = null; resetCompatibilityResume()
   } catch (error: any) { ElMessage.error(error?.response?.data?.detail || '停止转码失败') }
   finally { cancellingProxy.value = false }
 }
 function closePlayer() {
   const id = activeRecording.value?.id; const shouldCancel = playbackMode.value === 'proxy-live'
-  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false; resetOriginalRecovery()
+  videoSrc.value = ''; stopProgressPolling(); playbackTracker.reset(); proxyProgress.value = null; playbackMode.value = ''; playbackNotice.value = ''; proxyError.value = ''; preparing.value = false; navigationLoading.value = false; fallbackInProgress.value = false; originalPlaybackConfirmed.value = false; resetOriginalRecovery(); resetCompatibilityResume()
   if (id && shouldCancel) void axios.post(`/api/recordings/${id}/playback/cancel`).catch(() => undefined)
 }
 
