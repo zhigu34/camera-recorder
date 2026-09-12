@@ -45,6 +45,33 @@ const form = reactive({
   local_retention_hours: 48,
 })
 
+const segmentDurationPresets = [
+  { label: '30 秒', value: 30 },
+  { label: '1 分钟', value: 60 },
+  { label: '2 分钟', value: 120 },
+  { label: '3 分钟', value: 180 },
+  { label: '5 分钟', value: 300 },
+  { label: '10 分钟', value: 600 },
+  { label: '15 分钟', value: 900 },
+  { label: '30 分钟', value: 1800 },
+  { label: '60 分钟', value: 3600 },
+]
+
+function segmentDurationText(seconds: number) {
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds % 60 === 0) return `${seconds / 60} 分钟`
+  return `${seconds} 秒`
+}
+
+const segmentDurationOptions = computed(() => {
+  if (segmentDurationPresets.some((option) => option.value === form.segment_duration_seconds)) {
+    return segmentDurationPresets
+  }
+  return [
+    ...segmentDurationPresets,
+    { label: `当前自定义值 · ${segmentDurationText(form.segment_duration_seconds)}`, value: form.segment_duration_seconds },
+  ].sort((a, b) => a.value - b.value)
+})
 const retentionLabel = computed(() => form.local_retention_hours < 0 ? '永久保留' : `${form.local_retention_hours} 小时`)
 const rtspTimeoutSeconds = computed(() => `${(form.rtsp_timeout_us / 1_000_000).toFixed(1)} 秒`)
 
@@ -159,11 +186,15 @@ onMounted(load)
         </div>
         <div class="settings-fields settings-fields-grid">
           <el-form-item label="切片时长">
-            <div class="number-field">
-              <el-input-number v-model="form.segment_duration_seconds" :min="30" :max="86400" :step="60" />
-              <span>秒</span>
-            </div>
-            <small>修改后重启对应摄像头连接生效。</small>
+            <el-select v-model="form.segment_duration_seconds" style="width: 220px" placeholder="选择单段录像时长">
+              <el-option
+                v-for="option in segmentDurationOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <small>每个录像文件约 {{ segmentDurationText(form.segment_duration_seconds) }}；修改后重启对应摄像头连接生效。</small>
           </el-form-item>
           <el-form-item label="RTSP 超时">
             <div class="number-field">
