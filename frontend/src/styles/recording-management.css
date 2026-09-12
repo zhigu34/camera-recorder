@@ -1,0 +1,60 @@
+/* Recording management workspace.
+ * Keep asset-management surfaces theme-native instead of relying on a late parity patch.
+ */
+
+.nvr-workspace-content .recording-page .summary-card,
+.nvr-workspace-content .recording-page .panel,
+.nvr-workspace-content .recording-page .filter-panel,
+.nvr-workspace-content .recording-page .table-panel {
+  color: var(--nvr-text);
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .recording-page .summary-card em {
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-workspace-content .recording-page .pagination-row {
+  color: var(--nvr-muted);
+  background: var(--nvr-surface-2) !important;
+}
+
+.nvr-workspace-content .recording-page .el-table {
+  --el-table-bg-color: var(--nvr-surface);
+  --el-table-tr-bg-color: var(--nvr-surface);
+  --el-table-header-bg-color: color-mix(in srgb, var(--nvr-surface-2) 72%, var(--nvr-surface));
+  --el-table-row-hover-bg-color: var(--nvr-hover);
+  --el-table-border-color: var(--nvr-border);
+  --el-table-text-color: var(--nvr-text-soft);
+  --el-table-header-text-color: var(--nvr-subtle);
+}
+
+.nvr-workspace-content .recording-page .el-table th.el-table__cell,
+.nvr-workspace-content .recording-page .el-table td.el-table__cell,
+.nvr-workspace-content .recording-page .el-table__fixed,
+.nvr-workspace-content .recording-page .el-table__fixed-right {
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .recording-page .el-table th.el-table__cell {
+  background: color-mix(in srgb, var(--nvr-surface-2) 72%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .recording-page .el-table__row:hover > td.el-table__cell {
+  background: var(--nvr-hover) !important;
+}
+
+.nvr-workspace-content .recording-page .detail-title,
+.nvr-workspace-content .recording-page .detail-list,
+.nvr-workspace-content .recording-page .detail-list > div {
+  border-color: var(--nvr-border) !important;
+}
+
+.nvr-workspace-content .recording-page .detail-list dd {
+  color: var(--nvr-text-soft);
+}
+
+.nvr-workspace-content .recording-page .batch-actions {
+  border-color: color-mix(in srgb, var(--nvr-red) 18%, var(--nvr-border));
+  background: color-mix(in srgb, var(--nvr-red) 4%, var(--nvr-surface));
+}
