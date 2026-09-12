@@ -759,15 +759,15 @@ onBeforeUnmount(() => {
         <section class="panel list-panel" v-loading="loading">
           <div class="panel-head"><div><strong>录像片段列表</strong><span>共 {{ filteredRecordings.length }} 条</span></div><span class="list-hint">单击选择 · 双击播放</span></div>
           <el-table :data="filteredRecordings" row-key="id" max-height="520" empty-text="当前日期暂无录像" :row-class-name="recordingRowClassName" @selection-change="handleSelectionChange" @row-click="selectRecording" @row-dblclick="play">
-            <el-table-column type="selection" width="42" :selectable="canDelete" />
-            <el-table-column label="开始时间" width="96"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
-            <el-table-column label="时长" width="82"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
-            <el-table-column label="大小" width="88"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
-            <el-table-column label="位置" width="104"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
-            <el-table-column label="健康" width="84"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
-            <el-table-column label="归档" width="90"><template #default="{ row }">{{ uploadLabel(row.upload_status) }}</template></el-table-column>
-            <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
-            <el-table-column label="操作" width="132" fixed="right"><template #default="{ row }"><el-button size="small" type="primary" plain :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-button size="small" type="danger" link :disabled="!canDelete(row)" @click.stop="deleteOne(row)">删除</el-button></template></el-table-column>
+            <el-table-column type="selection" width="38" :selectable="canDelete" />
+            <el-table-column label="开始时间" width="86"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
+            <el-table-column label="时长" width="68"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
+            <el-table-column label="大小" width="74"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
+            <el-table-column label="位置" width="66"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
+            <el-table-column label="健康" width="62"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
+            <el-table-column label="归档" width="70"><template #default="{ row }">{{ uploadLabel(row.upload_status) }}</template></el-table-column>
+            <el-table-column prop="filename" label="文件名" min-width="120" show-overflow-tooltip />
+            <el-table-column label="操作" width="112"><template #default="{ row }"><el-button size="small" type="primary" plain :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-button size="small" type="danger" link :disabled="!canDelete(row)" @click.stop="deleteOne(row)">删除</el-button></template></el-table-column>
           </el-table>
         </section>
       </div>

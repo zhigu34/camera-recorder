@@ -183,24 +183,6 @@
   grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
 }
 
-/* Recording table ---------------------------------------------------------
- * Element Plus owns fixed-column sizing and positioning. Only the surface is
- * customized here so the action column stays opaque above scrolled content. */
-.nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right,
-.nvr-workspace-content .recording-center .list-panel th.el-table-fixed-column--right,
-.nvr-workspace-content .recording-center .list-panel td.el-table-fixed-column--right {
-  background: var(--nvr-surface) !important;
-  box-shadow: -1px 0 0 var(--recording-soft-line) !important;
-}
-
-.nvr-workspace-content .recording-center .list-panel .active-recording-row > td.el-table-fixed-column--right {
-  background: color-mix(in srgb, var(--nvr-blue) 8%, var(--nvr-surface)) !important;
-}
-
-.nvr-workspace-content .recording-center .list-panel .el-table__row:hover > td.el-table-fixed-column--right {
-  background: color-mix(in srgb, var(--nvr-blue) 5%, var(--nvr-surface)) !important;
-}
-
 @media (max-width: 1280px) {
   .nvr-workspace-content .recording-center .calendar-toolbar {
     grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.15fr) repeat(3, minmax(0, .8fr)) !important;

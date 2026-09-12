@@ -230,9 +230,10 @@
 }
 
 .nvr-workspace-content .recording-center .heat-cell.active {
-  outline: 1px solid var(--nvr-blue) !important;
-  outline-offset: 1px !important;
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nvr-blue) 35%, transparent) !important;
+  outline: 0 !important;
+  box-shadow:
+    0 0 0 2px var(--nvr-blue) inset,
+    0 0 0 1px color-mix(in srgb, var(--nvr-blue) 35%, transparent) inset !important;
 }
 
 .nvr-workspace-content .recording-center .heat-cell:not(:disabled):hover {
