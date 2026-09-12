@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor"]
+CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor", "panoramic"]
 CameraIdentityConfidence = Literal["high", "medium"]
 
 
@@ -26,6 +26,8 @@ def _brand(manufacturer: str | None) -> str:
         return "hikvision"
     if "大华" in raw:
         return "dahua"
+    if "萤石" in raw:
+        return "ezviz"
 
     value = _compact(raw)
     aliases = {
@@ -36,29 +38,12 @@ def _brand(manufacturer: str | None) -> str:
         "UNIFI": "unifi",
         "TPLINK": "tplink",
         "TAPO": "tplink",
+        "EZVIZ": "ezviz",
     }
     for alias, normalized in aliases.items():
         if alias in value:
             return normalized
     return value.lower()
-
-
-def _brand_from_model(compact_model: str) -> str | None:
-    """Infer vendor only when the model prefix is vendor-specific enough.
-
-    This intentionally avoids ambiguous short consumer model names such as
-    ``C200`` unless the manufacturer already identifies the vendor.
-    """
-
-    if compact_model.startswith(("DS2CD", "DS2DE")):
-        return "hikvision"
-    if compact_model.startswith(("IPCHFW", "IPCHDBW", "IPCHDW")) or re.match(r"^SD[0-9A-Z]", compact_model):
-        return "dahua"
-    if compact_model.startswith(("RLC", "VIDEODOORBELL", "TRACKMIX")) or compact_model in {"E1", "E1PRO", "E1ZOOM"}:
-        return "reolink"
-    if compact_model.startswith("UVC"):
-        return "unifi"
-    return None
 
 
 def infer_camera_form_factor(
@@ -69,8 +54,7 @@ def infer_camera_form_factor(
 
     Rules intentionally favor precision over recall. Unknown or ambiguous models
     return None so callers can preserve a manually selected form factor instead
-    of guessing incorrectly. Recognizable vendor-specific model prefixes can be
-    used even when the manufacturer field was never filled in.
+    of guessing incorrectly.
     """
 
     raw_model = (model or "").strip()
@@ -80,12 +64,12 @@ def infer_camera_form_factor(
     upper_model = raw_model.upper()
     compact_model = _compact(raw_model)
     brand = _brand(manufacturer)
-    if brand not in {"hikvision", "dahua", "reolink", "unifi", "tplink"}:
-        brand = _brand_from_model(compact_model) or brand
 
     # Explicit product-family words are the safest cross-vendor signal.
     generic_words: tuple[tuple[str, CameraFormFactor], ...] = (
         ("DOORBELL", "doorbell"),
+        ("PANORAMIC", "panoramic"),
+        ("FISHEYE", "panoramic"),
         ("TURRET", "turret"),
         ("BULLET", "bullet"),
         ("DOME", "dome"),
@@ -94,6 +78,26 @@ def infer_camera_form_factor(
     for word, form_factor in generic_words:
         if word in upper_model:
             return CameraFormFactorGuess(form_factor, "high", "model_keyword", word.lower())
+
+    # EZVIZ consumer cameras use CS-* identifiers. Installations often store the
+    # manufacturer as Hikvision (the parent/vendor ecosystem), so recognize these
+    # product families from the model itself rather than requiring manufacturer=EZVIZ.
+    if re.search(r"^CSC6(?:C|CN|WI|N|W|$)", compact_model) or compact_model.startswith("CSC60P"):
+        return CameraFormFactorGuess("ptz", "high", "model_catalog", "ezviz_c6_ptz")
+    if compact_model.startswith("CSC8C"):
+        return CameraFormFactorGuess("ptz", "high", "model_catalog", "ezviz_c8c_ptz")
+    if compact_model.startswith("CSE4P"):
+        return CameraFormFactorGuess("panoramic", "high", "model_catalog", "ezviz_e4p_panoramic")
+
+    # Recognizable catalog prefixes can identify the vendor even if manufacturer
+    # was never filled in. This keeps automatic shape inference useful for legacy
+    # rows imported before identity metadata existed.
+    if compact_model.startswith("DS2"):
+        brand = "hikvision"
+    elif compact_model.startswith(("IPCHFW", "IPCHDBW", "IPCHDW")):
+        brand = "dahua"
+    elif compact_model.startswith("RLC") or compact_model.startswith(("VIDEODOORBELL", "TRACKMIX")):
+        brand = "reolink"
 
     if brand == "hikvision":
         rules: tuple[tuple[str, CameraFormFactor], ...] = (
