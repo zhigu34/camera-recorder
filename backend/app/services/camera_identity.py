@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
-CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor", "panoramic"]
+CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor"]
 CameraIdentityConfidence = Literal["high", "medium"]
 
 
@@ -68,8 +68,6 @@ def infer_camera_form_factor(
     # Explicit product-family words are the safest cross-vendor signal.
     generic_words: tuple[tuple[str, CameraFormFactor], ...] = (
         ("DOORBELL", "doorbell"),
-        ("PANORAMIC", "panoramic"),
-        ("FISHEYE", "panoramic"),
         ("TURRET", "turret"),
         ("BULLET", "bullet"),
         ("DOME", "dome"),
@@ -82,12 +80,12 @@ def infer_camera_form_factor(
     # EZVIZ consumer cameras use CS-* identifiers. Installations often store the
     # manufacturer as Hikvision (the parent/vendor ecosystem), so recognize these
     # product families from the model itself rather than requiring manufacturer=EZVIZ.
-    if re.search(r"^CSC6(?:C|CN|WI|N|W|$)", compact_model) or compact_model.startswith("CSC60P"):
+    if compact_model.startswith("CSC6"):
         return CameraFormFactorGuess("ptz", "high", "model_catalog", "ezviz_c6_ptz")
     if compact_model.startswith("CSC8C"):
         return CameraFormFactorGuess("ptz", "high", "model_catalog", "ezviz_c8c_ptz")
     if compact_model.startswith("CSE4P"):
-        return CameraFormFactorGuess("panoramic", "high", "model_catalog", "ezviz_e4p_panoramic")
+        return CameraFormFactorGuess("dome", "high", "model_catalog", "ezviz_e4p_ceiling")
 
     # Recognizable catalog prefixes can identify the vendor even if manufacturer
     # was never filled in. This keeps automatic shape inference useful for legacy
