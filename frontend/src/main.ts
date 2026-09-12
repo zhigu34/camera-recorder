@@ -12,6 +12,7 @@ import './styles/unifi-console.css'
 import './styles/camera-device-center.css'
 import './styles/appliance-console.css'
 import './styles/playback-theme-parity.css'
+import './styles/operations-theme-parity.css'
 
 import Root from './Root.vue'
 
