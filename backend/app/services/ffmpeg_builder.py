@@ -65,6 +65,10 @@ def build_record_command(
         camera.rtsp_path,
     )
 
+    input_fflags = "+discardcorrupt"
+    if camera.timestamp_mode == "wallclock":
+        input_fflags += "+genpts"
+
     command = [
         settings.ffmpeg_bin,
         "-nostdin",
@@ -75,10 +79,12 @@ def build_record_command(
         "tcp",
         "-timeout",
         str(runtime.rtsp_timeout_us),
+        "-fflags",
+        input_fflags,
     ]
 
     if camera.timestamp_mode == "wallclock":
-        command += ["-use_wallclock_as_timestamps", "1", "-fflags", "+genpts"]
+        command += ["-use_wallclock_as_timestamps", "1"]
 
     command += [
         "-i",
