@@ -19,15 +19,14 @@ frontend/.vite/
 .env.*
 !.env.example
 *.key
-data/secret.key
 
 # Runtime data
-data/*.db
-data/*.db-*
+data/
 recordings/
 staging/
 failed/
 logs/
+openlist-data/
 
 # Media
 *.mkv
