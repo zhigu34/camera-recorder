@@ -123,6 +123,41 @@ async def scan_media_packets(path: Path) -> tuple[bool, str | None]:
     return True, None
 
 
+async def decode_media_video(path: Path) -> tuple[bool, str | None]:
+    """Fully decode a suspicious video segment to distinguish warning from corruption.
+
+    This intentionally runs only after the cheap packet scan reports a problem,
+    so normal recordings do not pay the CPU cost of decoding every stored frame.
+    """
+
+    command = [
+        settings.ffmpeg_bin,
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-xerror",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-an",
+        "-f",
+        "null",
+        "-",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await process.communicate()
+    detail = stderr.decode(errors="replace").strip()
+    if process.returncode != 0 or detail:
+        return False, detail[-1000:] or f"decode scan exited with {process.returncode}"
+    return True, None
+
+
 async def remux_to_mp4(source: Path, target: Path, video_codec: str | None) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.part.mp4")
@@ -283,12 +318,34 @@ class SegmentProcessor:
                 raise RuntimeError("final MP4 has no video stream")
 
             packet_ok, packet_error = await scan_media_packets(target)
+            decode_ok = True
+            decode_error: str | None = None
             health = "healthy"
+            warning_increment = 0
+
             if camera.audio_codec and not media["has_audio"]:
                 health = "warning"
+                warning_increment += 1
+
             if not packet_ok:
                 health = "warning"
+                warning_increment += 1
                 logger.warning("recording packet scan warning for %s: %s", target, packet_error)
+                decode_ok, decode_error = await decode_media_video(target)
+                if not decode_ok:
+                    health = "unhealthy"
+                    warning_increment += 1
+                    logger.error(
+                        "recording deep decode failed for %s: packet=%s decode=%s",
+                        target,
+                        packet_error,
+                        decode_error,
+                    )
+                else:
+                    logger.info(
+                        "recording deep decode passed after packet warning for %s",
+                        target,
+                    )
 
             duration = media["duration"]
             ended_at = started_at + timedelta(seconds=duration) if duration else None
@@ -308,8 +365,8 @@ class SegmentProcessor:
             recording.ffprobe_ok = 1
             recording.has_video = int(media["has_video"])
             recording.has_audio = int(media["has_audio"])
-            if not packet_ok:
-                recording.warning_count = int(recording.warning_count or 0) + 1
+            if warning_increment:
+                recording.warning_count = int(recording.warning_count or 0) + warning_increment
 
             if existing is None:
                 session.add(recording)
