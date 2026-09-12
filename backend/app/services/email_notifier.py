@@ -3,6 +3,7 @@ import smtplib
 import ssl
 from datetime import datetime, timezone
 from email.message import EmailMessage
+from email.utils import formataddr
 
 from app.core.database import SessionLocal
 from app.services.event_log import add_event
@@ -22,13 +23,22 @@ class EmailNotifier:
         camera_id: int | None = None,
         success_code: str = "notification.email_sent",
         config: EmailNotificationConfig | None = None,
+        recipient_override: str | None = None,
+        attachments: list[tuple[str, bytes, str, str]] | None = None,
     ) -> bool:
         config = config or await self.load_config()
         if not config.configured:
             return False
 
         try:
-            await asyncio.to_thread(self._send_sync, config, subject, body)
+            await asyncio.to_thread(
+                self._send_sync,
+                config,
+                subject,
+                body,
+                recipient_override,
+                attachments or [],
+            )
         except Exception as exc:
             await self._record_event(
                 level="error",
@@ -114,7 +124,7 @@ class EmailNotifier:
             config=config,
         )
 
-    async def send_test(self) -> bool:
+    async def send_test(self, recipient: str | None = None) -> bool:
         config = await self.load_config()
         now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
         return await self.send(
@@ -122,15 +132,36 @@ class EmailNotifier:
             body=f"这是一封 Camera Recorder 测试邮件。\n\n发送时间：{now}\n",
             success_code="notification.test_email_sent",
             config=config,
+            recipient_override=recipient,
         )
 
     @staticmethod
-    def _send_sync(config: EmailNotificationConfig, subject: str, body: str) -> None:
+    def _send_sync(
+        config: EmailNotificationConfig,
+        subject: str,
+        body: str,
+        recipient_override: str | None,
+        attachments: list[tuple[str, bytes, str, str]],
+    ) -> None:
         message = EmailMessage()
         message["Subject"] = subject
-        message["From"] = config.smtp_from
-        message["To"] = ", ".join(config.recipients)
+        message["From"] = (
+            formataddr((config.smtp_sender_name, config.smtp_from))
+            if config.smtp_sender_name.strip()
+            else config.smtp_from
+        )
+        if recipient_override:
+            message["To"] = recipient_override
+        else:
+            message["To"] = ", ".join(
+                formataddr((entry.name, entry.address)) if entry.name else entry.address
+                for entry in config.recipient_entries
+            )
         message.set_content(body)
+
+        if config.email_attach_images:
+            for filename, payload, maintype, subtype in attachments:
+                message.add_attachment(payload, maintype=maintype, subtype=subtype, filename=filename)
 
         if config.smtp_use_ssl:
             context = ssl.create_default_context()
@@ -159,7 +190,7 @@ class EmailNotifier:
 
     @staticmethod
     def _login(smtp: smtplib.SMTP, config: EmailNotificationConfig) -> None:
-        if config.smtp_username:
+        if config.smtp_auth_enabled:
             smtp.login(config.smtp_username, config.smtp_password)
 
     @staticmethod
