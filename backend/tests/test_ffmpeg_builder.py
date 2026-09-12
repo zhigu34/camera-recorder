@@ -38,10 +38,22 @@ def test_reconstruct_command_uses_detected_media_clock(tmp_path: Path):
     assert "time_base=1/20:prescale=1" in joined
     assert "ts=N*1024:duration=1024:time_base=1/16000:prescale=1" in joined
     assert "-rtsp_transport tcp" in joined
+    assert "-fflags +discardcorrupt" in joined
     assert "-c:v copy" in joined
     assert "-c:a copy" in joined
     assert "-segment_time 600" in joined
     assert "-segment_atclocktime 1" in joined
+
+
+def test_wallclock_command_combines_timestamp_and_corrupt_packet_flags(tmp_path: Path):
+    camera = make_camera(timestamp_mode="wallclock")
+    runtime = RuntimeSettings(segment_duration_seconds=300, rtsp_timeout_us=5_000_000)
+
+    command = build_record_command(camera, tmp_path, runtime)
+    joined = " ".join(command)
+
+    assert "-fflags +discardcorrupt+genpts" in joined
+    assert "-use_wallclock_as_timestamps 1" in joined
 
 
 def test_scheduled_recording_can_disable_clock_alignment(tmp_path: Path):
