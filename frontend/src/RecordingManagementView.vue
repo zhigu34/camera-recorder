@@ -136,6 +136,16 @@ function clearFilters() {
   dateRange.value = null
 }
 function openDetail(row: Recording) { activeRecording.value = row; detailVisible.value = true }
+function openPlayback(row: Recording) {
+  const params = new URLSearchParams()
+  params.set('camera_id', String(row.camera_id))
+  const date = row.started_at?.slice(0, 10)
+  if (date) params.set('date', date)
+  params.set('recording_id', String(row.id))
+  detailVisible.value = false
+  window.history.pushState({}, '', `/recordings/browser?${params.toString()}`)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
 function requestParams() {
   const params: Record<string, string | number> = {
     offset: (page.value - 1) * pageSize.value,
@@ -302,7 +312,7 @@ onBeforeUnmount(() => { if (filterTimer !== null) window.clearTimeout(filterTime
         <el-table-column label="存储" width="125"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
         <el-table-column label="归档" width="120"><template #default="{ row }"><el-tag :type="uploadType(row.upload_status)" size="small">{{ uploadLabel(row.upload_status) }}</el-tag></template></el-table-column>
         <el-table-column label="健康" width="110"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
-        <el-table-column label="操作" width="270" fixed="right"><template #default="{ row }"><el-button size="small" @click="openDetail(row)">详情</el-button><el-button size="small" type="primary" plain @click="emit('open-playback')"><VideoPlay class="button-icon" />回放</el-button><el-button v-if="row.upload_status === 'failed' || row.upload_status === 'retry_wait'" size="small" type="warning" plain @click="emit('open-uploads')">处理归档</el-button><el-button v-if="row.status !== 'deleted'" size="small" type="danger" plain :disabled="row.upload_status === 'uploading'" :loading="deleting" @click="deleteOne(row)">删除</el-button></template></el-table-column>
+        <el-table-column label="操作" width="270" fixed="right"><template #default="{ row }"><el-button size="small" @click="openDetail(row)">详情</el-button><el-button size="small" type="primary" plain @click="openPlayback(row)"><VideoPlay class="button-icon" />回放</el-button><el-button v-if="row.upload_status === 'failed' || row.upload_status === 'retry_wait'" size="small" type="warning" plain @click="emit('open-uploads')">处理归档</el-button><el-button v-if="row.status !== 'deleted'" size="small" type="danger" plain :disabled="row.upload_status === 'uploading'" :loading="deleting" @click="deleteOne(row)">删除</el-button></template></el-table-column>
       </el-table>
       <div class="pagination-row"><el-pagination background layout="prev, pager, next" :current-page="page" :page-size="pageSize" :total="total" :pager-count="7" @current-change="changePage" /></div>
     </section>
@@ -312,7 +322,7 @@ onBeforeUnmount(() => { if (filterTimer !== null) window.clearTimeout(filterTime
         <div class="detail-title"><strong>{{ cameraName(activeRecording.camera_id) }}</strong><span>{{ fileName(activeRecording) }}</span></div>
         <div class="detail-tags"><el-tag :type="storageType(activeRecording)">{{ storageLabel(activeRecording) }}</el-tag><el-tag :type="uploadType(activeRecording.upload_status)">{{ uploadLabel(activeRecording.upload_status) }}</el-tag><el-tag :type="healthType(activeRecording)">{{ healthLabel(activeRecording) }}</el-tag></div>
         <dl class="detail-list"><div><dt>开始时间</dt><dd>{{ formatTime(activeRecording.started_at) }}</dd></div><div><dt>结束时间</dt><dd>{{ formatTime(activeRecording.ended_at) }}</dd></div><div><dt>时长</dt><dd>{{ formatDuration(activeRecording.duration) }}</dd></div><div><dt>文件大小</dt><dd>{{ formatBytes(activeRecording.file_size) }}</dd></div><div><dt>编码</dt><dd>{{ activeRecording.video_codec || '-' }} / {{ activeRecording.audio_codec || '-' }}</dd></div><div><dt>分辨率</dt><dd>{{ activeRecording.width || '-' }} × {{ activeRecording.height || '-' }}</dd></div><div class="wide"><dt>本地路径</dt><dd>{{ activeRecording.mp4_path }}</dd></div><div><dt>归档状态</dt><dd>{{ uploadLabel(activeRecording.upload_status) }}</dd></div><div><dt>告警</dt><dd>{{ activeRecording.warning_count }}（时间戳 {{ activeRecording.timestamp_warning_count }} / 网络 {{ activeRecording.network_warning_count }}）</dd></div></dl>
-        <div class="drawer-actions"><el-button v-if="activeRecording.status !== 'deleted'" type="danger" plain :disabled="activeRecording.upload_status === 'uploading'" :loading="deleting" @click="deleteOne(activeRecording)">删除录像</el-button><span class="drawer-spacer"></span><el-button @click="emit('open-uploads')">上传管理</el-button><el-button type="primary" @click="emit('open-playback')">进入录像回放</el-button></div>
+        <div class="drawer-actions"><el-button v-if="activeRecording.status !== 'deleted'" type="danger" plain :disabled="activeRecording.upload_status === 'uploading'" :loading="deleting" @click="deleteOne(activeRecording)">删除录像</el-button><span class="drawer-spacer"></span><el-button @click="emit('open-uploads')">上传管理</el-button><el-button type="primary" @click="openPlayback(activeRecording)">进入录像回放</el-button></div>
       </template>
     </el-drawer>
   </div>
