@@ -1,5 +1,5 @@
 <script setup lang="ts">
-type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor'
+type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor' | 'panoramic'
 
 defineProps<{
   formFactor: CameraFormFactor
@@ -33,6 +33,14 @@ defineProps<{
       <path d="M17 29h30v6c0 10-7 18-15 18s-15-8-15-18z" />
       <circle cx="32" cy="38" r="7" />
       <circle cx="32" cy="38" r="3" />
+    </g>
+
+    <g v-else-if="formFactor === 'panoramic'">
+      <ellipse cx="32" cy="31" rx="22" ry="13" />
+      <ellipse cx="32" cy="31" rx="9" ry="9" />
+      <circle cx="32" cy="31" r="3" />
+      <path d="M16 42c4 5 10 8 16 8s12-3 16-8" />
+      <path d="M14 23c4-5 10-8 18-8s14 3 18 8" />
     </g>
 
     <g v-else-if="formFactor === 'doorbell'">
