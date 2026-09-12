@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  ArrowLeft,
+  ArrowRight,
   Connection,
   Delete,
   Edit,
@@ -327,6 +329,36 @@ const filteredCameras = computed(() => {
   })
 })
 
+const selectedInFilteredCameras = computed(() => Boolean(
+  selectedCamera.value && filteredCameras.value.some((camera) => camera.id === selectedCamera.value?.id),
+))
+
+const navigationCameras = computed(() => {
+  if (!selectedCamera.value || selectedInFilteredCameras.value) return filteredCameras.value
+  return cameras.value
+})
+
+const selectedNavigationIndex = computed(() => {
+  if (!selectedCamera.value) return -1
+  return navigationCameras.value.findIndex((camera) => camera.id === selectedCamera.value?.id)
+})
+
+const previousCamera = computed<Camera | null>(() => {
+  const index = selectedNavigationIndex.value
+  return index > 0 ? navigationCameras.value[index - 1] : null
+})
+
+const nextCamera = computed<Camera | null>(() => {
+  const index = selectedNavigationIndex.value
+  return index >= 0 && index < navigationCameras.value.length - 1 ? navigationCameras.value[index + 1] : null
+})
+
+const navigationScopeLabel = computed(() => {
+  if (!selectedInFilteredCameras.value) return '全部设备'
+  if (query.value.trim() || filter.value !== 'all') return '当前筛选'
+  return '全部设备'
+})
+
 const previewSrc = computed(() => selectedCamera.value && previewPlaying.value
   ? `/api/cameras/${selectedCamera.value.id}/preview.mjpeg?stream=${previewSource.value}&fps=6&width=960&_=${previewNonce.value}`
   : '')
@@ -491,6 +523,12 @@ function openDetails(camera: Camera, syncUrl = true) {
   if (syncUrl && deepLinkedCameraId() !== camera.id) writeCameraDeepLink(camera.id, 'push')
 }
 
+function switchDetails(camera: Camera | null) {
+  if (!camera) return
+  openDetails(camera, false)
+  writeCameraDeepLink(camera.id, 'replace')
+}
+
 function closeDrawer() {
   const selectedId = selectedCamera.value?.id || null
   previewPlaying.value = false
@@ -569,13 +607,13 @@ onBeforeUnmount(() => {
 
         <div class="camera-copy">
           <div class="camera-name-row">
-            <strong>{{ camera.name }}</strong>
+            <strong :title="camera.name">{{ camera.name }}</strong>
             <span class="health-badge" :class="health(camera)"><i></i>{{ healthLabel(camera) }}</span>
             <span class="record-badge" :class="{ active: isRecording(camera.id) }"><i></i>{{ runtimeLabel(camera) }}</span>
           </div>
-          <div class="camera-identity">{{ identitySummary(camera) }}</div>
-          <div class="camera-video">{{ videoSummary(camera) }}</div>
-          <div class="camera-address">{{ camera.ip }}:{{ camera.rtsp_port }} · {{ camera.rtsp_path }}</div>
+          <div class="camera-identity" :title="identitySummary(camera)">{{ identitySummary(camera) }}</div>
+          <div class="camera-video" :title="videoSummary(camera)">{{ videoSummary(camera) }}</div>
+          <div class="camera-address" :title="`${camera.ip}:${camera.rtsp_port} · ${camera.rtsp_path}`">{{ camera.ip }}:{{ camera.rtsp_port }} · {{ camera.rtsp_path }}</div>
         </div>
 
         <div class="camera-signals">
@@ -602,8 +640,8 @@ onBeforeUnmount(() => {
       <template #header>
         <div v-if="selectedCamera" class="drawer-title">
           <div class="drawer-title-copy">
-            <strong>{{ selectedCamera.name }}</strong>
-            <span>{{ identitySummary(selectedCamera) }}</span>
+            <strong :title="selectedCamera.name">{{ selectedCamera.name }}</strong>
+            <span :title="identitySummary(selectedCamera)">{{ identitySummary(selectedCamera) }}</span>
           </div>
           <div class="drawer-title-states">
             <span class="health-badge" :class="health(selectedCamera)"><i></i>{{ healthLabel(selectedCamera) }}</span>
@@ -613,6 +651,27 @@ onBeforeUnmount(() => {
       </template>
 
       <div v-if="selectedCamera" class="drawer-body drawer-body-v2">
+        <nav v-if="navigationCameras.length > 1" class="drawer-device-nav" aria-label="摄像头切换">
+          <el-button
+            text
+            :icon="ArrowLeft"
+            :disabled="!previousCamera"
+            :title="previousCamera ? `上一台：${previousCamera.name}` : '已经是第一台'"
+            @click="switchDetails(previousCamera)"
+          >上一台</el-button>
+          <div class="drawer-device-nav-position">
+            <strong>{{ selectedNavigationIndex + 1 }} / {{ navigationCameras.length }}</strong>
+            <span>{{ navigationScopeLabel }}</span>
+          </div>
+          <el-button
+            text
+            :icon="ArrowRight"
+            :disabled="!nextCamera"
+            :title="nextCamera ? `下一台：${nextCamera.name}` : '已经是最后一台'"
+            @click="switchDetails(nextCamera)"
+          >下一台</el-button>
+        </nav>
+
         <section class="device-overview">
           <div class="device-overview-visual" :class="health(selectedCamera)">
             <CameraDeviceGlyph :form-factor="selectedCamera.form_factor" />
@@ -620,14 +679,14 @@ onBeforeUnmount(() => {
           <div class="device-overview-main">
             <div class="device-overview-heading">
               <div>
-                <strong>{{ selectedCamera.manufacturer || '通用 RTSP 摄像头' }}</strong>
-                <span>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span>
+                <strong :title="selectedCamera.manufacturer || '通用 RTSP 摄像头'">{{ selectedCamera.manufacturer || '通用 RTSP 摄像头' }}</strong>
+                <span :title="`${selectedCamera.model || formFactorLabel(selectedCamera.form_factor)} · #${selectedCamera.id}`">{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span>
               </div>
               <span class="device-overview-type">{{ formFactorLabel(selectedCamera.form_factor) }}</span>
             </div>
             <dl class="device-overview-facts">
-              <div><dt>地址</dt><dd>{{ selectedCamera.ip }}:{{ selectedCamera.rtsp_port }}</dd></div>
-              <div><dt>视频</dt><dd>{{ videoSummary(selectedCamera) }}</dd></div>
+              <div><dt>地址</dt><dd :title="`${selectedCamera.ip}:${selectedCamera.rtsp_port}`">{{ selectedCamera.ip }}:{{ selectedCamera.rtsp_port }}</dd></div>
+              <div><dt>视频</dt><dd :title="videoSummary(selectedCamera)">{{ videoSummary(selectedCamera) }}</dd></div>
               <div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div>
             </dl>
           </div>
@@ -708,8 +767,8 @@ onBeforeUnmount(() => {
               <div><dt>IP 地址</dt><dd>{{ selectedCamera.ip }}</dd></div>
               <div><dt>RTSP 端口</dt><dd>{{ selectedCamera.rtsp_port }}</dd></div>
               <div><dt>用户名</dt><dd>{{ selectedCamera.username || '-' }}</dd></div>
-              <div><dt>主码流</dt><dd>{{ selectedCamera.rtsp_path }}</dd></div>
-              <div class="wide"><dt>子码流</dt><dd>{{ selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置' }}</dd></div>
+              <div><dt>主码流</dt><dd :title="selectedCamera.rtsp_path">{{ selectedCamera.rtsp_path }}</dd></div>
+              <div class="wide"><dt>子码流</dt><dd :title="selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置'">{{ selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置' }}</dd></div>
             </dl>
           </section>
 
@@ -793,6 +852,6 @@ onBeforeUnmount(() => {
 .toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}.search-box{width:min(560px,100%)}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
 .camera-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.camera-card{min-width:0;display:flex;flex-direction:column;cursor:pointer}.camera-card-topline{display:flex;align-items:flex-start;justify-content:space-between}.camera-icon{display:grid;place-items:center;border:1px solid var(--nvr-border)}.camera-card-id{color:var(--nvr-subtle);font-size:10px}.camera-copy{min-width:0}.camera-name-row{display:flex;align-items:center;gap:6px;min-width:0}.camera-name-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.health-badge.online i{background:var(--nvr-green)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active i{background:var(--nvr-red)}.camera-identity,.camera-video,.camera-address{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.camera-signals span,.camera-signals b{display:block}.camera-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .empty-state{min-height:330px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--nvr-border-strong);border-radius:11px;color:var(--nvr-muted);background:var(--nvr-surface)}.empty-state :deep(svg){width:34px;margin-bottom:12px;color:var(--nvr-subtle)}.empty-state strong{color:var(--nvr-text-soft);font-size:13px}.empty-state span{margin:6px 0 16px;font-size:11px}
-.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div:first-child{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px}.drawer-title span:not(.health-badge):not(.record-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-title-states{display:flex;align-items:center;gap:6px}.drawer-body{display:flex;flex-direction:column;gap:13px}.device-hero{display:flex;align-items:center;gap:16px}.device-hero-visual{display:grid;place-items:center;border:1px solid var(--nvr-border)}.device-hero-copy{min-width:0;display:flex;flex-direction:column}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:28px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.74));font-size:10px}.preview-overlay-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.preview-overlay-status>span{display:inline-flex;align-items:center;gap:5px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-stream-chip{padding:2px 5px;border:1px solid rgba(255,255,255,.16);border-radius:4px;background:rgba(5,8,12,.44)}.preview-stream-chip.fallback{color:#ffd58a}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.drawer-operation-panel,.detail-section{border:1px solid var(--nvr-border);background:var(--nvr-surface)}.drawer-operation-copy{display:flex;flex-direction:column}.drawer-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.detail-heading{display:flex;align-items:center;justify-content:space-between}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.camera-form{padding-top:4px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-grid .wide{grid-column:1/-1}.form-grid :deep(.el-input-number){width:100%}.switch-group{display:flex;align-items:center;gap:20px;min-height:32px;padding:0 0 18px 88px}.switch-group label{display:flex;align-items:center;gap:9px;color:var(--nvr-muted);font-size:11px}
+.drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div:first-child{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px}.drawer-title span:not(.health-badge):not(.record-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-title-states{display:flex;align-items:center;gap:6px}.drawer-body{display:flex;flex-direction:column;gap:13px}.drawer-device-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:1px 2px}.drawer-device-nav :deep(.el-button){height:29px;margin:0;padding:0 8px;color:var(--nvr-muted);font-size:10px}.drawer-device-nav :deep(.el-button:first-child){justify-self:start}.drawer-device-nav :deep(.el-button:last-child){justify-self:end;flex-direction:row-reverse}.drawer-device-nav-position{display:flex;align-items:baseline;justify-content:center;gap:6px;color:var(--nvr-muted);white-space:nowrap}.drawer-device-nav-position strong{color:var(--nvr-text-soft);font-size:10px;font-weight:650}.drawer-device-nav-position span{font-size:8px}.device-hero{display:flex;align-items:center;gap:16px}.device-hero-visual{display:grid;place-items:center;border:1px solid var(--nvr-border)}.device-hero-copy{min-width:0;display:flex;flex-direction:column}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:28px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.74));font-size:10px}.preview-overlay-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.preview-overlay-status>span{display:inline-flex;align-items:center;gap:5px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-stream-chip{padding:2px 5px;border:1px solid rgba(255,255,255,.16);border-radius:4px;background:rgba(5,8,12,.44)}.preview-stream-chip.fallback{color:#ffd58a}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.drawer-operation-panel,.detail-section{border:1px solid var(--nvr-border);background:var(--nvr-surface)}.drawer-operation-copy{display:flex;flex-direction:column}.drawer-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.detail-heading{display:flex;align-items:center;justify-content:space-between}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.camera-form{padding-top:4px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-grid .wide{grid-column:1/-1}.form-grid :deep(.el-input-number){width:100%}.switch-group{display:flex;align-items:center;gap:20px;min-height:32px;padding:0 0 18px 88px}.switch-group label{display:flex;align-items:center;gap:9px;color:var(--nvr-muted);font-size:11px}
 @media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.camera-list{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}.drawer-title{align-items:flex-start}.drawer-title-states{flex-direction:column;align-items:flex-end}}
 </style>
