@@ -71,20 +71,20 @@
   background: var(--nvr-surface-2) !important;
 }
 
-/* Keep the device name authoritative. Runtime states may move to the next line,
-   but they must never squeeze a Chinese camera name down to one character wide. */
+/* Device title and both runtime states are one information row. The title owns
+   the flexible width and truncates first; state tags remain visible and never
+   force Chinese device names into vertical wrapping. */
 .nvr-workspace-content .camera-page .camera-name-row {
   display: flex !important;
   align-items: center !important;
-  flex-wrap: wrap !important;
-  column-gap: 7px !important;
-  row-gap: 4px !important;
+  flex-wrap: nowrap !important;
+  gap: 6px !important;
   min-width: 0;
 }
 
 .nvr-workspace-content .camera-page .camera-name-row > strong {
-  min-width: 120px;
-  flex: 1 1 180px;
+  min-width: 0;
+  flex: 1 1 auto;
   margin-right: 2px;
   overflow: hidden;
   color: var(--nvr-text);
@@ -96,58 +96,78 @@
   word-break: keep-all;
 }
 
-.nvr-workspace-content .camera-page .camera-name-row .health-badge,
-.nvr-workspace-content .camera-page .camera-name-row .record-badge {
+/* The dashboard also owns a class named health-badge. Explicitly reset it inside
+   the camera workspace so dashboard-only decoration (including LIVE STATUS)
+   can never leak into device rows or the camera drawer. */
+.nvr-workspace-content .camera-page .health-badge,
+.nvr-workspace-content .camera-page .record-badge {
+  width: auto !important;
+  min-width: auto !important;
+  height: 22px !important;
+  min-height: 22px !important;
   flex: 0 0 auto;
-  height: auto !important;
-  min-height: 0 !important;
   display: inline-flex !important;
+  grid-template-columns: none !important;
   align-items: center !important;
+  justify-content: center !important;
   gap: 4px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  border-radius: 0 !important;
+  padding: 0 7px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 6px !important;
   color: var(--nvr-muted) !important;
-  background: transparent !important;
+  background: var(--nvr-pill-bg) !important;
   font-size: 10px !important;
-  font-weight: 520;
-  line-height: 1.2 !important;
+  font-weight: 560 !important;
+  line-height: 20px !important;
   box-shadow: none !important;
   white-space: nowrap;
 }
 
-.nvr-workspace-content .camera-page .camera-name-row .health-badge i,
-.nvr-workspace-content .camera-page .camera-name-row .record-badge i {
+.nvr-workspace-content .camera-page .health-badge::after {
+  content: none !important;
+  display: none !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge i,
+.nvr-workspace-content .camera-page .record-badge i {
   width: 5px !important;
   height: 5px !important;
   flex: 0 0 5px;
   margin: 0 !important;
   border-radius: 50%;
+  background: var(--nvr-subtle);
   box-shadow: none !important;
 }
 
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.online {
-  color: color-mix(in srgb, var(--nvr-green) 80%, var(--nvr-text)) !important;
+.nvr-workspace-content .camera-page .health-badge.online {
+  border-color: color-mix(in srgb, var(--nvr-green) 24%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-green) 82%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-green) 7%, var(--nvr-surface)) !important;
 }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.online i { background: var(--nvr-green) !important; }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.offline { color: color-mix(in srgb, var(--nvr-red) 84%, var(--nvr-text)) !important; }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.offline i { background: var(--nvr-red) !important; }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.unknown { color: color-mix(in srgb, var(--nvr-yellow) 80%, var(--nvr-text)) !important; }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.unknown i { background: var(--nvr-yellow) !important; }
-.nvr-workspace-content .camera-page .camera-name-row .health-badge.disabled i { background: var(--nvr-subtle) !important; }
+.nvr-workspace-content .camera-page .health-badge.online i { background: var(--nvr-green) !important; }
 
-.nvr-workspace-content .camera-page .camera-name-row .record-badge::before {
-  content: '·';
-  margin-right: 1px;
-  color: var(--nvr-subtle);
-  font-size: 10px;
-  line-height: 1;
-}
-
-.nvr-workspace-content .camera-page .camera-name-row .record-badge.active {
+.nvr-workspace-content .camera-page .health-badge.offline {
+  border-color: color-mix(in srgb, var(--nvr-red) 24%, var(--nvr-border)) !important;
   color: color-mix(in srgb, var(--nvr-red) 84%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-red) 7%, var(--nvr-surface)) !important;
 }
-.nvr-workspace-content .camera-page .camera-name-row .record-badge.active i { background: var(--nvr-red) !important; }
+.nvr-workspace-content .camera-page .health-badge.offline i { background: var(--nvr-red) !important; }
+
+.nvr-workspace-content .camera-page .health-badge.unknown {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 24%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-yellow) 82%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-yellow) 7%, var(--nvr-surface)) !important;
+}
+.nvr-workspace-content .camera-page .health-badge.unknown i { background: var(--nvr-yellow) !important; }
+.nvr-workspace-content .camera-page .health-badge.disabled i { background: var(--nvr-subtle) !important; }
+
+.nvr-workspace-content .camera-page .record-badge::before { content: none !important; }
+.nvr-workspace-content .camera-page .record-badge.active {
+  border-color: color-mix(in srgb, var(--nvr-red) 24%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-red) 84%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-red) 7%, var(--nvr-surface)) !important;
+}
+.nvr-workspace-content .camera-page .record-badge.active i { background: var(--nvr-red) !important; }
 
 .nvr-workspace-content .camera-page .camera-identity { margin-top: 4px !important; font-size: 10px !important; }
 .nvr-workspace-content .camera-page .camera-address { margin-top: 4px !important; font-size: 10px !important; }
@@ -177,9 +197,16 @@
 
 @media (max-width: 760px) {
   .nvr-workspace-content .camera-page { padding: 14px !important; }
+  .nvr-workspace-content .camera-page .camera-name-row {
+    gap: 5px !important;
+  }
   .nvr-workspace-content .camera-page .camera-name-row > strong {
-    min-width: 100%;
-    flex-basis: 100%;
+    min-width: 0;
+    flex-basis: auto;
+  }
+  .nvr-workspace-content .camera-page .health-badge,
+  .nvr-workspace-content .camera-page .record-badge {
+    padding: 0 6px !important;
   }
   .nvr-workspace-content .camera-page .camera-signals {
     padding-left: 0;
