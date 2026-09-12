@@ -62,6 +62,7 @@ const query = ref('')
 const filter = ref<FilterKey>('all')
 const drawerVisible = ref(false)
 const selectedCamera = ref<Camera | null>(null)
+const previewPlaying = ref(false)
 const previewFailed = ref(false)
 const previewNonce = ref(Date.now())
 const previewSource = ref<PreviewSource>('main')
@@ -207,11 +208,36 @@ function preferredPreviewSource(camera: Camera): PreviewSource {
   return camera.sub_rtsp_path?.trim() || inferSubstreamPath(camera.rtsp_path) ? 'sub' : 'main'
 }
 
-function resetPreview(camera: Camera) {
+function preparePreview(camera: Camera) {
+  previewPlaying.value = false
   previewSource.value = preferredPreviewSource(camera)
   previewFallbackUsed.value = false
   previewFailed.value = false
   previewNonce.value = Date.now()
+}
+
+function startPreview() {
+  if (!selectedCamera.value?.enabled) return
+  previewSource.value = preferredPreviewSource(selectedCamera.value)
+  previewFallbackUsed.value = false
+  previewFailed.value = false
+  previewNonce.value = Date.now()
+  previewPlaying.value = true
+}
+
+function stopPreview() {
+  previewPlaying.value = false
+  previewFailed.value = false
+  previewFallbackUsed.value = false
+}
+
+function refreshPreview() {
+  if (!selectedCamera.value?.enabled) return
+  previewSource.value = preferredPreviewSource(selectedCamera.value)
+  previewFallbackUsed.value = false
+  previewFailed.value = false
+  previewNonce.value = Date.now()
+  previewPlaying.value = true
 }
 
 function handlePreviewLoad() {
@@ -219,7 +245,7 @@ function handlePreviewLoad() {
 }
 
 function handlePreviewError() {
-  if (!selectedCamera.value) return
+  if (!selectedCamera.value || !previewPlaying.value) return
   if (previewSource.value === 'sub') {
     previewSource.value = 'main'
     previewFallbackUsed.value = true
@@ -228,6 +254,7 @@ function handlePreviewError() {
     return
   }
   previewFailed.value = true
+  previewPlaying.value = false
 }
 
 function deepLinkedCameraId() {
@@ -251,6 +278,7 @@ function syncDrawerFromLocation(showMissing = false) {
   if (cameraId === null) {
     if (drawerVisible.value) drawerVisible.value = false
     selectedCamera.value = null
+    previewPlaying.value = false
     return
   }
   const camera = cameraById(cameraId)
@@ -259,11 +287,13 @@ function syncDrawerFromLocation(showMissing = false) {
     writeCameraDeepLink(null, 'replace')
     drawerVisible.value = false
     selectedCamera.value = null
+    previewPlaying.value = false
     return
   }
   const openingDifferentCamera = !drawerVisible.value || selectedCamera.value?.id !== camera.id
   selectedCamera.value = camera
-  if (openingDifferentCamera) resetPreview(camera)
+  if (openingDifferentCamera) preparePreview(camera)
+  if (!camera.enabled) previewPlaying.value = false
   drawerVisible.value = true
 }
 
@@ -297,7 +327,7 @@ const filteredCameras = computed(() => {
   })
 })
 
-const previewSrc = computed(() => selectedCamera.value
+const previewSrc = computed(() => selectedCamera.value && previewPlaying.value
   ? `/api/cameras/${selectedCamera.value.id}/preview.mjpeg?stream=${previewSource.value}&fps=6&width=960&_=${previewNonce.value}`
   : '')
 
@@ -312,6 +342,7 @@ async function loadData(showLoading = true) {
     } else if (selectedCamera.value) {
       selectedCamera.value = cameras.value.find((item) => item.id === selectedCamera.value?.id) || null
       if (!selectedCamera.value) drawerVisible.value = false
+      else if (!selectedCamera.value.enabled) previewPlaying.value = false
     }
   } catch (error) {
     if (showLoading) ElMessage.error(apiError(error, '摄像头数据加载失败'))
@@ -441,6 +472,7 @@ async function removeCamera(camera: Camera) {
     await axios.delete(`/api/cameras/${camera.id}`)
     ElMessage.success('摄像头已删除')
     if (selectedCamera.value?.id === camera.id) {
+      previewPlaying.value = false
       drawerVisible.value = false
       writeCameraDeepLink(null, 'replace')
     }
@@ -452,18 +484,16 @@ async function removeCamera(camera: Camera) {
 }
 
 function openDetails(camera: Camera, syncUrl = true) {
+  const openingDifferentCamera = selectedCamera.value?.id !== camera.id || !drawerVisible.value
   selectedCamera.value = camera
-  resetPreview(camera)
+  if (openingDifferentCamera) preparePreview(camera)
   drawerVisible.value = true
   if (syncUrl && deepLinkedCameraId() !== camera.id) writeCameraDeepLink(camera.id, 'push')
 }
 
-function refreshPreview() {
-  if (selectedCamera.value) resetPreview(selectedCamera.value)
-}
-
 function closeDrawer() {
   const selectedId = selectedCamera.value?.id || null
+  previewPlaying.value = false
   selectedCamera.value = null
   previewFailed.value = false
   previewFallbackUsed.value = false
@@ -477,6 +507,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  previewPlaying.value = false
   if (refreshTimer !== null) window.clearInterval(refreshTimer)
   window.removeEventListener('popstate', handleCameraPopState)
 })
@@ -521,6 +552,7 @@ onBeforeUnmount(() => {
         v-for="camera in filteredCameras"
         :key="camera.id"
         class="camera-card"
+        :class="{ selected: drawerVisible && selectedCamera?.id === camera.id }"
         role="button"
         tabindex="0"
         :aria-label="`查看 ${camera.name} 详情`"
@@ -566,13 +598,12 @@ onBeforeUnmount(() => {
       <el-button v-if="!cameras.length" type="primary" :icon="Plus" @click="openCreate">添加摄像头</el-button>
     </div>
 
-    <el-drawer v-model="drawerVisible" size="600px" class="camera-detail-drawer" @closed="closeDrawer">
+    <el-drawer v-model="drawerVisible" size="680px" class="camera-detail-drawer" @closed="closeDrawer">
       <template #header>
         <div v-if="selectedCamera" class="drawer-title">
-          <div>
+          <div class="drawer-title-copy">
             <strong>{{ selectedCamera.name }}</strong>
             <span>{{ identitySummary(selectedCamera) }}</span>
-            <span>{{ selectedCamera.ip }}:{{ selectedCamera.rtsp_port }}</span>
           </div>
           <div class="drawer-title-states">
             <span class="health-badge" :class="health(selectedCamera)"><i></i>{{ healthLabel(selectedCamera) }}</span>
@@ -581,103 +612,139 @@ onBeforeUnmount(() => {
         </div>
       </template>
 
-      <div v-if="selectedCamera" class="drawer-body">
-        <div class="device-hero">
-          <div class="device-hero-visual" :class="health(selectedCamera)">
+      <div v-if="selectedCamera" class="drawer-body drawer-body-v2">
+        <section class="device-overview">
+          <div class="device-overview-visual" :class="health(selectedCamera)">
             <CameraDeviceGlyph :form-factor="selectedCamera.form_factor" />
           </div>
-          <div class="device-hero-copy">
-            <strong>{{ selectedCamera.manufacturer || '通用 RTSP 摄像头' }}</strong>
-            <b>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }}</b>
-            <small>{{ formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</small>
-          </div>
-        </div>
-
-        <div class="preview-panel">
-          <img
-            v-if="selectedCamera.enabled && !previewFailed"
-            :key="previewNonce"
-            class="preview-image"
-            :src="previewSrc"
-            :alt="`${selectedCamera.name} 实时预览`"
-            @load="handlePreviewLoad"
-            @error="handlePreviewError"
-          />
-          <div v-else class="preview-empty">
-            <VideoCamera />
-            <strong>{{ selectedCamera.enabled ? '实时预览暂不可用' : '摄像头已禁用' }}</strong>
-            <span v-if="selectedCamera.enabled">子码流与主码流均无法打开，可执行连接检测后重试。</span>
-          </div>
-          <div class="preview-overlay">
-            <div class="preview-overlay-status">
-              <span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span>
-              <span class="preview-stream-chip">策略：AUTO</span>
-              <span class="preview-stream-chip" :class="{ fallback: previewFallbackUsed }">
-                实际：{{ previewSource === 'sub' ? '子码流' : '主码流' }}<template v-if="previewFallbackUsed"> · 回退</template>
-              </span>
+          <div class="device-overview-main">
+            <div class="device-overview-heading">
+              <div>
+                <strong>{{ selectedCamera.manufacturer || '通用 RTSP 摄像头' }}</strong>
+                <span>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span>
+              </div>
+              <span class="device-overview-type">{{ formFactorLabel(selectedCamera.form_factor) }}</span>
             </div>
-            <button @click="refreshPreview">重新加载</button>
+            <dl class="device-overview-facts">
+              <div><dt>地址</dt><dd>{{ selectedCamera.ip }}:{{ selectedCamera.rtsp_port }}</dd></div>
+              <div><dt>视频</dt><dd>{{ videoSummary(selectedCamera) }}</dd></div>
+              <div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div>
+            </dl>
           </div>
-        </div>
+        </section>
 
-        <div class="drawer-operation-panel">
+        <section class="preview-section">
+          <div class="preview-section-heading">
+            <div>
+              <strong>实时预览</strong>
+              <span>按需播放，打开详情不会自动拉取摄像头码流。</span>
+            </div>
+            <span v-if="previewPlaying" class="preview-live-badge"><i></i>预览中</span>
+          </div>
+
+          <div class="preview-panel preview-panel-v2" :class="{ idle: !previewPlaying && !previewFailed, failed: previewFailed }">
+            <img
+              v-if="selectedCamera.enabled && previewPlaying && !previewFailed"
+              :key="previewNonce"
+              class="preview-image"
+              :src="previewSrc"
+              :alt="`${selectedCamera.name} 实时预览`"
+              @load="handlePreviewLoad"
+              @error="handlePreviewError"
+            />
+
+            <div v-else-if="!selectedCamera.enabled" class="preview-empty preview-state-panel">
+              <VideoCamera />
+              <strong>摄像头已禁用</strong>
+              <span>启用设备后才能播放实时画面。</span>
+            </div>
+
+            <div v-else-if="previewFailed" class="preview-empty preview-state-panel">
+              <VideoCamera />
+              <strong>实时预览暂不可用</strong>
+              <span>子码流与主码流均无法打开，可先执行连接检测。</span>
+              <el-button size="small" :icon="Refresh" @click="startPreview">重新尝试</el-button>
+            </div>
+
+            <button v-else type="button" class="preview-play-control" @click="startPreview">
+              <span class="preview-play-icon"><VideoPlay /></span>
+              <strong>播放实时画面</strong>
+              <small>点击后才开始拉取 {{ preferredPreviewSource(selectedCamera) === 'sub' ? '子码流' : '主码流' }}</small>
+            </button>
+
+            <div v-if="previewPlaying && !previewFailed" class="preview-overlay preview-overlay-v2">
+              <div class="preview-overlay-status">
+                <span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span>
+                <span class="preview-stream-chip" :class="{ fallback: previewFallbackUsed }">
+                  {{ previewSource === 'sub' ? '子码流' : '主码流' }}<template v-if="previewFallbackUsed"> · 已回退</template>
+                </span>
+              </div>
+              <div class="preview-overlay-actions">
+                <button type="button" @click="refreshPreview">重新加载</button>
+                <button type="button" class="stop" @click="stopPreview">停止预览</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="drawer-operation-panel drawer-operation-panel-v2">
           <div class="drawer-operation-copy">
             <strong>设备操作</strong>
-            <span>预览、检测、录像与配置操作集中在当前设备详情中。</span>
+            <span>检测连接、控制录像、调整配置或进入多画面实时监控。</span>
           </div>
-          <div class="drawer-actions">
+          <div class="drawer-actions drawer-actions-v2">
             <el-button :icon="Connection" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'probe')">连接检测</el-button>
             <el-button v-if="!isRecording(selectedCamera.id)" type="primary" :icon="VideoPlay" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'start')">开始录像</el-button>
             <el-button v-else type="danger" plain :icon="VideoPause" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'stop')">停止录像</el-button>
             <el-button :icon="Edit" @click="openEdit(selectedCamera)">编辑配置</el-button>
-            <el-button @click="emit('open-preview')">进入实时监控</el-button>
-            <el-button type="danger" plain :icon="Delete" @click="removeCamera(selectedCamera)">删除摄像头</el-button>
+            <el-button @click="emit('open-preview')">实时监控</el-button>
           </div>
+        </section>
+
+        <div class="detail-columns">
+          <section class="detail-section detail-section-v2">
+            <div class="detail-heading"><strong>连接信息</strong></div>
+            <dl class="detail-grid detail-grid-v2">
+              <div><dt>IP 地址</dt><dd>{{ selectedCamera.ip }}</dd></div>
+              <div><dt>RTSP 端口</dt><dd>{{ selectedCamera.rtsp_port }}</dd></div>
+              <div><dt>用户名</dt><dd>{{ selectedCamera.username || '-' }}</dd></div>
+              <div><dt>主码流</dt><dd>{{ selectedCamera.rtsp_path }}</dd></div>
+              <div class="wide"><dt>子码流</dt><dd>{{ selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置' }}</dd></div>
+            </dl>
+          </section>
+
+          <section class="detail-section detail-section-v2">
+            <div class="detail-heading"><strong>视频与录像</strong></div>
+            <dl class="detail-grid detail-grid-v2">
+              <div><dt>编码</dt><dd>{{ selectedCamera.video_codec?.toUpperCase() || '-' }}</dd></div>
+              <div><dt>分辨率</dt><dd>{{ selectedCamera.width && selectedCamera.height ? `${selectedCamera.width}×${selectedCamera.height}` : '-' }}</dd></div>
+              <div><dt>帧率</dt><dd>{{ fps(selectedCamera) ? `${fps(selectedCamera)} FPS` : '-' }}</dd></div>
+              <div><dt>音频</dt><dd>{{ selectedCamera.audio_codec?.toUpperCase() || '-' }}</dd></div>
+              <div><dt>录像策略</dt><dd>{{ schedulePolicyLabel(selectedCamera) }}</dd></div>
+              <div><dt>计划状态</dt><dd>{{ scheduleStateLabel(selectedCamera) }}</dd></div>
+            </dl>
+          </section>
         </div>
 
-        <div class="detail-section">
-          <div class="detail-heading"><strong>设备信息</strong></div>
-          <dl class="detail-grid">
-            <div><dt>厂商</dt><dd>{{ selectedCamera.manufacturer || '未填写' }}</dd></div>
-            <div><dt>型号</dt><dd>{{ selectedCamera.model || '未填写' }}</dd></div>
-            <div><dt>外形</dt><dd>{{ formFactorLabel(selectedCamera.form_factor) }}</dd></div>
-            <div><dt>设备 ID</dt><dd>#{{ selectedCamera.id }}</dd></div>
-          </dl>
-        </div>
-
-        <div class="detail-section">
-          <div class="detail-heading"><strong>连接信息</strong></div>
-          <dl class="detail-grid">
-            <div><dt>IP 地址</dt><dd>{{ selectedCamera.ip }}</dd></div>
-            <div><dt>RTSP 端口</dt><dd>{{ selectedCamera.rtsp_port }}</dd></div>
-            <div><dt>用户名</dt><dd>{{ selectedCamera.username || '-' }}</dd></div>
-            <div><dt>主码流</dt><dd>{{ selectedCamera.rtsp_path }}</dd></div>
-            <div class="wide"><dt>子码流</dt><dd>{{ selectedCamera.sub_rtsp_path || inferSubstreamPath(selectedCamera.rtsp_path) || '未配置' }}</dd></div>
-          </dl>
-        </div>
-
-        <div class="detail-section">
-          <div class="detail-heading"><strong>视频与录像</strong></div>
-          <dl class="detail-grid">
-            <div><dt>编码</dt><dd>{{ selectedCamera.video_codec?.toUpperCase() || '-' }}</dd></div>
-            <div><dt>分辨率</dt><dd>{{ selectedCamera.width && selectedCamera.height ? `${selectedCamera.width}×${selectedCamera.height}` : '-' }}</dd></div>
-            <div><dt>帧率</dt><dd>{{ fps(selectedCamera) ? `${fps(selectedCamera)} FPS` : '-' }}</dd></div>
-            <div><dt>音频</dt><dd>{{ selectedCamera.audio_codec?.toUpperCase() || '-' }}</dd></div>
-            <div><dt>录像策略</dt><dd>{{ schedulePolicyLabel(selectedCamera) }}</dd></div>
-            <div><dt>时间戳模式</dt><dd>{{ selectedCamera.timestamp_mode }}</dd></div>
-          </dl>
-        </div>
-
-        <div class="detail-section">
+        <section class="detail-section detail-section-v2 runtime-section">
           <div class="detail-heading"><strong>运行状态</strong></div>
-          <dl class="detail-grid">
+          <dl class="detail-grid runtime-grid">
             <div><dt>连接状态</dt><dd>{{ healthLabel(selectedCamera) }}</dd></div>
             <div><dt>录像状态</dt><dd>{{ runtimeLabel(selectedCamera) }}</dd></div>
-            <div><dt>计划状态</dt><dd>{{ scheduleStateLabel(selectedCamera) }}</dd></div>
             <div><dt>最近检测</dt><dd>{{ formatTime(selectedCamera.last_probe_at) }}</dd></div>
             <div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div>
+            <div><dt>时间戳模式</dt><dd>{{ selectedCamera.timestamp_mode }}</dd></div>
+            <div><dt>设备类型</dt><dd>{{ formFactorLabel(selectedCamera.form_factor) }}</dd></div>
           </dl>
-        </div>
+        </section>
+
+        <section class="drawer-danger-zone">
+          <div>
+            <strong>删除摄像头</strong>
+            <span>删除设备配置；若正在录像，会先停止当前录像任务。</span>
+          </div>
+          <el-button type="danger" plain :icon="Delete" @click="removeCamera(selectedCamera)">删除</el-button>
+        </section>
       </div>
     </el-drawer>
 
