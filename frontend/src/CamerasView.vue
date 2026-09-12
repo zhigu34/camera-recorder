@@ -59,6 +59,10 @@ const emit = defineEmits<{
   (event: 'open-preview'): void
 }>()
 
+const CAMERA_PREFERENCES_KEY = 'camera-recorder:camera-device-preferences:v1'
+const validFilters = new Set<FilterKey>(['all', 'online', 'issue', 'recording'])
+const validSortKeys = new Set<SortKey>(['attention', 'name', 'ip', 'status'])
+
 const cameras = ref<Camera[]>([])
 const loading = ref(false)
 const query = ref('')
@@ -75,6 +79,9 @@ const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
 const saving = ref(false)
 const actionCameraId = ref<number | null>(null)
+const batchProbeRunning = ref(false)
+const batchProbeFailedNames = ref<string[]>([])
+const batchProbeProgress = reactive({ current: 0, total: 0, success: 0, failed: 0 })
 let refreshTimer: number | null = null
 
 const form = reactive({
@@ -119,6 +126,34 @@ function apiError(error: unknown, fallback: string) {
   return fallback
 }
 
+function loadPreferences() {
+  try {
+    const raw = window.localStorage.getItem(CAMERA_PREFERENCES_KEY)
+    if (!raw) return
+    const stored = JSON.parse(raw) as { filter?: string; sortKey?: string }
+    if (stored.filter && validFilters.has(stored.filter as FilterKey)) filter.value = stored.filter as FilterKey
+    if (stored.sortKey && validSortKeys.has(stored.sortKey as SortKey)) sortKey.value = stored.sortKey as SortKey
+  } catch {
+    // Ignore malformed or unavailable local storage; defaults remain safe.
+  }
+}
+
+function savePreferences() {
+  try {
+    window.localStorage.setItem(CAMERA_PREFERENCES_KEY, JSON.stringify({
+      filter: filter.value,
+      sortKey: sortKey.value,
+    }))
+  } catch {
+    // Browsing restrictions should not block camera management.
+  }
+}
+
+function setFilter(value: FilterKey) {
+  filter.value = value
+  savePreferences()
+}
+
 function cameraById(cameraId: number) {
   return cameras.value.find((item) => item.id === cameraId)
 }
@@ -129,6 +164,10 @@ function runtimeState(cameraId: number) {
 
 function isRecording(cameraId: number) {
   return runtimeState(cameraId) === 'RECORDING'
+}
+
+function isCameraBusy(cameraId: number) {
+  return actionCameraId.value === cameraId
 }
 
 function health(camera: Camera): CameraHealth {
@@ -380,6 +419,12 @@ const summary = computed(() => ({
 
 const sortedCameras = computed(() => [...cameras.value].sort(compareCameras))
 
+const issueCameras = computed(() => sortedCameras.value.filter(canQuickProbe))
+
+const batchProbeLabel = computed(() => batchProbeRunning.value
+  ? `检测中 ${batchProbeProgress.current}/${batchProbeProgress.total}`
+  : `检测异常 ${issueCameras.value.length}`)
+
 const filteredCameras = computed(() => {
   const needle = query.value.trim().toLowerCase()
   return sortedCameras.value.filter((camera) => {
@@ -543,6 +588,7 @@ async function saveCamera() {
 }
 
 async function runAction(camera: Camera, action: 'probe' | 'start' | 'stop') {
+  if (batchProbeRunning.value || actionCameraId.value !== null) return
   actionCameraId.value = camera.id
   try {
     if (action === 'probe') {
@@ -564,7 +610,49 @@ async function runAction(camera: Camera, action: 'probe' | 'start' | 'stop') {
   }
 }
 
+async function runBatchProbe() {
+  if (batchProbeRunning.value || actionCameraId.value !== null) return
+  const targets = [...issueCameras.value]
+  if (!targets.length) {
+    ElMessage.info('当前没有需要检测的异常设备')
+    return
+  }
+
+  batchProbeRunning.value = true
+  batchProbeFailedNames.value = []
+  Object.assign(batchProbeProgress, { current: 0, total: targets.length, success: 0, failed: 0 })
+
+  try {
+    for (const camera of targets) {
+      actionCameraId.value = camera.id
+      try {
+        await axios.post(`/api/cameras/${camera.id}/probe`)
+        batchProbeProgress.success += 1
+      } catch {
+        batchProbeProgress.failed += 1
+        batchProbeFailedNames.value.push(camera.name)
+      } finally {
+        batchProbeProgress.current += 1
+      }
+    }
+
+    actionCameraId.value = null
+    await loadData(false)
+    if (batchProbeProgress.failed === 0) {
+      ElMessage.success(`异常设备检测完成：成功 ${batchProbeProgress.success} 台`)
+    } else {
+      const names = batchProbeFailedNames.value.slice(0, 3).join('、')
+      const extra = batchProbeFailedNames.value.length > 3 ? ` 等 ${batchProbeFailedNames.value.length} 台` : ''
+      ElMessage.warning(`异常设备检测完成：成功 ${batchProbeProgress.success} 台，失败 ${batchProbeProgress.failed} 台（${names}${extra}）`)
+    }
+  } finally {
+    actionCameraId.value = null
+    batchProbeRunning.value = false
+  }
+}
+
 async function removeCamera(camera: Camera) {
+  if (batchProbeRunning.value || actionCameraId.value !== null) return
   try {
     await ElMessageBox.confirm(
       `确认删除“${camera.name}”？正在录像时会先停止录像。`,
@@ -594,7 +682,7 @@ function openDetails(camera: Camera, syncUrl = true) {
 }
 
 function switchDetails(camera: Camera | null) {
-  if (!camera) return
+  if (!camera || batchProbeRunning.value || actionCameraId.value !== null) return
   openDetails(camera, false)
   writeCameraDeepLink(camera.id, 'replace')
 }
@@ -608,8 +696,23 @@ function closeDrawer() {
   if (selectedId !== null && deepLinkedCameraId() === selectedId) writeCameraDeepLink(null, 'replace')
 }
 
+function handleDrawerKeyboard(event: KeyboardEvent) {
+  if (!drawerVisible.value || dialogVisible.value || batchProbeRunning.value || actionCameraId.value !== null) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, button, [contenteditable="true"], .el-input, .el-select')) return
+  if (event.key === 'ArrowLeft' && previousCamera.value) {
+    event.preventDefault()
+    switchDetails(previousCamera.value)
+  } else if (event.key === 'ArrowRight' && nextCamera.value) {
+    event.preventDefault()
+    switchDetails(nextCamera.value)
+  }
+}
+
 onMounted(() => {
+  loadPreferences()
   window.addEventListener('popstate', handleCameraPopState)
+  window.addEventListener('keydown', handleDrawerKeyboard)
   void loadData()
   refreshTimer = window.setInterval(() => void loadData(false), 10000)
 })
@@ -618,6 +721,7 @@ onBeforeUnmount(() => {
   previewPlaying.value = false
   if (refreshTimer !== null) window.clearInterval(refreshTimer)
   window.removeEventListener('popstate', handleCameraPopState)
+  window.removeEventListener('keydown', handleDrawerKeyboard)
 })
 </script>
 
@@ -629,32 +733,42 @@ onBeforeUnmount(() => {
         <p>集中查看设备身份、连接能力、实时预览与录像运行状态。</p>
       </div>
       <div class="heading-actions">
-        <el-button :icon="Refresh" @click="loadData()">刷新</el-button>
-        <el-button @click="emit('open-batch')">批量添加</el-button>
-        <el-button type="primary" :icon="Plus" @click="openCreate">添加摄像头</el-button>
+        <el-button :icon="Refresh" :disabled="batchProbeRunning" @click="loadData()">刷新</el-button>
+        <el-button :disabled="batchProbeRunning" @click="emit('open-batch')">批量添加</el-button>
+        <el-button type="primary" :icon="Plus" :disabled="batchProbeRunning" @click="openCreate">添加摄像头</el-button>
       </div>
     </div>
 
     <div class="summary-grid">
-      <button class="summary-card" :class="{ active: filter === 'all' }" @click="filter = 'all'">
+      <button class="summary-card" :class="{ active: filter === 'all' }" @click="setFilter('all')">
         <span>全部摄像头</span><strong>{{ summary.total }}</strong><small>已配置设备</small>
       </button>
-      <button class="summary-card online" :class="{ active: filter === 'online' }" @click="filter = 'online'">
+      <button class="summary-card online" :class="{ active: filter === 'online' }" @click="setFilter('online')">
         <span>在线</span><strong>{{ summary.online }}</strong><small>最近连接正常</small>
       </button>
-      <button class="summary-card issue" :class="{ active: filter === 'issue' }" @click="filter = 'issue'">
+      <button class="summary-card issue" :class="{ active: filter === 'issue' }" @click="setFilter('issue')">
         <span>异常 / 未检测</span><strong>{{ summary.issue }}</strong><small>建议执行连接检测</small>
       </button>
-      <button class="summary-card recording" :class="{ active: filter === 'recording' }" @click="filter = 'recording'">
+      <button class="summary-card recording" :class="{ active: filter === 'recording' }" @click="setFilter('recording')">
         <span>录像中</span><strong>{{ summary.recording }}</strong><small>当前录像进程</small>
       </button>
     </div>
 
     <div class="toolbar">
       <el-input v-model="query" clearable :prefix-icon="Search" placeholder="搜索名称、厂商、型号、IP 或 RTSP 路径" class="search-box" />
-      <el-select v-model="sortKey" class="camera-sort-select" aria-label="设备排序" title="设备排序">
-        <el-option v-for="item in sortOptions" :key="item.value" :label="item.label" :value="item.value" />
-      </el-select>
+      <div class="camera-toolbar-actions">
+        <el-select v-model="sortKey" class="camera-sort-select" aria-label="设备排序" title="设备排序" @change="savePreferences">
+          <el-option v-for="item in sortOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-button
+          v-if="issueCameras.length || batchProbeRunning"
+          class="batch-probe-button"
+          :icon="Connection"
+          :loading="batchProbeRunning"
+          :disabled="actionCameraId !== null && !batchProbeRunning"
+          @click="runBatchProbe"
+        >{{ batchProbeLabel }}</el-button>
+      </div>
       <span class="result-count">显示 {{ filteredCameras.length }} / {{ cameras.length }} 台</span>
     </div>
 
@@ -666,6 +780,7 @@ onBeforeUnmount(() => {
         :class="{
           selected: drawerVisible && selectedCamera?.id === camera.id,
           'needs-probe': canQuickProbe(camera),
+          busy: isCameraBusy(camera.id),
         }"
         role="button"
         tabindex="0"
@@ -706,7 +821,8 @@ onBeforeUnmount(() => {
                 size="small"
                 plain
                 :icon="Connection"
-                :loading="actionCameraId === camera.id"
+                :loading="isCameraBusy(camera.id)"
+                :disabled="batchProbeRunning || (actionCameraId !== null && !isCameraBusy(camera.id))"
                 @click="runAction(camera, 'probe')"
               >连接检测</el-button>
             </div>
@@ -745,18 +861,18 @@ onBeforeUnmount(() => {
           <el-button
             text
             :icon="ArrowLeft"
-            :disabled="!previousCamera"
+            :disabled="!previousCamera || batchProbeRunning || actionCameraId !== null"
             :title="previousCamera ? `上一台：${previousCamera.name}` : '已经是第一台'"
             @click="switchDetails(previousCamera)"
           >上一台</el-button>
           <div class="drawer-device-nav-position">
             <strong>{{ selectedNavigationIndex + 1 }} / {{ navigationCameras.length }}</strong>
-            <span>{{ navigationScopeLabel }}</span>
+            <span>{{ navigationScopeLabel }} · ← →</span>
           </div>
           <el-button
             text
             :icon="ArrowRight"
-            :disabled="!nextCamera"
+            :disabled="!nextCamera || batchProbeRunning || actionCameraId !== null"
             :title="nextCamera ? `下一台：${nextCamera.name}` : '已经是最后一台'"
             @click="switchDetails(nextCamera)"
           >下一台</el-button>
@@ -842,11 +958,31 @@ onBeforeUnmount(() => {
             <span>检测连接、控制录像、调整配置或进入多画面实时监控。</span>
           </div>
           <div class="drawer-actions drawer-actions-v2">
-            <el-button :icon="Connection" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'probe')">连接检测</el-button>
-            <el-button v-if="!isRecording(selectedCamera.id)" type="primary" :icon="VideoPlay" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'start')">开始录像</el-button>
-            <el-button v-else type="danger" plain :icon="VideoPause" :loading="actionCameraId === selectedCamera.id" @click="runAction(selectedCamera, 'stop')">停止录像</el-button>
-            <el-button :icon="Edit" @click="openEdit(selectedCamera)">编辑配置</el-button>
-            <el-button @click="emit('open-preview')">实时监控</el-button>
+            <el-button
+              :icon="Connection"
+              :loading="isCameraBusy(selectedCamera.id)"
+              :disabled="batchProbeRunning || (actionCameraId !== null && !isCameraBusy(selectedCamera.id))"
+              @click="runAction(selectedCamera, 'probe')"
+            >连接检测</el-button>
+            <el-button
+              v-if="!isRecording(selectedCamera.id)"
+              type="primary"
+              :icon="VideoPlay"
+              :loading="isCameraBusy(selectedCamera.id)"
+              :disabled="batchProbeRunning || (actionCameraId !== null && !isCameraBusy(selectedCamera.id))"
+              @click="runAction(selectedCamera, 'start')"
+            >开始录像</el-button>
+            <el-button
+              v-else
+              type="danger"
+              plain
+              :icon="VideoPause"
+              :loading="isCameraBusy(selectedCamera.id)"
+              :disabled="batchProbeRunning || (actionCameraId !== null && !isCameraBusy(selectedCamera.id))"
+              @click="runAction(selectedCamera, 'stop')"
+            >停止录像</el-button>
+            <el-button :icon="Edit" :disabled="batchProbeRunning || actionCameraId !== null" @click="openEdit(selectedCamera)">编辑配置</el-button>
+            <el-button :disabled="batchProbeRunning" @click="emit('open-preview')">实时监控</el-button>
           </div>
         </section>
 
@@ -892,7 +1028,7 @@ onBeforeUnmount(() => {
             <strong>删除摄像头</strong>
             <span>删除设备配置；若正在录像，会先停止当前录像任务。</span>
           </div>
-          <el-button type="danger" plain :icon="Delete" @click="removeCamera(selectedCamera)">删除</el-button>
+          <el-button type="danger" plain :icon="Delete" :disabled="batchProbeRunning || actionCameraId !== null" @click="removeCamera(selectedCamera)">删除</el-button>
         </section>
       </div>
     </el-drawer>
@@ -939,9 +1075,10 @@ onBeforeUnmount(() => {
 .camera-page{padding:22px;min-height:100%;color:var(--nvr-text)}
 .page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-heading h1{margin:0;font-size:20px;font-weight:680}.page-heading p{margin:6px 0 0;color:var(--nvr-muted);font-size:12px}.heading-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .summary-grid{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.summary-card{appearance:none;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);cursor:pointer}.summary-card span,.summary-card strong{display:inline-block}.summary-card small{display:none}
-.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}.search-box{width:min(560px,100%)}.camera-sort-select{width:116px;flex:0 0 116px}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
-.camera-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.camera-card{min-width:0;display:flex;flex-direction:column;cursor:pointer}.camera-card-topline{display:flex;align-items:flex-start;justify-content:space-between}.camera-icon{display:grid;place-items:center;border:1px solid var(--nvr-border)}.camera-card-id{color:var(--nvr-subtle);font-size:10px}.camera-copy{min-width:0}.camera-name-row{display:flex;align-items:center;gap:6px;min-width:0}.camera-name-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.health-badge.online i{background:var(--nvr-green)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active i{background:var(--nvr-red)}.camera-identity,.camera-video,.camera-address{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.camera-signals span,.camera-signals b{display:block}.camera-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.camera-card.needs-probe .camera-card-footer.quick-probe-footer{display:flex!important;grid-column:1/-1;margin-top:9px;padding-top:8px;border-top:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:9px}.camera-card-quick-action{flex:0 0 auto}.camera-card-quick-action :deep(.el-button){height:27px;margin:0;padding:0 9px;font-size:9px}.camera-card-quick-action :deep(.el-button.is-loading){pointer-events:none}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px}.search-box{width:min(560px,100%)}.camera-toolbar-actions{display:flex;align-items:center;gap:6px;flex:0 0 auto}.camera-sort-select{width:116px;flex:0 0 116px}.batch-probe-button{height:32px;margin:0!important;padding:0 10px;font-size:10px}.result-count{color:var(--nvr-muted);font-size:11px;white-space:nowrap}
+.camera-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}.camera-card{min-width:0;display:flex;flex-direction:column;cursor:pointer}.camera-card.busy{cursor:progress}.camera-card-topline{display:flex;align-items:flex-start;justify-content:space-between}.camera-icon{display:grid;place-items:center;border:1px solid var(--nvr-border)}.camera-card-id{color:var(--nvr-subtle);font-size:10px}.camera-copy{min-width:0}.camera-name-row{display:flex;align-items:center;gap:6px;min-width:0}.camera-name-row strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.health-badge,.record-badge{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}.health-badge i,.record-badge i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.health-badge.online i{background:var(--nvr-green)}.health-badge.offline i{background:var(--nvr-red)}.health-badge.unknown i{background:var(--nvr-yellow)}.record-badge.active i{background:var(--nvr-red)}.camera-identity,.camera-video,.camera-address{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.camera-signals{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.camera-signals span,.camera-signals b{display:block}.camera-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.camera-card.needs-probe .camera-card-footer.quick-probe-footer{display:flex!important;grid-column:1/-1;margin-top:9px;padding-top:8px;border-top:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:9px}.camera-card-quick-action{flex:0 0 auto}.camera-card-quick-action :deep(.el-button){height:27px;margin:0;padding:0 9px;font-size:9px}.camera-card-quick-action :deep(.el-button.is-loading){pointer-events:none}
 .empty-state{min-height:330px;display:flex;flex-direction:column;align-items:center;justify-content:center;border:1px dashed var(--nvr-border-strong);border-radius:11px;color:var(--nvr-muted);background:var(--nvr-surface)}.empty-state :deep(svg){width:34px;margin-bottom:12px;color:var(--nvr-subtle)}.empty-state strong{color:var(--nvr-text-soft);font-size:13px}.empty-state span{margin:6px 0 16px;font-size:11px}
 .drawer-title{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;padding-right:12px}.drawer-title>div:first-child{display:flex;min-width:0;flex-direction:column}.drawer-title strong{font-size:15px}.drawer-title span:not(.health-badge):not(.record-badge){margin-top:3px;color:var(--nvr-muted);font-size:10px}.drawer-title-states{display:flex;align-items:center;gap:6px}.drawer-body{display:flex;flex-direction:column;gap:13px}.drawer-device-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;padding:1px 2px}.drawer-device-nav :deep(.el-button){height:29px;margin:0;padding:0 8px;color:var(--nvr-muted);font-size:10px}.drawer-device-nav :deep(.el-button:first-child){justify-self:start}.drawer-device-nav :deep(.el-button:last-child){justify-self:end;flex-direction:row-reverse}.drawer-device-nav-position{display:flex;align-items:baseline;justify-content:center;gap:6px;color:var(--nvr-muted);white-space:nowrap}.drawer-device-nav-position strong{color:var(--nvr-text-soft);font-size:10px;font-weight:650}.drawer-device-nav-position span{font-size:8px}.device-hero{display:flex;align-items:center;gap:16px}.device-hero-visual{display:grid;place-items:center;border:1px solid var(--nvr-border)}.device-hero-copy{min-width:0;display:flex;flex-direction:column}.preview-panel{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:9px;background:#05080c;overflow:hidden}.preview-image{display:block;width:100%;height:100%;object-fit:contain;background:#05080c}.preview-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#617083}.preview-empty :deep(svg){width:34px;margin-bottom:9px}.preview-empty strong{color:#9aa7b7;font-size:12px}.preview-empty span{margin-top:5px;font-size:10px}.preview-overlay{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:flex-end;justify-content:space-between;gap:12px;padding:28px 10px 8px;color:#c4ced8;background:linear-gradient(transparent,rgba(0,0,0,.74));font-size:10px}.preview-overlay-status{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.preview-overlay-status>span{display:inline-flex;align-items:center;gap:5px}.preview-overlay i{width:6px;height:6px;border-radius:50%;background:#6a7787}.preview-overlay i.active{background:var(--nvr-red)}.preview-stream-chip{padding:2px 5px;border:1px solid rgba(255,255,255,.16);border-radius:4px;background:rgba(5,8,12,.44)}.preview-stream-chip.fallback{color:#ffd58a}.preview-overlay button{appearance:none;border:0;color:#c4ced8;background:transparent;cursor:pointer;font-size:10px}.drawer-operation-panel,.detail-section{border:1px solid var(--nvr-border);background:var(--nvr-surface)}.drawer-operation-copy{display:flex;flex-direction:column}.drawer-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.detail-heading{display:flex;align-items:center;justify-content:space-between}.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px 16px;margin:0}.detail-grid .wide{grid-column:1/-1}.detail-grid dt{margin-bottom:3px;color:var(--nvr-subtle);font-size:9px}.detail-grid dd{margin:0;color:var(--nvr-text-soft);font-size:10px;overflow-wrap:anywhere}.camera-form{padding-top:4px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}.form-grid .wide{grid-column:1/-1}.form-grid :deep(.el-input-number){width:100%}.switch-group{display:flex;align-items:center;gap:20px;min-height:32px;padding:0 0 18px 88px}.switch-group label{display:flex;align-items:center;gap:9px;color:var(--nvr-muted);font-size:11px}
-@media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.camera-list{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.camera-sort-select{width:100%;flex:none}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}.drawer-title{align-items:flex-start}.drawer-title-states{flex-direction:column;align-items:flex-end}.camera-card.needs-probe .camera-card-footer.quick-probe-footer{align-items:flex-start;gap:8px}.camera-card.needs-probe .camera-card-footer.quick-probe-footer>span{padding-top:5px}}
+@media (max-width:760px){.camera-page{padding:14px}.page-heading{flex-direction:column}.heading-actions{width:100%}.camera-list{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.search-box{width:100%}.camera-toolbar-actions{width:100%;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}.camera-sort-select{width:100%;flex:none}.batch-probe-button{width:100%}.detail-grid{grid-template-columns:1fr}.detail-grid .wide{grid-column:auto}.form-grid{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}.switch-group{padding-left:0}.camera-detail-drawer{width:100%!important}.drawer-title{align-items:flex-start}.drawer-title-states{flex-direction:column;align-items:flex-end}.camera-card.needs-probe .camera-card-footer.quick-probe-footer{align-items:flex-start;gap:8px}.camera-card.needs-probe .camera-card-footer.quick-probe-footer>span{padding-top:5px}}
+@media (max-width:460px){.camera-toolbar-actions{grid-template-columns:1fr}.drawer-device-nav-position span{display:none}}
 </style>
