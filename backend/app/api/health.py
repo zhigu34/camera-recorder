@@ -20,6 +20,26 @@ _EXPECTED_RECORDING_STATES = {
     "probe_required",
     "error",
 }
+_TIMESTAMP_GUIDANCE_THRESHOLD = 5
+
+
+def _timestamp_guidance(mode: str, warning_count: int) -> dict | None:
+    if warning_count < _TIMESTAMP_GUIDANCE_THRESHOLD:
+        return None
+    if mode == "native":
+        return {
+            "suggested_mode": "wallclock",
+            "message": "时间戳异常较多，建议切换为 wallclock 模式后观察。",
+        }
+    if mode == "wallclock":
+        return {
+            "suggested_mode": "reconstruct",
+            "message": "wallclock 下仍有时间戳异常，建议先 Probe，再尝试 reconstruct 模式。",
+        }
+    return {
+        "suggested_mode": None,
+        "message": "reconstruct 下仍有时间戳异常，建议检查摄像头源流、GOP 与网络稳定性。",
+    }
 
 
 async def _schedule_aware_snapshot() -> dict:
@@ -50,6 +70,8 @@ async def _schedule_aware_snapshot() -> dict:
         connectivity_status = camera.connectivity_status
         schedule_state = recording_schedule_manager.state_for(camera)
         expected = schedule_state in _EXPECTED_RECORDING_STATES
+        timestamp_warning_count = int(runtime.get("timestamp_warning_count") or 0)
+        timestamp_mode = str(camera.timestamp_mode or "native")
 
         if camera.enabled:
             if connectivity_status == "online":
@@ -78,6 +100,12 @@ async def _schedule_aware_snapshot() -> dict:
         row["schedule_active"] = schedule_state in {"in_window", "automatic", "manual_override"}
         row["schedule"] = schedule_label(camera)
         row["abnormal"] = abnormal
+        row["timestamp_mode"] = timestamp_mode
+        row["timestamp_warning_count"] = timestamp_warning_count
+        row["timestamp_guidance"] = _timestamp_guidance(
+            timestamp_mode,
+            timestamp_warning_count,
+        )
         if abnormal:
             abnormal_count += 1
 
