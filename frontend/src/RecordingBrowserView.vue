@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { useCameraStore } from './stores/cameras'
 import {
   PlaybackAttemptTracker,
   hevcSupportHint,
   isBrowserSafeAudio,
 } from './utils/playbackCompatibility'
 
-interface Camera { id: number; name: string; enabled: boolean }
 interface RecentRecording { id: number; camera_id: number; started_at?: string | null }
 interface ProxyProgress {
   mode?: 'live' | 'generate' | string
@@ -74,7 +76,10 @@ type AdjacentDirection = 'previous' | 'next'
 
 const MAX_ORIGINAL_RECOVERY_ATTEMPTS = 2
 
-const cameras = ref<Camera[]>([])
+const route = useRoute()
+const router = useRouter()
+const cameraStore = useCameraStore()
+const { cameras } = storeToRefs(cameraStore)
 const selectedCamera = ref<number | null>(null)
 const selectedDate = ref(todayString())
 const calendarMonth = ref(todayString().slice(0, 7))
@@ -185,9 +190,7 @@ const proxyProgressText = computed(() => {
   const runtime = progress.running_seconds ? ` · 已运行 ${formatDuration(progress.running_seconds)}` : ''
   return `已转至原片 ${elapsed} / ${total}${runtime}`
 })
-const showProxyProgress = computed(() =>
-  playbackMode.value === 'proxy-live' && Boolean(proxyProgress.value),
-)
+const showProxyProgress = computed(() => playbackMode.value === 'proxy-live' && Boolean(proxyProgress.value))
 const playerLoadingText = computed(() => {
   if (navigationLoading.value) return '正在定位相邻录像…'
   if (recoveringOriginal.value) return '正在恢复原片播放…'
@@ -202,29 +205,28 @@ function todayString() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
 }
 function recordingDate(value?: string | null) { return value && value.length >= 10 ? value.slice(0, 10) : null }
-function positiveQueryInt(params: URLSearchParams, key: string) {
-  const value = Number(params.get(key) || 0)
-  return Number.isInteger(value) && value > 0 ? value : null
+function queryValue(value: unknown) { return Array.isArray(value) ? value[0] : value }
+function positiveQueryInt(value: unknown) {
+  const parsed = Number(queryValue(value) || 0)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 function playbackDeepLink() {
-  const params = new URLSearchParams(window.location.search)
-  const rawDate = params.get('date')
+  const rawDate = queryValue(route.query.date)
   return {
-    cameraId: positiveQueryInt(params, 'camera_id'),
-    recordingId: positiveQueryInt(params, 'recording_id'),
-    date: rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null,
+    cameraId: positiveQueryInt(route.query.camera_id),
+    recordingId: positiveQueryInt(route.query.recording_id),
+    date: typeof rawDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : null,
   }
 }
 function syncPlaybackUrl(item: RecordingItem | null = null) {
-  if (window.location.pathname !== '/recordings/browser') return
-  const params = new URLSearchParams(window.location.search)
+  if (route.path !== '/recordings/browser') return
+  const query = { ...route.query }
   const cameraId = item?.camera_id || selectedCamera.value
   const date = recordingDate(item?.started_at) || selectedDate.value
-  if (cameraId) params.set('camera_id', String(cameraId)); else params.delete('camera_id')
-  if (date) params.set('date', date); else params.delete('date')
-  if (item) params.set('recording_id', String(item.id)); else params.delete('recording_id')
-  const query = params.toString()
-  window.history.replaceState({}, '', `/recordings/browser${query ? `?${query}` : ''}`)
+  if (cameraId) query.camera_id = String(cameraId); else delete query.camera_id
+  if (date) query.date = date; else delete query.date
+  if (item) query.recording_id = String(item.id); else delete query.recording_id
+  void router.replace({ path: '/recordings/browser', query, hash: route.hash })
 }
 function codecName(value?: string | null) { return (value || '').toLowerCase() }
 function isH264(value?: string | null) { return ['h264', 'avc', 'avc1'].includes(codecName(value)) }
@@ -340,8 +342,8 @@ function startProgressPolling(recordingId: number) {
 }
 
 async function loadInitialSelection() {
-  const [cameraResponse, recordingResponse] = await Promise.all([axios.get<Camera[]>('/api/cameras'), axios.get<RecentRecording[]>('/api/recordings?limit=1')])
-  cameras.value = cameraResponse.data; latestRecording.value = recordingResponse.data[0] || null
+  const [, recordingResponse] = await Promise.all([cameraStore.load(), axios.get<RecentRecording[]>('/api/recordings?limit=1')])
+  latestRecording.value = recordingResponse.data[0] || null
   const deepLink = playbackDeepLink()
   const deepLinkedCamera = deepLink.cameraId && cameras.value.some((camera) => camera.id === deepLink.cameraId) ? deepLink.cameraId : null
   const latest = latestRecording.value
@@ -479,9 +481,7 @@ async function navigateAdjacent(direction: AdjacentDirection, automatic = false)
 async function playPrevious() { await navigateAdjacent('previous') }
 async function playNext() { await navigateAdjacent('next') }
 
-function currentVideo(event?: Event) {
-  return (event?.currentTarget instanceof HTMLVideoElement ? event.currentTarget : null)
-}
+function currentVideo(event?: Event) { return (event?.currentTarget instanceof HTMLVideoElement ? event.currentTarget : null) }
 function handleLoadedMetadata(event: Event) {
   playbackTracker.markLoadedMetadata()
   const video = currentVideo(event)
@@ -547,13 +547,7 @@ async function restartOriginalAfterError(item: RecordingItem, video: HTMLVideoEl
   const skipText = skipSeconds ? `，跳过疑似损坏区间 ${skipSeconds}s` : ''
   playbackNotice.value = `${reason}（${formatDuration(errorAt)}），正在第 ${attempt}/${MAX_ORIGINAL_RECOVERY_ATTEMPTS} 次恢复原片${skipText}…`
   playbackTracker.reset()
-  playbackTracker.start({
-    recordingId: item.id,
-    codec: codecName(item.video_codec) || 'unknown',
-    playbackMode: 'original',
-    sourceKind: metricSourceKind(item, 'original'),
-    hevcHint: browserHevcHint.value,
-  })
+  playbackTracker.start({ recordingId: item.id, codec: codecName(item.video_codec) || 'unknown', playbackMode: 'original', sourceKind: metricSourceKind(item, 'original'), hevcHint: browserHevcHint.value })
   videoSrc.value = streamUrl(item.id, 'original')
   await nextTick()
 }
@@ -567,28 +561,16 @@ async function handleVideoError(event: Event) {
   if (playbackMode.value === 'original' && !fallbackInProgress.value) {
     if (originalPlaybackConfirmed.value || recoveringOriginal.value || originalRecoveryAttempts.value > 0) {
       if (originalRecoveryAttempts.value > 0 && errorAt - originalRecoveryPoint.value > 10) originalRecoveryAttempts.value = 0
-      if (originalRecoveryAttempts.value < MAX_ORIGINAL_RECOVERY_ATTEMPTS) {
-        await restartOriginalAfterError(item, video, mediaErrorCode)
-        return
-      }
-
+      if (originalRecoveryAttempts.value < MAX_ORIGINAL_RECOVERY_ATTEMPTS) { await restartOriginalAfterError(item, video, mediaErrorCode); return }
       if (mediaErrorCode === 3 || mediaErrorCode === 4) {
-        await prepareProxy(
-          item,
-          true,
-          true,
-          `原片在 ${formatDuration(errorAt)} 附近连续出现解码异常，原片自动恢复两次仍失败；已切换 H.264 兼容流以继续播放`,
-          errorAt,
-        )
+        await prepareProxy(item, true, true, `原片在 ${formatDuration(errorAt)} 附近连续出现解码异常，原片自动恢复两次仍失败；已切换 H.264 兼容流以继续播放`, errorAt)
         return
       }
-
       stopProgressPolling(); preparing.value = false; recoveringOriginal.value = false
       const reason = mediaErrorCode === 2 ? '原片网络读取连续失败' : '原片媒体读取连续失败'
       playbackNotice.value = `${reason}（${formatDuration(errorAt)}）。已自动重连两次但仍未恢复，没有因网络错误启动转码；可重新点击当前片段重试。`
       return
     }
-
     await prepareProxy(item, true, true, mediaErrorCode === 3 || mediaErrorCode === 4 ? '原片首帧前确认解码失败，已切换 H.264 兼容模式' : '', errorAt)
     return
   }
