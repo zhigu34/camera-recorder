@@ -71,22 +71,29 @@
   background: var(--nvr-surface-2) !important;
 }
 
+/* Keep the device name authoritative. Runtime states may move to the next line,
+   but they must never squeeze a Chinese camera name down to one character wide. */
 .nvr-workspace-content .camera-page .camera-name-row {
   display: flex !important;
   align-items: center !important;
-  flex-wrap: nowrap !important;
-  gap: 7px !important;
+  flex-wrap: wrap !important;
+  column-gap: 7px !important;
+  row-gap: 4px !important;
   min-width: 0;
 }
 
 .nvr-workspace-content .camera-page .camera-name-row > strong {
-  min-width: 0;
-  flex: 0 1 auto;
+  min-width: 120px;
+  flex: 1 1 180px;
   margin-right: 2px;
+  overflow: hidden;
   color: var(--nvr-text);
   font-size: 13px !important;
   font-weight: 630 !important;
   line-height: 1.3 !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: keep-all;
 }
 
 .nvr-workspace-content .camera-page .camera-name-row .health-badge,
@@ -170,11 +177,10 @@
 
 @media (max-width: 760px) {
   .nvr-workspace-content .camera-page { padding: 14px !important; }
-  .nvr-workspace-content .camera-page .camera-name-row {
-    flex-wrap: wrap !important;
-    row-gap: 4px !important;
+  .nvr-workspace-content .camera-page .camera-name-row > strong {
+    min-width: 100%;
+    flex-basis: 100%;
   }
-  .nvr-workspace-content .camera-page .camera-name-row > strong { flex-basis: 100%; }
   .nvr-workspace-content .camera-page .camera-signals {
     padding-left: 0;
     border-left: 0;
