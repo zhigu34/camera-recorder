@@ -208,6 +208,7 @@ const heatBins = computed<HeatBin[]>(() => {
   })
 })
 const heatHourLabels = Array.from({ length: 13 }, (_, index) => index * 2)
+const heatMinuteLabels = Array.from({ length: 12 }, (_, index) => index * 5)
 const activePosition = computed(() => {
   if (!activeRecording.value) return 0
   const index = playableRecordings.value.findIndex((item) => item.id === activeRecording.value?.id)
@@ -701,8 +702,11 @@ onBeforeUnmount(() => {
 
           <section class="heat-section">
             <div class="section-head"><div><strong>24 小时录像热力图</strong><span>5 分钟/格 · {{ selectedDate }}</span></div><span>{{ recordings.length }} 段 · {{ formatDuration(browserData?.total_duration) }}</span></div>
-            <div class="heat-grid">
-              <button v-for="bin in heatBins" :key="bin.index" type="button" class="heat-cell" :class="[`level-${bin.level}`, { warning: bin.warning, cloud: bin.cloud, active: bin.active }]" :disabled="!bin.items.some(isPlayable)" :title="bin.title" @click="playHeatBin(bin)" />
+            <div class="heat-map">
+              <div class="heat-grid">
+                <button v-for="bin in heatBins" :key="bin.index" type="button" class="heat-cell" :class="[`level-${bin.level}`, { warning: bin.warning, cloud: bin.cloud, active: bin.active }]" :disabled="!bin.items.some(isPlayable)" :title="bin.title" @click="playHeatBin(bin)" />
+              </div>
+              <div class="heat-minutes" aria-hidden="true"><span v-for="minute in heatMinuteLabels" :key="minute">{{ String(minute).padStart(2, '0') }}</span></div>
             </div>
             <div class="heat-axis"><span v-for="hour in heatHourLabels" :key="hour">{{ String(hour).padStart(2, '0') }}:00</span></div>
             <div class="heat-legend"><span><i class="heat-normal"></i>录像覆盖</span><span><i class="heat-warning"></i>有告警</span><span><i class="heat-cloud"></i>含云端</span><span><i class="heat-empty"></i>无录像</span></div>

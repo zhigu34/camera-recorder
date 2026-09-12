@@ -584,43 +584,6 @@
   opacity: .74;
 }
 
-/* Element Plus fixed-right overlay is unnecessary in the narrow catalog pane. */
-.nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right,
-.nvr-workspace-content .recording-center .list-panel th.el-table-fixed-column--right,
-.nvr-workspace-content .recording-center .list-panel td.el-table-fixed-column--right {
-  position: static !important;
-  right: auto !important;
-  left: auto !important;
-  z-index: auto !important;
-  box-shadow: none !important;
-}
-
-.nvr-workspace-content .recording-center .list-panel .el-table-fixed-column--right::before,
-.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right-patch,
-.nvr-workspace-content .recording-center .list-panel .el-table__fixed-right {
-  display: none !important;
-}
-
-/* Compact explicit widths while preserving filename breathing room. */
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(1),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(1) { width: 34px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(2),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(2) { width: 78px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(3),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(3) { width: 60px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(4),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(4) { width: 72px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(5),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(5) { width: 72px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(6),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(6) { width: 66px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(7),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(7) { width: 72px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(8),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(8) { width: 202px !important; }
-.nvr-workspace-content .recording-center .list-panel .el-table__header col:nth-child(9),
-.nvr-workspace-content .recording-center .list-panel .el-table__body col:nth-child(9) { width: 102px !important; }
-
 @media (max-width: 1080px) {
   .nvr-workspace-content .recording-center .recording-layout {
     grid-template-columns: 1fr !important;
