@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
-CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor"]
+CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor", "panoramic"]
 
 
 class RecordingWindow(BaseModel):
