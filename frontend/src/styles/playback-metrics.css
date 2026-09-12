@@ -1,29 +1,14 @@
-.nvr-workspace-content .page-shell {
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: stretch !important;
-}
-
-.nvr-workspace-content .page-shell > .el-card,
-.nvr-workspace-content .page-shell > .playback-health {
-  flex: 0 0 auto;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  box-sizing: border-box;
-  clear: both;
-}
-
 .playback-health {
+  width: min(100%, 1716px);
   max-width: none !important;
-  margin: 12px 22px 26px !important;
-  padding: 0 !important;
+  margin: 12px auto 26px !important;
+  padding: 0 20px !important;
 }
 
 .playback-health.embedded {
   width: 100%;
   max-width: none !important;
-  margin: 16px 0 0 !important;
+  margin: 12px 0 0 !important;
   padding: 0 !important;
   overflow: hidden;
 }
@@ -33,12 +18,15 @@
   min-width: 0;
   overflow: hidden;
   border-color: var(--nvr-border-strong) !important;
-  background: linear-gradient(180deg, rgba(76,141,255,.035), transparent 150px), var(--nvr-surface) !important;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--nvr-blue) 3.5%, transparent), transparent 150px),
+    var(--nvr-surface) !important;
 }
 
 .playback-health .el-card__header {
   padding: 14px 16px !important;
-  background: #111820;
+  color: var(--nvr-text);
+  background: var(--nvr-surface) !important;
 }
 
 .playback-health .el-card__body {
@@ -57,17 +45,15 @@
   font-size: 10px !important;
 }
 
-.playback-health .metric-row {
-  margin-bottom: 12px !important;
-}
+.playback-health .metric-row { margin-bottom: 12px !important; }
 
 .playback-health .metric-box {
   min-height: 82px !important;
+  align-items: flex-start !important;
+  padding: 12px 14px !important;
   border: 1px solid var(--nvr-border) !important;
   border-radius: 9px !important;
   background: var(--nvr-surface-2) !important;
-  align-items: flex-start !important;
-  padding: 12px 14px !important;
 }
 
 .playback-health .metric-box strong {
@@ -75,7 +61,6 @@
   font-size: 22px !important;
   line-height: 1;
 }
-
 .playback-health .metric-box span {
   color: var(--nvr-muted) !important;
   font-size: 10px !important;
@@ -87,20 +72,19 @@
   gap: 1px !important;
   padding: 1px !important;
   margin-bottom: 12px !important;
+  overflow: hidden;
   border: 1px solid var(--nvr-border) !important;
   border-radius: 8px !important;
   background: var(--nvr-border) !important;
-  overflow: hidden;
 }
 
 .playback-health .backend-strip span {
   min-width: 0;
   padding: 10px 12px;
-  background: #111820;
   color: var(--nvr-muted) !important;
+  background: var(--nvr-surface-2) !important;
   font-size: 9px !important;
 }
-
 .playback-health .backend-strip b {
   display: block;
   margin-top: 4px;
@@ -113,59 +97,30 @@
   max-width: 100%;
   --el-table-bg-color: var(--nvr-surface);
   --el-table-tr-bg-color: var(--nvr-surface);
-  --el-table-header-bg-color: #111820;
-  --el-table-row-hover-bg-color: var(--nvr-surface-2);
+  --el-table-header-bg-color: var(--nvr-surface-2);
+  --el-table-row-hover-bg-color: var(--nvr-hover);
   --el-table-border-color: var(--nvr-border);
-  --el-table-text-color: #aeb9c6;
-  --el-table-header-text-color: #718095;
+  --el-table-text-color: var(--nvr-text-soft);
+  --el-table-header-text-color: var(--nvr-subtle);
 }
-
 .playback-health .el-table th.el-table__cell,
-.playback-health .el-table td.el-table__cell {
-  font-size: 10px;
-}
+.playback-health .el-table td.el-table__cell { font-size: 10px; }
 
-.playback-health.compact {
-  margin-top: 10px !important;
-}
-
-.playback-health.compact .el-card {
-  background: var(--nvr-surface) !important;
-}
-
-.playback-health.compact .el-card__body {
-  padding: 12px 16px 14px !important;
-}
-
-.playback-health.compact .el-card__header {
-  padding: 11px 16px !important;
-}
-
-.playback-health.compact .compact-metrics {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-
-.playback-health.compact .compact-hint {
-  margin-top: 8px;
-}
+.playback-health.compact { margin-top: 10px !important; }
+.playback-health.compact .el-card { background: var(--nvr-surface) !important; }
+.playback-health.compact .el-card__body { padding: 12px 16px 14px !important; }
+.playback-health.compact .el-card__header { padding: 11px 16px !important; }
+.playback-health.compact .compact-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.playback-health.compact .compact-metrics > div { background: var(--nvr-surface-2) !important; }
+.playback-health.compact .compact-hint { margin-top: 8px; }
 
 @media (max-width: 1180px) {
-  .playback-health .backend-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .playback-health .backend-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
-  .playback-health {
-    margin: 10px 14px 20px !important;
-  }
-  .playback-health.embedded {
-    margin: 12px 0 0 !important;
-  }
-  .playback-health .backend-strip {
-    grid-template-columns: 1fr;
-  }
-  .playback-health.compact .compact-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+  .playback-health { margin: 10px auto 20px !important; padding: 0 14px !important; }
+  .playback-health.embedded { margin: 12px 0 0 !important; padding: 0 !important; }
+  .playback-health .backend-strip { grid-template-columns: 1fr; }
+  .playback-health.compact .compact-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
