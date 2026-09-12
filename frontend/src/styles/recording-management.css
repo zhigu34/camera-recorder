@@ -1,7 +1,6 @@
 /* Unified recording management workspace.
- * The page now owns playback, 24h heatmap, calendar filters and recording list.
- * Keep only cross-component Element Plus theme overrides here; layout lives with
- * RecordingManagementView.vue so the two-column structure stays self-contained.
+ * Keep cross-component Element Plus theme overrides and wide-screen layout
+ * corrections here. The playback/catalog structure lives in the Vue view.
  */
 
 .nvr-workspace-content .recording-center .el-table {
@@ -31,4 +30,95 @@
 
 .nvr-workspace-content .recording-center .active-recording-row > td.el-table__cell {
   background: color-mix(in srgb, var(--nvr-blue) 10%, var(--nvr-surface)) !important;
+}
+
+/* On desktop playback and catalog are peers. 48/52 keeps the player large
+ * enough to be useful without starving the management table. */
+.nvr-workspace-content .recording-center .recording-layout {
+  grid-template-columns: minmax(0, 48fr) minmax(0, 52fr) !important;
+  align-items: start !important;
+  gap: 12px !important;
+}
+
+/* The workspace itself is the scroll container. A 70px sticky offset pushed
+ * the left card visibly below the calendar; keep only a small breathing gap. */
+.nvr-workspace-content .recording-center .playback-column {
+  position: sticky !important;
+  top: 12px !important;
+  align-self: start !important;
+  margin-top: 0 !important;
+}
+
+.nvr-workspace-content .recording-center .player-box {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+/* Split filters into two clean rows instead of squeezing six controls into one.
+ * Row 1: camera + date. Row 2: storage + health + archive + search. */
+.nvr-workspace-content .recording-center .calendar-toolbar {
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  grid-template-areas:
+    "camera camera camera date date date"
+    "storage health upload search search search";
+  gap: 7px !important;
+  padding: 9px 10px 8px !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(1) { grid-area: camera; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(2) { grid-area: date; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(3) { grid-area: storage; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(4) { grid-area: health; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(5) { grid-area: upload; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(6) { grid-area: search; }
+
+.nvr-workspace-content .recording-center .calendar-actions {
+  min-height: 38px;
+  flex-wrap: wrap;
+  row-gap: 5px;
+}
+
+/* More width now reaches the flexible filename column; keep neighboring fields
+ * compact so filenames remain readable before the fixed action column. */
+.nvr-workspace-content .recording-center .list-panel .el-table th.el-table__cell,
+.nvr-workspace-content .recording-center .list-panel .el-table td.el-table__cell {
+  padding-left: 2px;
+  padding-right: 2px;
+}
+
+.nvr-workspace-content .recording-center .list-panel .el-table .cell {
+  padding-left: 7px;
+  padding-right: 7px;
+}
+
+/* Heat cells already expose time range / segment count / coverage through their
+ * native title. Strengthen the hover affordance so users discover it. */
+.nvr-workspace-content .recording-center .heat-cell:not(:disabled):hover {
+  filter: brightness(1.2);
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--nvr-blue) 18%, transparent);
+  z-index: 3;
+}
+
+@media (max-width: 1080px) {
+  .nvr-workspace-content .recording-center .recording-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .nvr-workspace-content .recording-center .playback-column {
+    position: static !important;
+    top: auto !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .nvr-workspace-content .recording-center .calendar-toolbar {
+    grid-template-columns: 1fr 1fr !important;
+    grid-template-areas:
+      "camera camera"
+      "date date"
+      "storage health"
+      "upload upload"
+      "search search";
+  }
 }
