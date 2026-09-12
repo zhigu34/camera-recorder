@@ -1,76 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 
-interface RecordingStats {
-  segments: number
-  unhealthy_segments: number
-  failed_segments: number
-  warning_count: number
-  timestamp_warning_count: number
-  network_warning_count: number
-}
-
-interface TimestampGuidance {
-  suggested_mode: string | null
-  message: string
-}
-
-interface CameraHealth {
-  camera_id: number
-  name: string
-  ip: string
-  enabled: boolean
-  expected_recording: boolean
-  connectivity_status: 'unknown' | 'online' | 'offline'
-  recorder_state: string
-  schedule_state: string
-  abnormal: boolean
-  restart_count: number
-  timestamp_mode: string
-  timestamp_warning_count: number
-  timestamp_guidance?: TimestampGuidance | null
-  started_at?: string | null
-  last_error?: string | null
-  recordings_24h: RecordingStats
-}
-
-interface StorageCleanup {
-  running: boolean
-  last_run_at: string | null
-  last_result: string | null
-  deleted_files: number
-  freed_bytes: number
-  last_error: string | null
-}
-
-interface HealthSnapshot {
-  generated_at: string
-  uptime_seconds: number
-  cameras: {
-    total: number
-    enabled: number
-    recording: number
-    reconnecting: number
-    abnormal: number
-    online: number
-    offline: number
-    unknown: number
-  }
-  recordings_24h: RecordingStats
-  uploads: Record<string, number>
-  storage: {
-    total_bytes: number
-    used_bytes: number
-    free_bytes: number
-    used_percent: number
-    state: 'healthy' | 'warning' | 'critical'
-    cleanup: StorageCleanup
-  }
-  camera_health: CameraHealth[]
-}
+import { type CameraHealth, useRuntimeStore } from './stores/runtime'
 
 interface CameraTrend {
   camera_id: number
@@ -83,7 +19,6 @@ interface CameraTrend {
   complete_segments: number
   recording_completeness: number | null
 }
-
 interface HealthTrends {
   generated_at: string
   overall: {
@@ -96,9 +31,7 @@ interface HealthTrends {
   }
   cameras: CameraTrend[]
 }
-
 type Verdict = 'pass' | 'fail' | 'collecting' | 'ignored'
-
 interface StabilityCamera {
   camera_id: number
   name: string
@@ -114,7 +47,6 @@ interface StabilityCamera {
   longest_offline_seconds: number
   current_offline_seconds: number
 }
-
 interface StabilityReport {
   generated_at: string
   hours: number
@@ -133,23 +65,30 @@ interface StabilityReport {
   cameras: StabilityCamera[]
 }
 
-const snapshot = ref<HealthSnapshot | null>(null)
+const router = useRouter()
+const runtime = useRuntimeStore()
+const { healthSnapshot: snapshot, socketState } = storeToRefs(runtime)
 const trends = ref<HealthTrends | null>(null)
 const stability = ref<StabilityReport | null>(null)
 const stabilityWindow = ref(24)
 const loading = ref(false)
-const wsConnected = ref(false)
-let socket: WebSocket | null = null
-let reconnectTimer: number | null = null
 let refreshTimer: number | null = null
-let destroyed = false
 
+const wsConnected = computed(() => socketState.value === 'connected')
 const pendingUploads = computed(() => {
   const value = snapshot.value?.uploads || {}
   return (value.pending || 0) + (value.uploading || 0) + (value.retry_wait || 0)
 })
 const monitoredTrends = computed(() => (trends.value?.cameras || []).filter((item) => item.monitored))
 const monitoredStability = computed(() => (stability.value?.cameras || []).filter((item) => item.monitored))
+const cleanup = computed(() => snapshot.value?.storage.cleanup || {
+  running: false,
+  last_run_at: null,
+  last_result: null,
+  deleted_files: 0,
+  freed_bytes: 0,
+  last_error: null,
+})
 
 function formatBytes(value?: number) {
   const bytes = value || 0
@@ -233,18 +172,19 @@ function verdictType(value: Verdict) {
   if (value === 'collecting') return 'warning'
   return 'info'
 }
+function openCamera(row: CameraHealth | CameraTrend | StabilityCamera) {
+  void router.push({ path: '/cameras', query: { camera_id: String(row.camera_id) } })
+}
 
-async function loadAll(showMessage = false) {
+async function loadReports(showMessage = false, refreshSnapshot = false) {
   loading.value = true
   try {
-    const [snapshotRes, trendsRes, stabilityRes] = await Promise.all([
-      axios.get<HealthSnapshot>('/api/health/summary'),
-      axios.get<HealthTrends>('/api/health/trends', { params: { hours: 24, bucket_minutes: 60 } }),
-      axios.get<StabilityReport>('/api/health/stability', { params: { hours: stabilityWindow.value } }),
-    ])
-    snapshot.value = snapshotRes.data
-    trends.value = trendsRes.data
-    stability.value = stabilityRes.data
+    const jobs: Promise<unknown>[] = [
+      axios.get<HealthTrends>('/api/health/trends', { params: { hours: 24, bucket_minutes: 60 } }).then((response) => { trends.value = response.data }),
+      axios.get<StabilityReport>('/api/health/stability', { params: { hours: stabilityWindow.value } }).then((response) => { stability.value = response.data }),
+    ]
+    if (refreshSnapshot) jobs.push(runtime.refreshHealth(), runtime.refreshSystem())
+    await Promise.all(jobs)
     if (showMessage) ElMessage.success('健康状态已刷新')
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '健康状态加载失败')
@@ -252,7 +192,6 @@ async function loadAll(showMessage = false) {
     loading.value = false
   }
 }
-
 async function changeStabilityWindow() {
   try {
     stability.value = (await axios.get<StabilityReport>('/api/health/stability', { params: { hours: stabilityWindow.value } })).data
@@ -261,49 +200,12 @@ async function changeStabilityWindow() {
   }
 }
 
-function scheduleReconnect() {
-  if (destroyed || reconnectTimer !== null) return
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null
-    connectWebSocket()
-  }, 3000)
-}
-function connectWebSocket() {
-  if (destroyed) return
-  if (socket) {
-    socket.onclose = null
-    socket.close()
-  }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  socket = new WebSocket(`${protocol}//${window.location.host}/ws/status`)
-  socket.onopen = () => { wsConnected.value = true }
-  socket.onmessage = (event) => {
-    try {
-      const message = JSON.parse(event.data)
-      if (message.type === 'health.snapshot' && message.data) snapshot.value = message.data as HealthSnapshot
-    } catch { /* next snapshot will recover */ }
-  }
-  socket.onerror = () => { wsConnected.value = false }
-  socket.onclose = () => {
-    wsConnected.value = false
-    socket = null
-    scheduleReconnect()
-  }
-}
-
 onMounted(() => {
-  void loadAll()
-  connectWebSocket()
-  refreshTimer = window.setInterval(() => void loadAll(false), 60_000)
+  void loadReports()
+  refreshTimer = window.setInterval(() => void loadReports(false, false), 60_000)
 })
 onBeforeUnmount(() => {
-  destroyed = true
-  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
   if (refreshTimer !== null) window.clearInterval(refreshTimer)
-  if (socket) {
-    socket.onclose = null
-    socket.close()
-  }
 })
 </script>
 
@@ -311,7 +213,7 @@ onBeforeUnmount(() => {
   <section class="health-v2" v-loading="loading && !snapshot">
     <div class="page-head">
       <div class="realtime-pill" :class="{ online: wsConnected }"><i></i>{{ wsConnected ? '实时状态已连接' : '实时状态重连中' }}</div>
-      <el-button :icon="Refresh" @click="loadAll(true)">刷新</el-button>
+      <el-button :icon="Refresh" @click="loadReports(true, true)">刷新</el-button>
     </div>
 
     <template v-if="snapshot">
@@ -325,30 +227,17 @@ onBeforeUnmount(() => {
       </div>
 
       <article class="panel camera-panel">
-        <div class="panel-head"><div><strong>摄像头实时状态</strong><span>连接、录像、计划三条状态链独立展示</span></div><span>服务运行 {{ formatDuration(snapshot.uptime_seconds) }}</span></div>
-        <el-table :data="snapshot.camera_health" empty-text="暂无摄像头" class="state-table">
+        <div class="panel-head"><div><strong>摄像头实时状态</strong><span>连接、录像、计划三条状态链独立展示 · 点击设备进入详情</span></div><span>服务运行 {{ formatDuration(snapshot.uptime_seconds) }}</span></div>
+        <el-table :data="snapshot.camera_health" empty-text="暂无摄像头" class="state-table" @row-click="openCamera">
           <el-table-column prop="name" label="摄像头" min-width="150" fixed="left" />
           <el-table-column prop="ip" label="IP" width="140" />
-          <el-table-column label="连接" width="105">
-            <template #default="{ row }"><el-tag :type="connectivityType(row.connectivity_status)">{{ connectivityLabel(row.connectivity_status) }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="录像" width="110">
-            <template #default="{ row }"><el-tag :type="recorderType(row.recorder_state)">{{ recorderLabel(row.recorder_state) }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="计划状态" min-width="150">
-            <template #default="{ row }"><el-tag :type="scheduleType(row.schedule_state)" effect="plain">{{ scheduleLabel(row.schedule_state) }}</el-tag></template>
-          </el-table-column>
-          <el-table-column label="时间戳" min-width="230">
-            <template #default="{ row }">
-              <div class="timestamp-cell">
-                <el-tag :type="row.timestamp_warning_count ? 'warning' : 'info'" effect="plain">{{ row.timestamp_mode }} · {{ row.timestamp_warning_count || 0 }}</el-tag>
-                <span v-if="row.timestamp_guidance" :title="row.timestamp_guidance.message">{{ row.timestamp_guidance.message }}</span>
-              </div>
-            </template>
-          </el-table-column>
+          <el-table-column label="连接" width="105"><template #default="{ row }"><el-tag :type="connectivityType(row.connectivity_status)">{{ connectivityLabel(row.connectivity_status) }}</el-tag></template></el-table-column>
+          <el-table-column label="录像" width="110"><template #default="{ row }"><el-tag :type="recorderType(row.recorder_state)">{{ recorderLabel(row.recorder_state) }}</el-tag></template></el-table-column>
+          <el-table-column label="计划状态" min-width="150"><template #default="{ row }"><el-tag :type="scheduleType(row.schedule_state)" effect="plain">{{ scheduleLabel(row.schedule_state) }}</el-tag></template></el-table-column>
+          <el-table-column label="时间戳" min-width="230"><template #default="{ row }"><div class="timestamp-cell"><el-tag :type="row.timestamp_warning_count ? 'warning' : 'info'" effect="plain">{{ row.timestamp_mode }} · {{ row.timestamp_warning_count || 0 }}</el-tag><span v-if="row.timestamp_guidance" :title="row.timestamp_guidance.message">{{ row.timestamp_guidance.message }}</span></div></template></el-table-column>
           <el-table-column label="期望录像" width="90"><template #default="{ row }">{{ row.expected_recording ? '是' : '否' }}</template></el-table-column>
           <el-table-column prop="restart_count" label="重连" width="75" sortable />
-          <el-table-column label="24h片段" width="90"><template #default="{ row }">{{ row.recordings_24h.segments }}</template></el-table-column>
+          <el-table-column label="24h片段" width="90"><template #default="{ row }">{{ row.recordings_24h?.segments || 0 }}</template></el-table-column>
           <el-table-column label="最后错误" min-width="260" show-overflow-tooltip><template #default="{ row }">{{ row.last_error || '-' }}</template></el-table-column>
           <el-table-column label="健康" width="90" fixed="right"><template #default="{ row }"><el-tag :type="row.abnormal ? 'danger' : 'success'">{{ row.abnormal ? '关注' : '正常' }}</el-tag></template></el-table-column>
         </el-table>
@@ -363,7 +252,7 @@ onBeforeUnmount(() => {
             <div><span>监控摄像头</span><strong>{{ trends.overall.monitored_cameras }}</strong></div>
             <div><span>采样点</span><strong>{{ trends.overall.samples }}</strong></div>
           </div>
-          <el-table v-if="trends" :data="monitoredTrends" size="small" empty-text="暂无自动录像样本">
+          <el-table v-if="trends" :data="monitoredTrends" size="small" empty-text="暂无自动录像样本" @row-click="openCamera">
             <el-table-column prop="name" label="摄像头" min-width="130" />
             <el-table-column label="录像可用率" width="120"><template #default="{ row }"><el-tag :type="rateType(row.online_rate)">{{ rate(row.online_rate) }}</el-tag></template></el-table-column>
             <el-table-column label="完整率" width="105"><template #default="{ row }">{{ rate(row.recording_completeness) }}</template></el-table-column>
@@ -372,21 +261,18 @@ onBeforeUnmount(() => {
         </article>
 
         <article class="panel storage-panel">
-          <div class="panel-head"><div><strong>磁盘与自动保护</strong><span>{{ snapshot.storage.state }} · 最近检查 {{ formatTime(snapshot.storage.cleanup.last_run_at) }}</span></div></div>
+          <div class="panel-head"><div><strong>磁盘与自动保护</strong><span>{{ snapshot.storage.state }} · 最近检查 {{ formatTime(cleanup.last_run_at) }}</span></div></div>
           <div class="storage-number">{{ snapshot.storage.used_percent }}%</div>
           <el-progress :percentage="snapshot.storage.used_percent" :status="snapshot.storage.state === 'critical' ? 'exception' : snapshot.storage.state === 'warning' ? 'warning' : 'success'" :show-text="false" />
           <div class="storage-detail"><span>已用 {{ formatBytes(snapshot.storage.used_bytes) }}</span><span>剩余 {{ formatBytes(snapshot.storage.free_bytes) }}</span><span>总计 {{ formatBytes(snapshot.storage.total_bytes) }}</span></div>
-          <div v-if="snapshot.storage.cleanup.last_error" class="error-box"><WarningFilled />{{ snapshot.storage.cleanup.last_error }}</div>
+          <div v-if="cleanup.last_error" class="error-box"><WarningFilled />{{ cleanup.last_error }}</div>
         </article>
       </div>
 
       <article v-if="stability" class="panel stability-panel">
-        <div class="panel-head">
-          <div><strong>稳定性验收</strong><span>FFmpeg 连续失败、断流与录像完整性综合验收</span></div>
-          <div class="panel-actions"><el-tag :type="verdictType(stability.overall.verdict)">{{ verdictLabel(stability.overall.verdict) }}</el-tag><el-radio-group v-model="stabilityWindow" size="small" @change="changeStabilityWindow"><el-radio-button :value="24">24h</el-radio-button><el-radio-button :value="72">72h</el-radio-button></el-radio-group></div>
-        </div>
+        <div class="panel-head"><div><strong>稳定性验收</strong><span>FFmpeg 连续失败、断流与录像完整性综合验收</span></div><div class="panel-actions"><el-tag :type="verdictType(stability.overall.verdict)">{{ verdictLabel(stability.overall.verdict) }}</el-tag><el-radio-group v-model="stabilityWindow" size="small" @change="changeStabilityWindow"><el-radio-button :value="24">24h</el-radio-button><el-radio-button :value="72">72h</el-radio-button></el-radio-group></div></div>
         <div class="stability-summary"><span>通过 <b>{{ stability.overall.passed_cameras }}/{{ stability.overall.monitored_cameras }}</b></span><span>FFmpeg 异常 <b>{{ stability.overall.ffmpeg_failures }}</b></span><span>断流 <b>{{ stability.overall.outage_count }}</b></span><span>最长断流 <b>{{ formatDuration(stability.overall.longest_offline_seconds) }}</b></span></div>
-        <el-table :data="monitoredStability" size="small" empty-text="暂无稳定性样本">
+        <el-table :data="monitoredStability" size="small" empty-text="暂无稳定性样本" @row-click="openCamera">
           <el-table-column prop="name" label="摄像头" min-width="140" />
           <el-table-column label="结果" width="90"><template #default="{ row }"><el-tag :type="verdictType(row.verdict)">{{ verdictLabel(row.verdict) }}</el-tag></template></el-table-column>
           <el-table-column label="覆盖率" width="100"><template #default="{ row }">{{ rate(row.sample_coverage) }}</template></el-table-column>
@@ -411,7 +297,7 @@ onBeforeUnmount(() => {
 .panel{margin-top:10px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);overflow:hidden}.panel-head{min-height:60px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 15px;border-bottom:1px solid var(--nvr-border)}.panel-head>div:first-child{display:flex;flex-direction:column;gap:4px}.panel-head strong{font-size:12px}.panel-head span{color:var(--nvr-muted);font-size:9px}.panel-actions{display:flex!important;flex-direction:row!important;align-items:center;gap:8px}.state-table{width:100%}.timestamp-cell{display:flex;align-items:center;gap:7px;min-width:0}.timestamp-cell>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--nvr-yellow);font-size:9px}
 .two-column{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(300px,.6fr);gap:10px}.reliability-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--nvr-border);border-bottom:1px solid var(--nvr-border)}.reliability-grid>div{padding:14px;background:var(--nvr-surface);display:flex;flex-direction:column;gap:7px}.reliability-grid span{color:var(--nvr-muted);font-size:9px}.reliability-grid strong{font-size:18px}.storage-panel{padding-bottom:16px}.storage-number{padding:18px 16px 8px;font-size:30px;font-weight:680}.storage-panel :deep(.el-progress){margin:0 16px 16px}.storage-detail{display:flex;gap:18px;flex-wrap:wrap;padding:0 16px;color:var(--nvr-muted);font-size:10px}.error-box{display:flex;align-items:flex-start;gap:8px;margin:14px 16px 0;padding:9px;color:var(--nvr-red);background:rgba(240,93,94,.06);border:1px solid rgba(240,93,94,.16);border-radius:7px;font-size:10px}.error-box :deep(svg){flex:0 0 14px;width:14px}
 .stability-summary{display:flex;gap:24px;flex-wrap:wrap;padding:12px 15px;border-bottom:1px solid var(--nvr-border);color:var(--nvr-muted);font-size:10px}.stability-summary b{color:var(--nvr-text);font-weight:600}.snapshot-time{padding:12px 2px 0;text-align:right;color:#5f6d7e;font-size:9px}
-:deep(.el-table){--el-table-bg-color:var(--nvr-surface);--el-table-tr-bg-color:var(--nvr-surface);--el-table-header-bg-color:#111820;--el-table-row-hover-bg-color:var(--nvr-surface-2);--el-table-border-color:var(--nvr-border);--el-table-text-color:#aeb9c6;--el-table-header-text-color:#718095;background:transparent}:deep(.el-table th.el-table__cell){font-size:10px}:deep(.el-table td.el-table__cell){font-size:10px}
+:deep(.el-table){--el-table-bg-color:var(--nvr-surface);--el-table-tr-bg-color:var(--nvr-surface);--el-table-header-bg-color:#111820;--el-table-row-hover-bg-color:var(--nvr-surface-2);--el-table-border-color:var(--nvr-border);--el-table-text-color:#aeb9c6;--el-table-header-text-color:#718095;background:transparent}:deep(.el-table th.el-table__cell){font-size:10px}:deep(.el-table td.el-table__cell){font-size:10px}.state-table :deep(tbody tr),.stability-panel :deep(tbody tr){cursor:pointer}
 @media(max-width:1250px){.metrics{grid-template-columns:repeat(3,1fr)}.two-column{grid-template-columns:1fr}}
 @media(max-width:720px){.health-v2{padding:14px}.metrics{grid-template-columns:repeat(2,1fr)}.reliability-grid{grid-template-columns:repeat(2,1fr)}.panel-head{align-items:flex-start;flex-direction:column;padding:12px 15px}.panel-actions{width:100%;justify-content:space-between}}
 </style>

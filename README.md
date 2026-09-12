@@ -20,7 +20,7 @@
 - 本地与 OpenList 云端录像统一时间轴回放
 - 1 / 4 / 9 宫格实时预览
 - 事件中心、邮件告警、系统健康、24h/72h 稳定性验收
-- Vue 3 + TypeScript 管理界面
+- Vue 3 + TypeScript + Vue Router + Pinia 管理界面
 - Docker Compose 一键部署，支持 amd64 / arm64
 
 ## 摄像头状态模型
@@ -61,13 +61,13 @@ cp .env.example .env
 git pull && ./deploy.sh
 ```
 
-`deploy.sh` 会检查 Docker/Compose/Buildx、FFmpeg 本地包、Compose 配置、镜像构建和服务健康状态。已有且有效的 FFmpeg 包与 Docker 层会直接复用。
+`deploy.sh` 会检查 Docker/Compose/Buildx、FFmpeg 本地包、Compose 配置、镜像构建和服务健康状态。已有且有效的 FFmpeg 包与 Docker 层会直接复用；普通前端改动只重建前端，不重启录像 backend。
 
 服务默认地址：
 
 ```text
 Camera Recorder  http://127.0.0.1:8080
-FastAPI          http://127.0.0.1:8000
+FastAPI          backend:8000（仅 Docker 内部网络，通过前端 /api、/ws 和 /health 代理）
 OpenList         http://127.0.0.1:5244
 ```
 
@@ -125,7 +125,7 @@ WebDAV URL: http://openlist:5244/dav
 ## 技术栈
 
 - Backend: Python 3.12+, FastAPI, SQLAlchemy 2, SQLite, asyncio
-- Frontend: Vue 3, TypeScript, Vite, Element Plus, Axios
+- Frontend: Vue 3, TypeScript, Vue Router, Pinia, Vite, Element Plus, Axios
 - Media: FFmpeg / ffprobe
 - Archive bridge: OpenList / WebDAV
 - Runtime: Docker Compose + Nginx
@@ -147,6 +147,7 @@ WebDAV URL: http://openlist:5244/dav
 
 ## 当前重点
 
+- 前端路由、共享运行状态和实体深链接继续收敛
 - 10 路 24h / 72h 真实稳定性验证与阈值校准
 - Chrome / Safari / Edge 本地与云端回放实机验收
 - 继续清理旧兼容代码与重复状态获取

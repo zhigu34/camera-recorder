@@ -1,107 +1,54 @@
 <script setup lang="ts">
 import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
-import axios from 'axios'
+import { storeToRefs } from 'pinia'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
   Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
   Monitor, Moon, Setting, Sunny, UploadFilled, VideoCamera, VideoPlay, WarningFilled,
 } from '@element-plus/icons-vue'
 
-import CamerasWorkspace from './CamerasWorkspace.vue'
-import DashboardView from './DashboardView.vue'
-import EventCenterView from './EventCenterView.vue'
-import HealthView from './HealthView.vue'
-import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
-import PlaybackTelemetryBridge from './PlaybackTelemetryBridge.vue'
-import PreviewView from './PreviewView.vue'
-import RecordingBrowserView from './RecordingBrowserView.vue'
-import RecordingCalendarLegend from './RecordingCalendarLegend.vue'
-import RecordingManagementView from './RecordingManagementView.vue'
-import RecordingScheduleView from './RecordingScheduleView.vue'
-import RecordingTimelineLegend from './RecordingTimelineLegend.vue'
-import SystemSettingsWorkspace from './SystemSettingsWorkspace.vue'
-import UploadManagementView from './UploadManagementView.vue'
+import { useRuntimeStore } from './stores/runtime'
 
 interface NavEntry {
   key: string
   label: string
   description: string
-  kind: 'dashboard' | 'route'
   target: string
   group: 'core' | 'ops' | 'settings'
   icon: object
 }
-interface ShellStatus {
-  ffmpeg?: { setts_available?: boolean }
-  recorders?: Array<{ camera_id: number; state: string }>
-  recording_schedule?: { cameras?: Array<{ camera_id: number }> }
-  upload?: { enabled: boolean; configured: boolean; active: boolean }
-  storage?: { used_percent: number; state: 'healthy' | 'warning' | 'critical' }
-}
 type ThemeMode = 'light' | 'dark'
 
 const navEntries: NavEntry[] = [
-  { key: 'dashboard', label: '总览', description: '运行概览与异常状态', kind: 'dashboard', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
-  { key: 'preview', label: '实时监控', description: '实时画面与码流状态', kind: 'route', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
-  { key: 'playback', label: '录像回放', description: '检索、时间轴与兼容回放', kind: 'route', target: '/recordings/browser', group: 'core', icon: markRaw(VideoPlay) },
-  { key: 'cameras', label: '摄像头', description: '设备、码流与录像配置', kind: 'route', target: '/cameras', group: 'core', icon: markRaw(Camera) },
-  { key: 'schedule', label: '录制计划', description: '自动录像与时间窗口', kind: 'route', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
-  { key: 'health', label: '系统健康', description: '录像服务、存储与稳定性', kind: 'route', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
-  { key: 'recordings', label: '录像管理', description: '录像资产与归档状态', kind: 'route', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
-  { key: 'uploads', label: '上传管理', description: 'OpenList 归档任务与传输', kind: 'route', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
-  { key: 'events', label: '事件中心', description: '异常、告警与运行事件', kind: 'route', target: '/events', group: 'ops', icon: markRaw(Bell) },
-  { key: 'settings', label: '系统设置', description: '录像、存储与通知配置', kind: 'route', target: '/settings', group: 'settings', icon: markRaw(Setting) },
+  { key: 'dashboard', label: '总览', description: '运行概览与异常状态', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
+  { key: 'preview', label: '实时监控', description: '实时画面与码流状态', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
+  { key: 'playback', label: '录像回放', description: '检索、时间轴与兼容回放', target: '/recordings/browser', group: 'core', icon: markRaw(VideoPlay) },
+  { key: 'cameras', label: '摄像头', description: '设备、码流与录像配置', target: '/cameras', group: 'core', icon: markRaw(Camera) },
+  { key: 'schedule', label: '录制计划', description: '自动录像与时间窗口', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
+  { key: 'health', label: '系统健康', description: '录像服务、存储与稳定性', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
+  { key: 'recordings', label: '录像管理', description: '录像资产与归档状态', target: '/recordings/manage', group: 'ops', icon: markRaw(Files) },
+  { key: 'uploads', label: '上传管理', description: 'OpenList 归档任务与传输', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },
+  { key: 'events', label: '事件中心', description: '异常、告警与运行事件', target: '/events', group: 'ops', icon: markRaw(Bell) },
+  { key: 'settings', label: '系统设置', description: '录像、存储与通知配置', target: '/settings', group: 'settings', icon: markRaw(Setting) },
 ]
 const entryMap = new Map(navEntries.map((item) => [item.key, item]))
 
+const route = useRoute()
+const router = useRouter()
+const runtime = useRuntimeStore()
+const { systemStatus: shellStatus, statusError, recordingCount, cameraCount, storageState, systemHealthy } = storeToRefs(runtime)
 const collapsed = ref(localStorage.getItem('nvr-sidebar-collapsed') === '1')
 const themeMode = ref<ThemeMode>(document.documentElement.dataset.theme === 'light' ? 'light' : 'dark')
-const activeKey = ref('dashboard')
-const renderKey = ref('dashboard')
-const shellStatus = ref<ShellStatus | null>(null)
-const statusError = ref(false)
-let statusTimer: number | null = null
 
+const activeKey = computed(() => String(route.meta.navKey || 'dashboard'))
 const activeEntry = computed(() => entryMap.get(activeKey.value) || entryMap.get('dashboard')!)
 const coreEntries = computed(() => navEntries.filter((item) => item.group === 'core'))
 const opsEntries = computed(() => navEntries.filter((item) => item.group === 'ops'))
 const settingsEntry = computed(() => navEntries.find((item) => item.group === 'settings')!)
-const recordingCount = computed(() => (shellStatus.value?.recorders || []).filter((item) => item.state === 'RECORDING').length)
-const cameraCount = computed(() => shellStatus.value?.recording_schedule?.cameras?.length ?? 0)
-const storageState = computed(() => shellStatus.value?.storage?.state || 'healthy')
-const systemHealthy = computed(() => Boolean(
-  shellStatus.value && !statusError.value && shellStatus.value.ffmpeg?.setts_available !== false && storageState.value !== 'critical',
-))
 
-function locationKey() {
-  const path = window.location.pathname
-  if (path === '/alerts') return 'settings'
-  if (path === '/cameras/batch') return 'cameras'
-  if (path === '/') {
-    const view = new URLSearchParams(window.location.search).get('view')
-    return view && entryMap.has(view) ? view : 'dashboard'
-  }
-  return navEntries.find((item) => item.kind === 'route' && item.target === path)?.key || 'dashboard'
-}
-function urlFor(entry: NavEntry) {
-  return entry.kind === 'dashboard' ? '/' : entry.target
-}
-function showEntry(entry: NavEntry, historyMode: 'push' | 'replace' | 'none' = 'push') {
-  activeKey.value = entry.key
-  renderKey.value = entry.key
-  const url = urlFor(entry)
-  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
-  if (historyMode === 'push' && current !== url) window.history.pushState({}, '', url)
-  else if (historyMode === 'replace' && window.location.pathname !== url) window.history.replaceState({}, '', url)
-}
 function navigate(key: string) {
   const entry = entryMap.get(key)
-  if (entry) showEntry(entry)
-}
-function openPlaybackCompatibility() {
-  navigate('playback')
-  window.setTimeout(() => {
-    document.getElementById('playback-compatibility')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }, 80)
+  if (entry) void router.push(entry.target)
 }
 function toggleSidebar() {
   collapsed.value = !collapsed.value
@@ -116,31 +63,9 @@ function setTheme(mode: ThemeMode) {
 function toggleTheme() {
   setTheme(themeMode.value === 'dark' ? 'light' : 'dark')
 }
-async function loadShellStatus() {
-  try {
-    shellStatus.value = (await axios.get<ShellStatus>('/api/system/status')).data
-    statusError.value = false
-  } catch {
-    statusError.value = true
-  }
-}
-function handlePopState() {
-  showEntry(entryMap.get(locationKey()) || entryMap.get('dashboard')!, 'none')
-}
 
-onMounted(() => {
-  const initialKey = locationKey()
-  const legacyAlerts = window.location.pathname === '/alerts'
-  showEntry(entryMap.get(initialKey) || entryMap.get('dashboard')!, 'replace')
-  if (legacyAlerts) window.history.replaceState({}, '', '/settings?section=alerts')
-  void loadShellStatus()
-  statusTimer = window.setInterval(loadShellStatus, 10000)
-  window.addEventListener('popstate', handlePopState)
-})
-onBeforeUnmount(() => {
-  if (statusTimer !== null) window.clearInterval(statusTimer)
-  window.removeEventListener('popstate', handlePopState)
-})
+onMounted(() => runtime.start())
+onBeforeUnmount(() => runtime.stop())
 </script>
 
 <template>
@@ -188,16 +113,9 @@ onBeforeUnmount(() => {
       </header>
 
       <main class="nvr-workspace-content">
-        <DashboardView v-if="renderKey === 'dashboard'" />
-        <CamerasWorkspace v-else-if="renderKey === 'cameras'" @open-preview="navigate('preview')" />
-        <RecordingManagementView v-else-if="renderKey === 'recordings'" @open-playback="navigate('playback')" @open-uploads="navigate('uploads')" />
-        <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="navigate('settings')" @open-recordings="navigate('recordings')" />
-        <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="navigate('cameras')" @open-recordings="navigate('recordings')" @open-uploads="navigate('uploads')" @open-health="navigate('health')" />
-        <PreviewView v-else-if="renderKey === 'preview'" />
-        <template v-else-if="renderKey === 'playback'"><RecordingBrowserView /><PlaybackTelemetryBridge /><PlaybackMetricsPanel /><RecordingCalendarLegend /><RecordingTimelineLegend /></template>
-        <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
-        <template v-else-if="renderKey === 'health'"><HealthView /><PlaybackMetricsPanel compact @open-playback="openPlaybackCompatibility" /></template>
-        <SystemSettingsWorkspace v-else-if="renderKey === 'settings'" @open-events="navigate('events')" />
+        <RouterView v-slot="{ Component }">
+          <component :is="Component" :key="route.path" />
+        </RouterView>
       </main>
 
       <footer class="nvr-statusbar">

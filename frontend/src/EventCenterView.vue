@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
+import { useCameraStore } from './stores/cameras'
 
-interface Camera { id: number; name: string }
 interface EventItem {
   id: number
   camera_id?: number | null
@@ -19,15 +21,11 @@ interface EventItem {
 type SocketState = 'connecting' | 'connected' | 'disconnected'
 type CameraFilter = number | 'all' | 'affected'
 
-const emit = defineEmits<{
-  (event: 'open-cameras'): void
-  (event: 'open-recordings'): void
-  (event: 'open-uploads'): void
-  (event: 'open-health'): void
-}>()
-
+const route = useRoute()
+const router = useRouter()
+const cameraStore = useCameraStore()
+const { cameras } = storeToRefs(cameraStore)
 const events = ref<EventItem[]>([])
-const cameras = ref<Camera[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const levelFilter = ref('all')
@@ -71,6 +69,11 @@ const filteredEvents = computed(() => {
   })
 })
 
+function positiveRouteId(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const id = Number(raw || 0)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
 function cameraName(cameraId?: number | null) {
   if (!cameraId) return '-'
   return cameras.value.find((camera) => camera.id === cameraId)?.name || `摄像头 #${cameraId}`
@@ -110,14 +113,37 @@ function metadataText(item: EventItem | null) {
   const parsed = parsedMetadata(item)
   return parsed ? JSON.stringify(parsed, null, 2) : item?.metadata_json || ''
 }
-function openDetail(item: EventItem) { selectedEvent.value = item; detailVisible.value = true }
+function openDetail(item: EventItem) {
+  selectedEvent.value = item
+  detailVisible.value = true
+  void router.replace({ query: { ...route.query, event_id: String(item.id) } })
+}
+function closeDetail() {
+  detailVisible.value = false
+  selectedEvent.value = null
+  const query = { ...route.query }
+  delete query.event_id
+  void router.replace({ query })
+}
+function syncDeepLinkedEvent() {
+  const eventId = positiveRouteId(route.query.event_id)
+  if (!eventId) return
+  const item = events.value.find((event) => event.id === eventId)
+  if (item) { selectedEvent.value = item; detailVisible.value = true }
+}
 function clearFilters() { keyword.value = ''; levelFilter.value = 'all'; categoryFilter.value = 'all'; cameraFilter.value = 'all' }
 function relatedAction(item: EventItem) {
   const category = item.category.toLowerCase()
-  if (item.recording_id || ['recording', 'recorder', 'playback'].includes(category)) return { label: '查看录像管理', action: () => emit('open-recordings') }
-  if (category === 'upload') return { label: '查看上传管理', action: () => emit('open-uploads') }
-  if (item.camera_id || category === 'camera') return { label: '查看摄像头', action: () => emit('open-cameras') }
-  return { label: '查看系统健康', action: () => emit('open-health') }
+  if (item.recording_id) {
+    const query: Record<string, string> = { recording_id: String(item.recording_id) }
+    if (item.camera_id) query.camera_id = String(item.camera_id)
+    return { label: '打开关联录像', action: () => router.push({ path: '/recordings/browser', query }) }
+  }
+  if (category === 'upload') return { label: '查看上传管理', action: () => router.push('/uploads') }
+  if (item.camera_id || category === 'camera') {
+    return { label: '打开摄像头', action: () => item.camera_id ? router.push({ path: '/cameras', query: { camera_id: String(item.camera_id) } }) : router.push('/cameras') }
+  }
+  return { label: '查看系统健康', action: () => router.push('/health-center') }
 }
 function wsUrl() {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -128,6 +154,7 @@ function mergeEvent(item: EventItem) {
   if (events.value.some((existing) => existing.id === item.id)) return
   eventCursor = eventCursor === null ? item.id : Math.max(eventCursor, item.id)
   events.value = [item, ...events.value].sort((a, b) => b.id - a.id).slice(0, 500)
+  syncDeepLinkedEvent()
 }
 function closeSocket() {
   if (!socket) return
@@ -160,18 +187,19 @@ function connectEventsSocket() {
 async function load() {
   loading.value = true
   try {
-    const [eventRes, cameraRes] = await Promise.all([
+    const [eventRes] = await Promise.all([
       axios.get<EventItem[]>('/api/events?limit=500'),
-      axios.get<Camera[]>('/api/cameras'),
+      cameraStore.load(),
     ])
     events.value = eventRes.data
-    cameras.value = cameraRes.data
     eventCursor = eventRes.data.reduce((maxId, item) => Math.max(maxId, item.id), 0)
+    syncDeepLinkedEvent()
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '事件加载失败')
   } finally { loading.value = false }
 }
-async function reload() { await load(); connectEventsSocket() }
+async function reload() { await Promise.all([load(), cameraStore.load(true)]); connectEventsSocket() }
+watch(() => route.query.event_id, syncDeepLinkedEvent)
 onMounted(() => { mounted = true; void (async () => { await load(); connectEventsSocket() })() })
 onBeforeUnmount(() => { mounted = false; closeSocket(); if (reconnectTimer !== null) window.clearTimeout(reconnectTimer) })
 </script>
@@ -201,22 +229,16 @@ onBeforeUnmount(() => { mounted = false; closeSocket(); if (reconnectTimer !== n
     <div class="filter-bar">
       <el-input v-model="keyword" clearable :prefix-icon="Search" placeholder="搜索消息、事件码、分类、摄像头或元数据" class="search-input" />
       <el-select v-model="levelFilter" class="filter-select" placeholder="级别">
-        <el-option label="全部级别" value="all" />
-        <el-option label="警告类" value="warnings" />
-        <el-option label="错误 / 严重" value="problems" />
+        <el-option label="全部级别" value="all" /><el-option label="警告类" value="warnings" /><el-option label="错误 / 严重" value="problems" />
         <el-option v-for="level in levelOptions" :key="level" :label="levelLabel(level)" :value="level" />
       </el-select>
       <el-select v-model="categoryFilter" class="filter-select" placeholder="分类">
-        <el-option label="全部分类" value="all" />
-        <el-option v-for="category in categories" :key="category" :label="categoryLabel(category)" :value="category" />
+        <el-option label="全部分类" value="all" /><el-option v-for="category in categories" :key="category" :label="categoryLabel(category)" :value="category" />
       </el-select>
       <el-select v-model="cameraFilter" class="camera-select" filterable placeholder="摄像头">
-        <el-option label="全部摄像头" value="all" />
-        <el-option label="所有设备相关事件" value="affected" />
-        <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
+        <el-option label="全部摄像头" value="all" /><el-option label="所有设备相关事件" value="affected" /><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
       </el-select>
-      <el-button text @click="clearFilters">清除筛选</el-button>
-      <span class="result-count">{{ filteredEvents.length }} 条</span>
+      <el-button text @click="clearFilters">清除筛选</el-button><span class="result-count">{{ filteredEvents.length }} 条</span>
     </div>
 
     <div class="table-panel">
@@ -232,14 +254,14 @@ onBeforeUnmount(() => { mounted = false; closeSocket(); if (reconnectTimer !== n
       </el-table>
     </div>
 
-    <el-drawer v-model="detailVisible" title="事件详情" size="460px">
+    <el-drawer v-model="detailVisible" title="事件详情" size="460px" @closed="closeDetail">
       <template v-if="selectedEvent">
         <div class="detail-hero" :class="levelType(selectedEvent.level)"><WarningFilled class="detail-icon" /><div><el-tag size="small" :type="levelType(selectedEvent.level)">{{ levelLabel(selectedEvent.level) }}</el-tag><strong>{{ selectedEvent.message }}</strong><span>{{ selectedEvent.created_at }}</span></div></div>
         <dl class="detail-list">
           <div><dt>事件 ID</dt><dd>#{{ selectedEvent.id }}</dd></div><div><dt>分类</dt><dd>{{ categoryLabel(selectedEvent.category) }}</dd></div><div><dt>事件码</dt><dd><code>{{ selectedEvent.code }}</code></dd></div><div><dt>摄像头</dt><dd>{{ cameraName(selectedEvent.camera_id) }}</dd></div><div><dt>录像</dt><dd>{{ selectedEvent.recording_id ? `#${selectedEvent.recording_id}` : '-' }}</dd></div>
         </dl>
         <div v-if="selectedEvent.metadata_json" class="metadata-block"><div class="section-label">元数据</div><pre>{{ metadataText(selectedEvent) }}</pre></div>
-        <div class="drawer-actions"><el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button><el-button @click="detailVisible = false">关闭</el-button></div>
+        <div class="drawer-actions"><el-button type="primary" @click="relatedAction(selectedEvent).action()">{{ relatedAction(selectedEvent).label }}</el-button><el-button @click="closeDetail">关闭</el-button></div>
       </template>
     </el-drawer>
   </div>

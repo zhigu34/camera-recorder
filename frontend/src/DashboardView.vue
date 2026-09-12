@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 import {
   Bell,
@@ -10,55 +12,7 @@ import {
   WarningFilled,
 } from '@element-plus/icons-vue'
 
-interface CameraHealth {
-  camera_id: number
-  name: string
-  ip: string
-  enabled: boolean
-  expected_recording: boolean
-  connectivity_status: 'unknown' | 'online' | 'offline'
-  recorder_state: string
-  schedule_state: string
-  state: string
-  abnormal: boolean
-  restart_count: number
-  last_error?: string | null
-}
-
-interface HealthSummary {
-  generated_at: string
-  uptime_seconds: number
-  cameras: {
-    total: number
-    enabled: number
-    recording: number
-    reconnecting: number
-    abnormal: number
-    online: number
-    offline: number
-    unknown: number
-  }
-  recordings_24h: {
-    segments: number
-    unhealthy_segments: number
-    failed_segments: number
-  }
-  uploads: Record<string, number>
-  storage: {
-    total_bytes: number
-    used_bytes: number
-    free_bytes: number
-    used_percent: number
-    state: 'healthy' | 'warning' | 'critical'
-  }
-  camera_health: CameraHealth[]
-}
-
-interface SystemStatus {
-  ffmpeg?: { setts_available?: boolean; ffmpeg_version?: string | null }
-  upload?: { enabled: boolean; configured: boolean; active: boolean; provider?: string }
-  storage_cleanup?: { last_error?: string | null }
-}
+import { type CameraHealth, useRuntimeStore } from './stores/runtime'
 
 interface EventItem {
   id: number
@@ -70,19 +24,13 @@ interface EventItem {
   created_at: string
 }
 
-type SocketState = 'connecting' | 'connected' | 'disconnected'
-
-const loading = ref(false)
-const summary = ref<HealthSummary | null>(null)
-const system = ref<SystemStatus | null>(null)
+const router = useRouter()
+const runtime = useRuntimeStore()
+const { healthSnapshot: summary, systemStatus: system, socketState, loading: runtimeLoading } = storeToRefs(runtime)
 const events = ref<EventItem[]>([])
-const socketState = ref<SocketState>('disconnected')
-let supplementalTimer: number | null = null
-let fallbackTimer: number | null = null
-let reconnectTimer: number | null = null
-let socket: WebSocket | null = null
-let mounted = false
+let eventTimer: number | null = null
 
+const loading = computed(() => runtimeLoading.value && !summary.value)
 const pendingUploads = computed(() => {
   const rows = summary.value?.uploads || {}
   return (rows.pending || 0) + (rows.uploading || 0) + (rows.retry_wait || 0)
@@ -105,10 +53,10 @@ const storageProgressStatus = computed(() => {
 const refreshLabel = computed(() => socketState.value === 'connected' ? 'WebSocket 实时更新' : 'HTTP 断线兜底')
 
 function bytes(value?: number) {
-  const bytes = value || 0
-  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(2)} TB`
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  return `${(bytes / 1024 ** 2).toFixed(0)} MB`
+  const amount = value || 0
+  if (amount >= 1024 ** 4) return `${(amount / 1024 ** 4).toFixed(2)} TB`
+  if (amount >= 1024 ** 3) return `${(amount / 1024 ** 3).toFixed(1)} GB`
+  return `${(amount / 1024 ** 2).toFixed(0)} MB`
 }
 function uptime(value?: number) {
   const seconds = value || 0
@@ -160,113 +108,30 @@ function eventClass(level: string) {
   if (level === 'warning') return 'warning'
   return 'info'
 }
-
-function wsUrl() {
-  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${scheme}//${window.location.host}/ws/status`
+function openCamera(cameraId: number) {
+  void router.push({ path: '/cameras', query: { camera_id: String(cameraId) } })
 }
-
-async function loadInitial() {
-  loading.value = true
-  try {
-    const [healthRes, systemRes, eventRes] = await Promise.all([
-      axios.get<HealthSummary>('/api/health/summary'),
-      axios.get<SystemStatus>('/api/system/status'),
-      axios.get<EventItem[]>('/api/events?limit=8'),
-    ])
-    summary.value = healthRes.data
-    system.value = systemRes.data
-    events.value = eventRes.data
-  } finally {
-    loading.value = false
+function openEvent(event: EventItem) {
+  if (event.camera_id) {
+    openCamera(event.camera_id)
+    return
   }
+  void router.push({ path: '/events', query: { event_id: String(event.id) } })
 }
-
-async function refreshSupplemental() {
+async function refreshEvents() {
   try {
-    const [systemRes, eventRes] = await Promise.all([
-      axios.get<SystemStatus>('/api/system/status'),
-      axios.get<EventItem[]>('/api/events?limit=8'),
-    ])
-    system.value = systemRes.data
-    events.value = eventRes.data
+    events.value = (await axios.get<EventItem[]>('/api/events?limit=8')).data
   } catch {
-    // Keep last known supplemental status; health continues over WebSocket.
-  }
-}
-
-async function refreshHealthFallback() {
-  if (socketState.value === 'connected') return
-  try {
-    summary.value = (await axios.get<HealthSummary>('/api/health/summary')).data
-  } catch {
-    // Keep the last valid snapshot while the socket reconnects.
-  }
-}
-
-function closeSocket() {
-  if (!socket) return
-  const current = socket
-  socket = null
-  current.onopen = null
-  current.onmessage = null
-  current.onerror = null
-  current.onclose = null
-  try { current.close() } catch { /* already closed */ }
-}
-
-function scheduleReconnect() {
-  if (!mounted || reconnectTimer !== null) return
-  reconnectTimer = window.setTimeout(() => {
-    reconnectTimer = null
-    connectStatusSocket()
-  }, 2000)
-}
-
-function connectStatusSocket() {
-  closeSocket()
-  if (!mounted) return
-  socketState.value = 'connecting'
-  const ws = new WebSocket(wsUrl())
-  socket = ws
-
-  ws.onopen = () => {
-    if (socket !== ws) return
-    socketState.value = 'connected'
-  }
-  ws.onmessage = (event: MessageEvent) => {
-    if (socket !== ws || typeof event.data !== 'string') return
-    try {
-      const message = JSON.parse(event.data) as { type?: string; data?: HealthSummary }
-      if (message.type === 'health.snapshot' && message.data) summary.value = message.data
-    } catch {
-      // Ignore unknown status frames.
-    }
-  }
-  ws.onerror = () => {
-    if (socket === ws) socketState.value = 'disconnected'
-  }
-  ws.onclose = () => {
-    if (socket !== ws) return
-    socket = null
-    socketState.value = 'disconnected'
-    scheduleReconnect()
+    // Keep the last valid event list; runtime health remains live through the shared store.
   }
 }
 
 onMounted(() => {
-  mounted = true
-  void loadInitial()
-  connectStatusSocket()
-  supplementalTimer = window.setInterval(refreshSupplemental, 30000)
-  fallbackTimer = window.setInterval(refreshHealthFallback, 10000)
+  void refreshEvents()
+  eventTimer = window.setInterval(() => void refreshEvents(), 30_000)
 })
 onBeforeUnmount(() => {
-  mounted = false
-  closeSocket()
-  if (supplementalTimer !== null) window.clearInterval(supplementalTimer)
-  if (fallbackTimer !== null) window.clearInterval(fallbackTimer)
-  if (reconnectTimer !== null) window.clearTimeout(reconnectTimer)
+  if (eventTimer !== null) window.clearInterval(eventTimer)
 })
 </script>
 
@@ -318,7 +183,7 @@ onBeforeUnmount(() => {
           <span class="panel-meta">{{ refreshLabel }}</span>
         </div>
         <div class="camera-grid">
-          <div v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-tile">
+          <div v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-tile" role="button" tabindex="0" @click="openCamera(camera.camera_id)" @keydown.enter="openCamera(camera.camera_id)">
             <div class="camera-title">
               <span class="camera-dot" :class="connectivityClass(camera)"></span>
               <div><strong>{{ camera.name }}</strong><span>{{ camera.ip }}</span></div>
@@ -359,7 +224,7 @@ onBeforeUnmount(() => {
         <article class="panel event-panel">
           <div class="panel-head compact"><div><span class="panel-kicker">ACTIVITY</span><h2>最近事件</h2></div></div>
           <div class="event-list">
-            <div v-for="event in events" :key="event.id" class="event-row">
+            <div v-for="event in events" :key="event.id" class="event-row" role="button" tabindex="0" @click="openEvent(event)" @keydown.enter="openEvent(event)">
               <span class="event-marker" :class="eventClass(event.level)"></span>
               <div class="event-content"><strong>{{ event.message }}</strong><span>{{ eventTime(event.created_at) }} · {{ event.category }}</span></div>
             </div>
@@ -395,7 +260,7 @@ onBeforeUnmount(() => {
 .panel-head { min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--nvr-border); }.panel-head.compact { min-height: 60px; }
 .panel-head h2 { margin: 4px 0 0; font-size: 13px; font-weight: 640; }.panel-meta { color: #657488; font-size: 10px; }
 .camera-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--nvr-border); }
-.camera-tile { min-height: 92px; padding: 14px 16px; background: var(--nvr-surface); }.camera-tile:hover { background: var(--nvr-surface-2); }
+.camera-tile { min-height: 92px; padding: 14px 16px; background: var(--nvr-surface); cursor:pointer; }.camera-tile:hover,.camera-tile:focus-visible { background: var(--nvr-surface-2); outline:none; }
 .camera-title { display: flex; align-items: center; gap: 7px; }.camera-title > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }.camera-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.camera-title span { color: #647287; font-size: 10px; }
 .camera-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }.camera-dot.success { background: var(--nvr-green); box-shadow: 0 0 0 3px rgba(46,204,138,.08); }.camera-dot.warning { background: var(--nvr-yellow); }.camera-dot.danger { background: var(--nvr-red); }.camera-dot.muted { background: #526071; }
 .camera-state { flex: 0 0 auto; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,.035); }.camera-state.success { color: var(--nvr-green); }.camera-state.warning { color: var(--nvr-yellow); }.camera-state.danger { color: var(--nvr-red); }.camera-state.muted { color: #718095; }
@@ -403,7 +268,7 @@ onBeforeUnmount(() => {
 .right-column { display: flex; flex-direction: column; gap: 12px; }.storage-panel { padding-bottom: 15px; }.storage-panel :deep(.el-progress) { margin: 18px 18px 14px; }.storage-value { font-size: 20px; font-weight: 670; }
 .storage-stats { display: grid; grid-template-columns: 1fr 1fr; padding: 0 18px 14px; gap: 10px; }.storage-stats div { display: flex; flex-direction: column; gap: 3px; }.storage-stats span { color: #647287; font-size: 9px; }.storage-stats strong { font-size: 12px; }
 .service-row { display: flex; justify-content: space-between; padding: 9px 18px 0; border-top: 1px solid rgba(255,255,255,.035); color: #788699; font-size: 10px; }.service-row b.ok { color: var(--nvr-green); }.service-row b.bad { color: var(--nvr-red); }.service-row b.neutral { color: #788699; }
-.event-list { padding: 5px 0; }.event-row { display: flex; gap: 10px; padding: 10px 16px; }.event-row + .event-row { border-top: 1px solid rgba(255,255,255,.035); }.event-marker { flex: 0 0 6px; width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; }.event-marker.danger { background: var(--nvr-red); }.event-marker.warning { background: var(--nvr-yellow); }.event-marker.info { background: #577291; }.event-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }.event-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 560; }.event-content span { color: #5f6e81; font-size: 9px; }
+.event-list { padding: 5px 0; }.event-row { display: flex; gap: 10px; padding: 10px 16px; cursor:pointer; }.event-row:hover,.event-row:focus-visible{background:var(--nvr-surface-2);outline:none}.event-row + .event-row { border-top: 1px solid rgba(255,255,255,.035); }.event-marker { flex: 0 0 6px; width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; }.event-marker.danger { background: var(--nvr-red); }.event-marker.warning { background: var(--nvr-yellow); }.event-marker.info { background: #577291; }.event-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }.event-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 560; }.event-content span { color: #5f6e81; font-size: 9px; }
 .empty-state { grid-column: 1/-1; padding: 34px; text-align: center; color: #657488; font-size: 11px; background: var(--nvr-surface); }.empty-state.compact { padding: 20px; }
 @media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.right-column{display:grid;grid-template-columns:1fr 1fr}}
 @media(max-width:760px){.dashboard-page{padding:14px}.dashboard-head{align-items:flex-start;flex-direction:column}.health-badge{width:100%}.metric-grid,.camera-grid,.right-column{grid-template-columns:1fr}.dashboard-head h1{font-size:21px}.camera-state:nth-last-child(1){display:none}}

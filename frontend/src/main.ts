@@ -18,6 +18,7 @@ import './styles/camera-device-layout.css'
 import './styles/camera-detail-drawer.css'
 
 import Root from './Root.vue'
+import { router } from './router'
 
 type ThemeMode = 'light' | 'dark'
 
@@ -32,7 +33,9 @@ document.documentElement.dataset.theme = theme
 document.documentElement.classList.toggle('dark', theme === 'dark')
 
 const app = createApp(Root)
+const pinia = createPinia()
 
-app.use(createPinia())
+app.use(pinia)
+app.use(router)
 app.use(ElementPlus)
 app.mount('#app')

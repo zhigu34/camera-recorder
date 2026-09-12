@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasView from './CamerasView.vue'
 
@@ -7,9 +8,23 @@ const emit = defineEmits<{
   (event: 'open-preview'): void
 }>()
 
+const route = useRoute()
+const router = useRouter()
 const batchVisible = ref(false)
 const cameraViewKey = ref(0)
 
+watch(() => route.path, (path) => {
+  batchVisible.value = path === '/cameras/batch'
+}, { immediate: true })
+
+function openBatch() {
+  batchVisible.value = true
+  if (route.path !== '/cameras/batch') void router.push('/cameras/batch')
+}
+function closeBatch() {
+  batchVisible.value = false
+  if (route.path === '/cameras/batch') void router.replace('/cameras')
+}
 function onBatchCompleted() {
   cameraViewKey.value += 1
 }
@@ -18,7 +33,7 @@ function onBatchCompleted() {
 <template>
   <CamerasView
     :key="cameraViewKey"
-    @open-batch="batchVisible = true"
+    @open-batch="openBatch"
     @open-preview="emit('open-preview')"
   />
 
@@ -30,10 +45,11 @@ function onBatchCompleted() {
     destroy-on-close
     :show-close="true"
     title="批量添加摄像头"
+    @closed="closeBatch"
   >
     <BatchCamerasView
       @completed="onBatchCompleted"
-      @close="batchVisible = false"
+      @close="closeBatch"
     />
   </el-dialog>
 </template>
