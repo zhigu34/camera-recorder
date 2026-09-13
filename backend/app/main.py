@@ -26,6 +26,7 @@ from app.services.alert_monitor import alert_monitor
 from app.services.camera_identity_reconcile import reconcile_camera_form_factors
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
+from app.services.motion_manager import motion_detection_manager
 from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
@@ -66,6 +67,10 @@ async def lifespan(_: FastAPI):
     # start cameras while deployment-local time is inside a configured window.
     await recording_schedule_manager.start()
 
+    # Motion detection is an auxiliary low-rate path. Starting it after recorder
+    # startup ensures detection can never delay or own the main recording lifecycle.
+    await motion_detection_manager.start()
+
     # Start background observability/protection after recorder auto-start. Planned
     # schedule transitions should not pollute health metrics, and cleanup must never
     # delay recorder startup.
@@ -77,6 +82,7 @@ async def lifespan(_: FastAPI):
     await playback_prefetch_manager.stop()
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
+    await motion_detection_manager.stop()
     await recording_schedule_manager.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
