@@ -8,6 +8,7 @@ import PlaybackEventFeed from './PlaybackEventFeed.vue'
 import PlaybackTimelineV3 from './PlaybackTimelineV3.vue'
 import RecordingManagementView from './RecordingManagementView.vue'
 import { cameraIdFromRouteQuery } from './utils/cameraMotionPortal'
+import { playbackSeekStrategy } from './utils/playbackSeekStrategy'
 import {
   findRecordingAtWallTime,
   recordingSeekOffset,
@@ -133,13 +134,25 @@ async function handleTimelineSeek(wallSeconds: number) {
   }
 
   activeWallSeconds.value = wallSeconds
-  pendingSeek.value = {
+  const pending: PendingSeek = {
     token: ++seekToken,
     recordingId: recording.id,
     seconds: recordingSeekOffset(recording, wallSeconds),
   }
-  timelineTargetReady.value = false
+  pendingSeek.value = pending
 
+  if (playbackSeekStrategy(recordingIdFromRoute(), recording.id) === 'in-place') {
+    const video = document.querySelector<HTMLVideoElement>('.recording-center .player-box video')
+    if (video) {
+      observeVideo(video)
+      bindSeek(video, pending)
+    } else {
+      refreshTargets()
+    }
+    return
+  }
+
+  timelineTargetReady.value = false
   await router.replace({
     path: route.path,
     query: {
