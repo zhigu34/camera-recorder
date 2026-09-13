@@ -1127,8 +1127,8 @@
 .nvr-workspace-content .recording-center .calendar-summary > span,
 .nvr-workspace-content .recording-center .browser-actions,
 .nvr-workspace-content .recording-center .list-hint,
-.nvr-workspace-content .recording-center .segment-primary span,
-.nvr-workspace-content .recording-center .segment-primary small,
+.nvr-workspace-content .recording-center .segment-current span,
+.nvr-workspace-content .recording-center .segment-current small,
 .nvr-workspace-content .recording-center .segment-facts dt,
 .nvr-workspace-content .recording-center .segment-controls small {
   font-size: var(--nvr-font-caption) !important;
@@ -1192,10 +1192,15 @@
   font-size: var(--nvr-font-caption) !important;
 }
 
+.nvr-workspace-content .recording-center .calendar-toolbar .date-picker .el-input__wrapper {
+  overflow: hidden;
+  border-radius: 10px !important;
+}
+
 .nvr-workspace-content .recording-center .segment-inspector {
   order: 6;
   display: grid;
-  grid-template-columns: minmax(145px, 1.1fr) minmax(0, 2fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: stretch;
   gap: 0;
   margin: 10px 12px 0;
@@ -1205,38 +1210,21 @@
   background: color-mix(in srgb, var(--nvr-bg) 36%, transparent);
 }
 
-.nvr-workspace-content .recording-center .segment-primary {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 4px;
-  padding: 11px 12px;
-  border-right: 1px solid var(--recording-soft-line);
-}
-
-.nvr-workspace-content .recording-center .segment-kicker {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.nvr-workspace-content .recording-center .segment-primary span,
-.nvr-workspace-content .recording-center .segment-primary small,
+.nvr-workspace-content .recording-center .segment-current span,
+.nvr-workspace-content .recording-center .segment-current small,
 .nvr-workspace-content .recording-center .segment-facts dt,
 .nvr-workspace-content .recording-center .segment-controls small {
   color: var(--nvr-muted);
 }
 
-.nvr-workspace-content .recording-center .segment-primary strong {
+.nvr-workspace-content .recording-center .segment-current strong {
   color: var(--nvr-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
-.nvr-workspace-content .recording-center .segment-primary small {
+.nvr-workspace-content .recording-center .segment-current small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1245,7 +1233,7 @@
 .nvr-workspace-content .recording-center .segment-facts {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: stretch;
   margin: 0;
 }
@@ -1256,8 +1244,13 @@
   flex-direction: column;
   justify-content: center;
   gap: 4px;
-  padding: 9px 10px;
+  padding: 10px 12px;
   border-right: 1px solid var(--recording-soft-line);
+  border-bottom: 1px solid var(--recording-soft-line);
+}
+
+.nvr-workspace-content .recording-center .segment-facts > div:last-child {
+  border-right: 0;
 }
 
 .nvr-workspace-content .recording-center .segment-facts dd {
@@ -1269,36 +1262,54 @@
   white-space: nowrap;
 }
 
+.nvr-workspace-content .recording-center .segment-current {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--recording-soft-line);
+}
+
+.nvr-workspace-content .recording-center .segment-current > span {
+  font-weight: 600;
+}
+
+.nvr-workspace-content .recording-center .segment-position {
+  font-variant-numeric: tabular-nums;
+}
+
 .nvr-workspace-content .recording-center .segment-controls {
-  min-width: 190px;
+  min-width: 0;
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
-  gap: 10px;
-  padding: 10px 12px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 9px 12px;
   background: color-mix(in srgb, var(--nvr-bg-soft) 42%, transparent);
 }
 
 .nvr-workspace-content .recording-center .segment-actions {
-  display: grid !important;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex !important;
   gap: 6px !important;
 }
 
 .nvr-workspace-content .recording-center .segment-actions .el-button {
-  width: 100%;
   margin: 0 !important;
 }
 
 .nvr-workspace-content .recording-center .segment-controls .auto-advance {
   order: initial;
-  width: 100% !important;
-  align-self: stretch !important;
-  justify-content: space-between !important;
-  min-height: 0 !important;
+  width: auto !important;
+  align-self: center !important;
+  justify-content: flex-start !important;
+  min-height: 32px !important;
   margin: 0 !important;
-  padding: 0 !important;
+  padding: 0 8px !important;
+  border-radius: var(--nvr-radius-sm) !important;
+  background: color-mix(in srgb, var(--nvr-bg) 34%, transparent) !important;
 }
 
 .nvr-workspace-content .recording-center .recording-row-actions {
@@ -1342,7 +1353,7 @@
  * that natural height and the recording rows scroll inside the remaining room. */
 @media (min-width: 1081px) {
   .nvr-workspace-content .recording-center .recording-layout {
-    align-items: stretch !important;
+    align-items: start !important;
   }
 
   .nvr-workspace-content .recording-center .playback-column {
@@ -1355,9 +1366,8 @@
   }
 
   .nvr-workspace-content .recording-center .catalog-column {
-    height: auto;
     min-height: 0;
-    align-self: stretch;
+    align-self: start;
   }
 
   .nvr-workspace-content .recording-center .calendar-panel {
@@ -1385,16 +1395,8 @@
       "storage health upload" !important;
   }
 
-  .nvr-workspace-content .recording-center .segment-inspector {
-    grid-template-columns: minmax(140px, 1fr) minmax(0, 1.55fr);
-  }
-
   .nvr-workspace-content .recording-center .segment-controls {
-    grid-column: 1 / -1;
-    flex-direction: row;
-    align-items: center;
-    justify-content: flex-end;
-    border-top: 1px solid var(--recording-soft-line);
+    flex-wrap: wrap;
   }
 }
 
@@ -1415,16 +1417,15 @@
     justify-content: flex-start;
   }
 
-  .nvr-workspace-content .recording-center .segment-inspector {
-    grid-template-columns: 1fr;
-  }
-
-  .nvr-workspace-content .recording-center .segment-primary {
-    border-right: 0;
-    border-bottom: 1px solid var(--recording-soft-line);
-  }
-
   .nvr-workspace-content .recording-center .segment-facts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nvr-workspace-content .recording-center .segment-current {
+    grid-template-columns: auto 1fr auto;
+  }
+
+  .nvr-workspace-content .recording-center .segment-current > small:not(.segment-position) {
+    grid-column: 1 / -1;
   }
 }
