@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import cv2
 import numpy as np
@@ -20,6 +22,15 @@ MotionStream = Literal["main", "sub"]
 
 class MotionWorkerError(RuntimeError):
     pass
+
+
+def deployment_now() -> datetime:
+    name = os.getenv("TZ", "UTC").strip() or "UTC"
+    try:
+        zone = ZoneInfo(name)
+    except ZoneInfoNotFoundError:
+        zone = timezone.utc
+    return datetime.now(zone)
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,7 +258,7 @@ class MotionWorker:
                         break
                     raise MotionWorkerError("motion stream ended with an incomplete frame") from exc
 
-                timestamp = datetime.now(timezone.utc)
+                timestamp = deployment_now()
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                     (output_height, output_width, 3)
                 )
