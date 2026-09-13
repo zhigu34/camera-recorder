@@ -5,9 +5,11 @@ import axios from 'axios'
 import {
   ZOOM_SPANS,
   clampViewport,
+  motionEventOverlapsRecordings,
   rangePercent,
   recordingRange,
   timeAtPointer,
+  timeAtTrackPointer,
   wallClockSeconds,
   zoomAround,
   type PlaybackZoom,
@@ -60,6 +62,7 @@ const recordingBlocks = computed(() => props.recordings.flatMap((item) => {
   return layout ? [{ item, ...layout }] : []
 }))
 const motionBlocks = computed(() => motionEvents.value.flatMap((event) => {
+  if (!motionEventOverlapsRecordings(event, props.recordings)) return []
   const start = wallClockSeconds(event.started_at)
   const end = wallClockSeconds(event.ended_at)
   if (start === null || end === null) return []
@@ -98,15 +101,15 @@ function chooseZoom(next: PlaybackZoom, anchorRatio = playheadRatio.value) {
   if (next !== '24h') centerOn(cursorSeconds.value)
 }
 
-function pointerRatio(event: PointerEvent | WheelEvent, element: HTMLElement) {
+function pointerTime(event: PointerEvent | WheelEvent, element: HTMLElement) {
   const rect = element.getBoundingClientRect()
-  return rect.width ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) : 0.5
+  return timeAtTrackPointer(viewStart.value, span.value, event.clientX, rect.left, rect.width)
 }
 
 function seekAtPointer(event: PointerEvent) {
   if (Date.now() < suppressClickUntil) return
   const element = event.currentTarget as HTMLElement
-  const target = timeAtPointer(viewStart.value, span.value, pointerRatio(event, element))
+  const target = pointerTime(event, element)
   cursorSeconds.value = target
   if (zoom.value !== '24h') centerOn(target)
   emit('seek', target)
@@ -145,7 +148,8 @@ function endDrag() {
 function handleWheel(event: WheelEvent) {
   event.preventDefault()
   const element = event.currentTarget as HTMLElement
-  const ratio = pointerRatio(event, element)
+  const anchor = pointerTime(event, element)
+  const ratio = Math.max(0, Math.min(1, (anchor - viewStart.value) / span.value))
   const current = zoomLevels.indexOf(zoom.value)
   const next = event.deltaY < 0 ? Math.min(zoomLevels.length - 1, current + 1) : Math.max(0, current - 1)
   chooseZoom(zoomLevels[next] || zoom.value, ratio)
@@ -153,7 +157,8 @@ function handleWheel(event: WheelEvent) {
 
 function seekOverview(event: PointerEvent) {
   const element = event.currentTarget as HTMLElement
-  const target = timeAtPointer(0, 86400, pointerRatio(event, element))
+  const rect = element.getBoundingClientRect()
+  const target = timeAtTrackPointer(0, 86400, event.clientX, rect.left, rect.width)
   cursorSeconds.value = target
   if (zoom.value !== '24h') centerOn(target)
   emit('seek', target)
@@ -175,6 +180,7 @@ async function loadMotionEvents() {
 watch(() => [props.cameraId, props.date] as const, () => {
   viewStart.value = 0
   cursorSeconds.value = typeof props.activeWallSeconds === 'number' ? props.activeWallSeconds : 12 * 3600
+  motionEvents.value = []
   void loadMotionEvents()
 })
 
@@ -199,12 +205,12 @@ onMounted(() => void loadMotionEvents())
       </div>
     </div>
 
-    <div class="playback-v3-stage" @wheel="handleWheel">
-      <div class="timeline-ruler">
+    <div class="playback-v3-stage">
+      <div class="timeline-ruler" @wheel="handleWheel">
         <span v-for="tick in ticks" :key="`${tick.seconds}-${tick.ratio}`" :style="{ left: `${tick.ratio * 100}%` }">{{ tick.label }}</span>
       </div>
 
-      <div class="timeline-lanes" :class="{ dragging }" @pointerdown="startDrag" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @click="seekAtPointer">
+      <div class="timeline-lanes">
         <div class="timeline-lane-row recording-row">
           <div class="lane-label">录像</div>
           <div class="lane-track">
@@ -227,8 +233,17 @@ onMounted(() => void loadMotionEvents())
           <div class="lane-track"><small class="lane-status">未启用</small></div>
         </div>
 
-        <div class="timeline-track-overlay" aria-hidden="true">
-          <div class="timeline-playhead" :style="playheadStyle"><span>{{ clockLabel(playheadSeconds, true) }}</span></div>
+        <div
+          class="timeline-track-overlay"
+          :class="{ dragging }"
+          @pointerdown="startDrag"
+          @pointermove="moveDrag"
+          @pointerup="endDrag"
+          @pointercancel="endDrag"
+          @click="seekAtPointer"
+          @wheel="handleWheel"
+        >
+          <div class="timeline-playhead" :style="playheadStyle" aria-hidden="true"><span>{{ clockLabel(playheadSeconds, true) }}</span></div>
         </div>
       </div>
 
@@ -242,6 +257,6 @@ onMounted(() => void loadMotionEvents())
 </template>
 
 <style scoped>
-.playback-v3{--timeline-label-width:60px;border-top:1px solid var(--nvr-border);padding:14px 14px 10px;background:linear-gradient(180deg,rgba(10,14,19,.16),rgba(10,14,19,.42));user-select:none}.playback-v3-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px}.playback-v3-date{display:flex;align-items:baseline;gap:12px;color:var(--nvr-text)}.playback-v3-date strong{font-size:14px}.playback-v3-date span{font-variant-numeric:tabular-nums;font-size:12px;color:var(--nvr-muted)}.playback-v3-zoom{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-input)}.playback-v3-zoom button{border:0;background:transparent;color:var(--nvr-muted);font:inherit;font-size:12px;padding:5px 11px;border-radius:5px;cursor:pointer}.playback-v3-zoom button.active{background:var(--nvr-blue);color:#fff}.playback-v3-stage{position:relative}.timeline-ruler{position:relative;height:24px;margin-left:var(--timeline-label-width);border-bottom:1px solid var(--nvr-border)}.timeline-ruler span{position:absolute;top:5px;transform:translateX(-50%);font-size:10px;color:var(--nvr-subtle);font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-lanes{position:relative;cursor:crosshair}.timeline-lanes.dragging{cursor:grabbing}.timeline-lane-row{display:grid;grid-template-columns:var(--timeline-label-width) 1fr;min-height:28px;border-bottom:1px solid rgba(255,255,255,.035)}.lane-label{display:flex;align-items:center;padding-left:6px;font-size:11px;color:var(--nvr-muted)}.lane-track{position:relative;margin:6px 0;background:rgba(255,255,255,.025);overflow:hidden}.recording-block,.motion-block{position:absolute;top:0;bottom:0;border-radius:2px}.recording-block{background:linear-gradient(90deg,rgba(76,141,255,.82),rgba(76,141,255,.58))}.motion-block{background:var(--nvr-blue);box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}.disabled-row .lane-track{background:transparent}.lane-status{position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--nvr-subtle)}.timeline-track-overlay{position:absolute;left:var(--timeline-label-width);right:0;top:0;bottom:0;pointer-events:none}.timeline-playhead{position:absolute;top:0;bottom:0;width:1px;background:#dce8ff;box-shadow:0 0 0 1px rgba(76,141,255,.35)}.timeline-playhead span{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:4px;background:#b9d4ff;color:#10223d;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-overview{position:relative;height:18px;margin:10px 0 0 var(--timeline-label-width);border:1px solid var(--nvr-border);border-radius:4px;background:rgba(255,255,255,.035);overflow:hidden;cursor:pointer}.overview-recording{position:absolute;top:3px;bottom:3px;background:rgba(130,149,176,.46)}.overview-window{position:absolute;top:0;bottom:0;border:1px solid var(--nvr-blue);background:rgba(76,141,255,.12);box-sizing:border-box}.overview-caption{display:flex;justify-content:space-between;margin:5px 2px 0 var(--timeline-label-width);font-size:10px;color:var(--nvr-subtle)}
+.playback-v3{--timeline-label-width:60px;border-top:1px solid var(--nvr-border);padding:14px 14px 10px;background:linear-gradient(180deg,rgba(10,14,19,.16),rgba(10,14,19,.42));user-select:none}.playback-v3-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px}.playback-v3-date{display:flex;align-items:baseline;gap:12px;color:var(--nvr-text)}.playback-v3-date strong{font-size:14px}.playback-v3-date span{font-variant-numeric:tabular-nums;font-size:12px;color:var(--nvr-muted)}.playback-v3-zoom{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-input)}.playback-v3-zoom button{border:0;background:transparent;color:var(--nvr-muted);font:inherit;font-size:12px;padding:5px 11px;border-radius:5px;cursor:pointer}.playback-v3-zoom button.active{background:var(--nvr-blue);color:#fff}.playback-v3-stage{position:relative}.timeline-ruler{position:relative;height:24px;margin-left:var(--timeline-label-width);border-bottom:1px solid var(--nvr-border)}.timeline-ruler span{position:absolute;top:5px;transform:translateX(-50%);font-size:10px;color:var(--nvr-subtle);font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-lanes{position:relative}.timeline-lane-row{display:grid;grid-template-columns:var(--timeline-label-width) 1fr;min-height:28px;border-bottom:1px solid rgba(255,255,255,.035)}.lane-label{display:flex;align-items:center;padding-left:6px;font-size:11px;color:var(--nvr-muted)}.lane-track{position:relative;margin:6px 0;background:rgba(255,255,255,.025);overflow:hidden}.recording-block,.motion-block{position:absolute;top:0;bottom:0;border-radius:2px}.recording-block{background:linear-gradient(90deg,rgba(76,141,255,.82),rgba(76,141,255,.58))}.motion-block{background:var(--nvr-blue);box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}.disabled-row .lane-track{background:transparent}.lane-status{position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--nvr-subtle)}.timeline-track-overlay{position:absolute;z-index:4;left:var(--timeline-label-width);right:0;top:0;bottom:0;cursor:crosshair;touch-action:none}.timeline-track-overlay.dragging{cursor:grabbing}.timeline-playhead{position:absolute;z-index:5;top:0;bottom:0;width:1px;background:#dce8ff;box-shadow:0 0 0 1px rgba(76,141,255,.35);pointer-events:none}.timeline-playhead span{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:4px;background:#b9d4ff;color:#10223d;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-overview{position:relative;height:18px;margin:10px 0 0 var(--timeline-label-width);border:1px solid var(--nvr-border);border-radius:4px;background:rgba(255,255,255,.035);overflow:hidden;cursor:pointer}.overview-recording{position:absolute;top:3px;bottom:3px;background:rgba(130,149,176,.46)}.overview-window{position:absolute;top:0;bottom:0;border:1px solid var(--nvr-blue);background:rgba(76,141,255,.12);box-sizing:border-box}.overview-caption{display:flex;justify-content:space-between;margin:5px 2px 0 var(--timeline-label-width);font-size:10px;color:var(--nvr-subtle)}
 @media (max-width:900px){.playback-v3{--timeline-label-width:48px;padding-inline:8px}.playback-v3-zoom button{padding-inline:8px}}
 </style>
