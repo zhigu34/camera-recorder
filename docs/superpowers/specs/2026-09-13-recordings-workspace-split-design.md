@@ -1,5 +1,11 @@
 # Recordings Workspace Split Design
 
+## Status and precedence
+
+This design is the structural continuation of `2026-09-13-playback-v3-design.md`.
+
+It **supersedes** the earlier design where Playback V3 was teleported into the existing recording-management layout and where the right-side recording catalog remained part of the Playback surface. Timeline math, wall-clock semantics, motion-event behavior, and existing playback compatibility requirements from the earlier design remain valid.
+
 ## Goal
 
 Finish the Playback V3 information architecture by separating **continuous playback** from **recording file management** while keeping both under one top-level “录像” module.
@@ -9,11 +15,11 @@ The current implementation still renders the legacy `RecordingManagementView.vue
 - **回放** — camera/date-first continuous playback.
 - **录像管理** — segment/file administration.
 
-No recording, cloud archive, compatibility proxy, deletion, or health capability is removed.
+No recording, cloud archive, compatibility proxy, deletion, health, or upload-management capability is removed.
 
 ## Navigation and routes
 
-The left sidebar has one top-level entry named **录像** with a description such as “连续回放与录像管理”. Its target is the playback route.
+The left sidebar has one top-level entry named **录像** with description **“连续回放与录像管理”**. Its target is `/recordings/playback`.
 
 Routes:
 
@@ -21,55 +27,60 @@ Routes:
 - `/recordings/manage` — recording management.
 - `/recordings/browser` — compatibility redirect to `/recordings/playback`, preserving query and hash.
 
-Both routes use the same `navKey: 'recordings'`, so the shell keeps one active sidebar entry. A route meta value such as `recordingMode: 'playback' | 'manage'` selects the inner workspace.
+Both primary routes use `navKey: 'recordings'`. Their route meta also sets `recordingMode: 'playback'` or `recordingMode: 'manage'`.
 
-A shared `RecordingsWorkspace.vue` renders the top tabs and the selected child surface. Tab changes preserve meaningful query state (`camera_id`, `date`, `recording_id`) so switching views does not lose context.
+A new `RecordingsWorkspace.vue` owns the top tabs and renders the selected child surface. Tab changes preserve `camera_id`, `date`, and `recording_id` when present.
 
-The top tabs are part of the recordings workspace, immediately below the global product top bar. They are not additional sidebar entries.
+The top tabs sit immediately below the global product top bar. They are not additional sidebar entries.
 
 ## Playback tab
 
-Playback becomes the default recordings experience. It must not expose the recording segment list as a primary navigation surface.
+Playback becomes the default recordings experience. It does not render the recording segment table or management catalog.
 
-The hierarchy is:
+The desktop hierarchy is fixed:
 
-1. Compact camera/date controls.
-2. Dominant video player.
-3. Right-side detection event feed on desktop; stacked below the player on narrow screens.
-4. Full-width continuous Playback V3 timeline below the player/event row.
-5. Compact playback/status details only when they directly help playback.
+1. Compact camera selector and date picker.
+2. Main row with dominant video player on the left and detection event feed on the right.
+3. Full-width continuous Playback V3 timeline below that row.
+4. Compact playback/source status attached to the player when needed.
 
-The legacy recording table, storage/health/upload filters, batch selection, delete controls, expanded calendar catalog, and file-management actions do not render in this tab.
+On narrow screens, the event feed stacks below the player and the timeline remains below both.
 
-Playback still consumes the day’s recording segments internally. Segments remain implementation data used to resolve wall-clock seeks, source changes, gaps, cloud/local source choice, compatibility proxy behavior, and event-to-video jumps. Users navigate by wall-clock time and events rather than by segment rows.
+The legacy recording table, storage/health/upload filters, batch selection, delete controls, expanded calendar catalog, and file-management actions do not render in Playback.
+
+Playback still consumes the day’s recording segments internally. Segments remain implementation data used to resolve wall-clock seeks, source changes, gaps, cloud/local source choice, compatibility proxy behavior, and event-to-video jumps. Users navigate by wall-clock time and events rather than segment rows.
 
 ### Playback selection controls
 
-Camera and date remain directly selectable in Playback. Date selection should be compact; a full management-style calendar is not required in the primary Playback surface. A lightweight date picker may show which days have recordings, but it must not recreate the old catalog/table layout.
+Playback has exactly two primary selectors:
 
-If route query state is incomplete, Playback resolves an initial camera/date/recording using the existing recent-recording behavior. Deep links with `camera_id`, `date`, and `recording_id` must continue to work.
+- Camera selector.
+- Compact date picker.
+
+The date picker selects a day; it does not expand into the management calendar/table inside the Playback surface.
+
+If route query state is incomplete, Playback uses the existing recent-recording behavior to select an initial camera/date/recording. Deep links with `camera_id`, `date`, and `recording_id` continue to work.
 
 ### Playback engine
 
-The current playback engine is embedded in `RecordingManagementView.vue`. It owns direct playback, HEVC handling, H.264 compatibility proxy/live proxy, cloud/OpenList playback, proxy progress, auto-advance, adjacent recording navigation, and error/fallback logic.
+The existing playback engine is currently embedded in `RecordingManagementView.vue`. It owns direct playback, HEVC handling, H.264 compatibility proxy/live proxy, cloud/OpenList playback, proxy progress, auto-advance, adjacent recording transitions, and error/fallback logic.
 
-That engine must be extracted into a playback-focused component/composable instead of duplicated. The new Playback tab uses the extracted engine directly.
+This behavior is extracted into one reusable playback layer with two concrete pieces:
 
-The V3 timeline must integrate through an explicit player API/ref. The final architecture must not depend on document-wide `querySelector`, `MutationObserver`, or Teleport lifecycle tricks to seek the video.
+- `useRecordingPlayback.ts` — source selection, compatibility/cloud state, proxy progress, fallback, adjacent transitions, and playback state.
+- `PlaybackPlayer.vue` — player UI around a native `<video ref>`, exposing an explicit seek/play API to its parent.
 
-Expected boundary:
+Playback behavior must not be copied into a second implementation.
 
-- `PlaybackPlayer.vue` (or equivalent) — video/source/fallback UI and explicit seek API.
-- `useRecordingPlayback.ts` (if extraction benefits clarity) — source selection, proxy/cloud state, adjacent source transitions.
-- `PlaybackWorkspace.vue` — camera/date state, player, event feed, timeline, deep-link state.
-- `PlaybackTimelineV3.vue` — timeline presentation/interactions.
-- `PlaybackEventFeed.vue` — real motion event feed.
+`PlaybackWorkspace.vue` owns camera/date/recording route state, day-recording loading, active wall-clock state, `PlaybackPlayer`, `PlaybackEventFeed`, and `PlaybackTimelineV3`.
 
-The exact split may be adjusted during implementation if the existing player logic can be isolated cleanly with fewer files, but playback behavior must have one source of truth.
+The timeline integrates with `PlaybackPlayer` through component refs/events. The final Playback architecture does not use document-wide `querySelector`, `MutationObserver`, or Teleport to discover or seek the video.
 
 ## Recording management tab
 
-The Management tab preserves the administrative capabilities users already have:
+`/recordings/manage` remains the segment-first administrative surface.
+
+It preserves the existing capabilities:
 
 - Camera/date filtering.
 - Calendar/day summaries.
@@ -79,35 +90,34 @@ The Management tab preserves the administrative capabilities users already have:
 - Recording health and warning counts.
 - Batch selection.
 - Delete/cleanup actions.
-- Compatibility/proxy actions that are operationally relevant.
-- Existing metadata needed to diagnose a recording.
+- Compatibility/proxy operations.
+- Recording metadata used for diagnosis.
 
-The management surface is segment-first by design because a segment/file is the object being administered.
+During this restructuring, Management **keeps its existing selected-recording player/preview and operational controls**. We do not visually simplify or remove that preview in this task. What is removed from Management is only the V3 Teleport injection: the continuous V3 timeline and Playback event feed belong exclusively to the Playback tab.
 
-Management does not need to duplicate the full continuous Playback V3 timeline. A selected segment may retain a compact preview or existing player during the first migration if that is the lowest-risk way to preserve current operational behavior. The long-term navigation action is explicit: **在回放中打开**.
-
-This staged rule is important: splitting the workspaces must not accidentally remove file-management or compatibility capabilities just to make the Playback tab visually clean.
+A later, separate design may simplify the Management preview, but that is not part of this migration.
 
 ## Cross-navigation
 
-Playback and Management must deep-link to each other.
+Playback and Management deep-link to each other.
 
 From Playback:
 
-- “管理当前录像” opens `/recordings/manage` with the current `camera_id`, `date`, and active `recording_id`.
-- If playback is currently in a gap and no recording is active, Management still receives camera/date context without inventing a recording ID.
+- **管理当前录像** opens `/recordings/manage` with current `camera_id`, `date`, and active `recording_id`.
+- If playback is currently in a gap and no recording is active, it passes only camera/date context.
 
 From Management:
 
-- Double-clicking a recording, or an explicit “回放” action, opens `/recordings/playback` with that recording’s camera/date/id.
-- Playback starts at the segment start unless a wall-clock target is also supplied by a future feature.
+- Double-clicking a recording opens `/recordings/playback` with that recording’s `camera_id`, local date, and `recording_id`.
+- The row action label becomes **回放** and opens the same Playback route.
+- Playback starts at the selected segment start for this migration.
 
-Other product links should use the route that matches intent:
+Other product links use the route matching their intent:
 
-- Event center “查看录像” / motion-event actions -> Playback.
-- Live monitoring “录像回放” -> Playback.
-- Upload/archive administration -> Management.
-- Health/compatibility operational links -> Management when they refer to a segment/proxy operation; Playback when they only request viewing.
+- Event Center “查看录像” / motion-event viewing -> `/recordings/playback`.
+- Live Monitoring “录像回放” -> `/recordings/playback`.
+- Upload/archive administration -> `/recordings/manage`.
+- Health compatibility/proxy operational links -> `/recordings/manage`.
 
 ## State and query contract
 
@@ -117,62 +127,73 @@ The route query is the durable cross-workspace state contract:
 - `date`: selected local recording date (`YYYY-MM-DD`).
 - `recording_id`: active/selected segment when known.
 
-Playback also maintains transient wall-clock state in memory for timeline movement. We do not add a required `time` query parameter in this restructuring; that can be introduced later if shareable second-level playback links are desired.
+Playback maintains transient wall-clock position in component state. This restructuring does not add a required `time` query parameter.
 
 Switching top tabs preserves the current query. Each surface ignores query fields it does not need rather than clearing them.
 
-All wall-clock timeline semantics continue to use the project’s offset-ignoring local recording clock helpers, avoiding the previously fixed timezone shift regression.
+All wall-clock timeline semantics continue to use the project’s offset-ignoring local recording clock helpers, preserving the previously fixed timezone behavior.
+
+If a deep-linked `recording_id` does not belong to the selected camera/date, the surface discards that recording selection and falls back to valid camera/date context. It must never select an unrelated segment.
 
 ## Migration strategy
 
-The migration is staged to protect playback and management behavior.
-
 ### Stage 1 — workspace shell and routing
 
-Introduce the shared recordings workspace with top tabs and explicit `/recordings/playback` route. Keep `/recordings/manage` working. Update the sidebar label/target and compatibility redirect.
+Create `RecordingsWorkspace.vue`, add `/recordings/playback`, keep `/recordings/manage`, redirect `/recordings/browser` to Playback, and change the sidebar entry from “录像管理” to “录像”.
+
+At the end of this stage, both tabs are navigable and preserve query context, but the old Playback implementation may still be temporarily used behind the Playback tab until Stage 3.
 
 ### Stage 2 — isolate the playback engine
 
-Extract the existing player/source/fallback logic from `RecordingManagementView.vue` without changing behavior. Add an explicit video ref/seek API. Regression-test same-recording seek, cross-recording source switches, pending seeks after metadata, and compatibility/cloud fallback state.
+Extract playback state/behavior from `RecordingManagementView.vue` into `useRecordingPlayback.ts` and `PlaybackPlayer.vue` without changing direct/proxy/cloud behavior.
+
+Add an explicit player API for seek/play. Regression-test same-recording seek, cross-recording source switches, pending seeks after metadata, compatibility fallback, and cloud fallback.
+
+Management consumes the same extracted player layer for its existing selected-recording preview so there is still one playback implementation.
 
 ### Stage 3 — native Playback V3 page
 
-Build `PlaybackWorkspace.vue` using the isolated player, `PlaybackTimelineV3`, and `PlaybackEventFeed`. Remove Teleport and document-level MutationObserver/querySelector integration. The Playback route contains no segment table or management catalog.
+Create `PlaybackWorkspace.vue` with the compact camera/date controls, `PlaybackPlayer`, `PlaybackEventFeed`, and `PlaybackTimelineV3`.
 
-### Stage 4 — management cleanup and deep links
+Remove Playback’s Teleport and document-level MutationObserver/querySelector integration. The Playback route renders no segment table, management filters, batch actions, or management calendar.
 
-Keep or simplify the management-side preview as appropriate, preserve all segment administration actions, and add explicit “在回放中打开” / “管理当前录像” navigation. Update Event Center, Live Monitoring, Uploads, Health, and other route consumers to use the correct destination.
+### Stage 4 — deep-link cleanup
+
+Add **管理当前录像** in Playback and **回放** actions in Management. Update Event Center, Live Monitoring, Uploads, Health, and other current route consumers to point to Playback or Management according to intent.
+
+Remove the obsolete `RecordingManagementWorkspace.vue` compatibility injection once no route depends on it.
 
 ### Stage 5 — Playback interaction polish
 
-Only after the structural split is stable, add the remaining Playback controls such as previous/next event, ±10 seconds, playback speed, screenshot, and export-range UX. These controls belong to Playback and should not block the workspace split.
+After the structural split is verified, continue Playback V3 with previous/next event, ±10 seconds, playback speed, screenshot, and export-range UX. These controls do not block the workspace split.
 
 ## Error handling
 
-A failure to load the Playback event feed or timeline must not prevent direct video playback.
+A failure to load the Playback event feed or timeline does not prevent video playback.
 
-A failure to resolve a wall-clock target to a recording leaves the current source unchanged and reports that no recording exists at that time.
+Seeking to a wall-clock time with no recording leaves the current source unchanged and reports that no recording exists at that time.
 
 A failed source switch preserves the existing direct/proxy/cloud fallback semantics.
 
-Switching tabs must not delete, stop, re-upload, or otherwise mutate recordings. Management actions remain explicit and confirmation-protected as they are today.
+Switching tabs never deletes, stops, uploads, retries, or otherwise mutates recordings. Management mutations remain explicit and confirmation-protected.
 
-If a deep-linked `recording_id` is stale or does not belong to the selected camera/date, the destination surface falls back to camera/date context rather than selecting an unrelated segment.
+A stale/invalid route `recording_id` is ignored rather than mapped to another recording.
 
 ## Testing
 
-Frontend tests must cover at least:
+Frontend tests cover at least:
 
-- Route compatibility: `/recordings/browser` redirects to Playback while preserving query/hash.
-- Both Playback and Management share the same sidebar/nav key.
+- `/recordings/browser` redirects to Playback while preserving query/hash.
+- Playback and Management share the same `navKey` and sidebar entry.
 - Top tab switching preserves `camera_id`, `date`, and `recording_id`.
-- Playback does not render the segment management table/catalog.
-- Management still renders segment administration and delete/select controls.
+- Playback does not render the segment table, management filters, batch actions, or management calendar.
+- Management still renders segment administration, selection, delete, status, and compatibility controls.
 - Management -> Playback deep link carries recording context.
 - Playback -> Management deep link carries current context.
 - Same-recording timeline/event seeks do not remount the Playback workspace.
-- Cross-recording seeks switch the player source and apply the correct offset.
-- Timeline/player integration uses an explicit component API rather than document-level DOM discovery.
+- Cross-recording seeks switch source and apply the correct offset.
+- Direct, compatibility proxy/live proxy, and cloud/OpenList playback regressions remain covered.
+- Timeline/player integration uses an explicit component API and no document-level DOM discovery.
 
 Final verification remains:
 
@@ -181,8 +202,8 @@ Final verification remains:
 - backend `pytest`
 - docker-smoke CI
 
-## Non-goals for this restructuring
+## Non-goals
 
-This change does not add person/vehicle analytics, change recording storage format, redesign OpenList upload behavior, add authentication/permissions, or implement export-range/video clipping yet.
+This restructuring does not add person/vehicle analytics, change recording storage format, redesign OpenList upload behavior, add authentication/permissions, implement export-range/video clipping, or visually redesign the Management preview.
 
-It also does not remove recording segment management. The purpose is to put segment management in the correct tab while making Playback genuinely continuous-time-first.
+It does not remove recording segment management. It puts segment management in the **录像管理** tab while making **回放** genuinely continuous-time-first.
