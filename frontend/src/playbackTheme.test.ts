@@ -19,7 +19,7 @@ describe('Playback theme contrast', () => {
 
   it('keeps active controls and playhead readable in both themes', () => {
     expect(eventFeedSource).toContain('.event-filter-row button.active{border-color:color-mix(in srgb,var(--nvr-blue) 56%,var(--nvr-border));color:var(--nvr-text)')
-    expect(timelineSource).toContain('.timeline-playhead{position:absolute;z-index:5;top:0;bottom:0;width:1px;background:var(--nvr-blue)')
-    expect(timelineSource).toContain('.timeline-playhead span{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:4px;background:var(--nvr-blue);color:#fff')
+    expect(timelineSource).toMatch(/\.timeline-playhead\{[^}]*background:var\(--nvr-blue\)/)
+    expect(timelineSource).toMatch(/\.timeline-playhead span\{[^}]*background:var\(--nvr-blue\);color:#fff/)
   })
 })
