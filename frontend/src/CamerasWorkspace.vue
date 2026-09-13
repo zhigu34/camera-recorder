@@ -18,6 +18,11 @@ const motionPortalReady = ref(false)
 const selectedCameraId = computed(() => cameraIdFromRouteQuery(route.query.camera_id))
 let portalObserver: MutationObserver | null = null
 
+function todayString() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
 function refreshMotionPortalTarget() {
   if (!selectedCameraId.value) {
     motionPortalReady.value = false
@@ -47,6 +52,20 @@ function closeBatch() {
 function onBatchCompleted() {
   cameraViewKey.value += 1
 }
+function openCameraPlayback() {
+  if (!selectedCameraId.value) return
+  void router.push({
+    path: '/recordings/playback',
+    query: { camera_id: String(selectedCameraId.value), date: todayString() },
+  })
+}
+function openCameraRecordings() {
+  if (!selectedCameraId.value) return
+  void router.push({
+    path: '/recordings/manage',
+    query: { camera_id: String(selectedCameraId.value), date: todayString() },
+  })
+}
 
 onMounted(() => {
   portalObserver = new MutationObserver(refreshMotionPortalTarget)
@@ -66,6 +85,25 @@ onBeforeUnmount(() => {
     @open-batch="openBatch"
     @open-preview="emit('open-preview')"
   />
+
+  <Teleport v-if="selectedCameraId && motionPortalReady" to=".camera-detail-drawer .drawer-body-v2">
+    <section class="camera-drawer-shortcuts" aria-label="设备工作区快捷入口">
+      <div class="camera-drawer-shortcut-copy">
+        <strong>设备工作区</strong>
+        <span>快速进入当前摄像头的历史回放或原始录像管理。</span>
+      </div>
+      <div class="camera-drawer-shortcut-actions">
+        <button type="button" @click="openCameraPlayback">
+          <strong>回放</strong>
+          <span>时间轴与事件</span>
+        </button>
+        <button type="button" @click="openCameraRecordings">
+          <strong>录像管理</strong>
+          <span>片段与归档</span>
+        </button>
+      </div>
+    </section>
+  </Teleport>
 
   <Teleport v-if="selectedCameraId && motionPortalReady" to=".camera-detail-drawer .drawer-body-v2">
     <section class="motion-portal-section">
