@@ -4,7 +4,10 @@ import {
   clampViewport,
   findRecordingAtWallTime,
   motionEventOverlapsRecordings,
+  moveTimelineRange,
+  normalizeTimelineRange,
   rangePercent,
+  resizeTimelineRange,
   timeAtPointer,
   timeAtTrackPointer,
   zoomAround,
@@ -54,6 +57,32 @@ describe('rangePercent', () => {
     expect(rangePercent(3300, 3900, 3600, 3600)).toEqual({ left: 0, width: 8.3333 })
     expect(rangePercent(6900, 7500, 3600, 3600)).toEqual({ left: 91.6667, width: 8.3333 })
     expect(rangePercent(8000, 9000, 3600, 3600)).toBeNull()
+  })
+})
+
+describe('timeline export range helpers', () => {
+  it('orders reversed endpoints and clamps to the day', () => {
+    expect(normalizeTimelineRange(90000, -20)).toEqual({ start: 0, end: 86400 })
+    expect(normalizeTimelineRange(4200, 3600)).toEqual({ start: 3600, end: 4200 })
+  })
+
+  it('enforces a minimum duration while keeping the range inside the day', () => {
+    expect(normalizeTimelineRange(100, 105, 30)).toEqual({ start: 100, end: 130 })
+    expect(normalizeTimelineRange(86390, 86400, 30)).toEqual({ start: 86370, end: 86400 })
+  })
+
+  it('resizes either edge without crossing the minimum duration', () => {
+    const range = { start: 3600, end: 4200 }
+    expect(resizeTimelineRange(range, 'start', 4100, 60)).toEqual({ start: 4100, end: 4200 })
+    expect(resizeTimelineRange(range, 'start', 4190, 60)).toEqual({ start: 4140, end: 4200 })
+    expect(resizeTimelineRange(range, 'end', 3650, 60)).toEqual({ start: 3600, end: 3660 })
+    expect(resizeTimelineRange(range, 'end', 4500, 60)).toEqual({ start: 3600, end: 4500 })
+  })
+
+  it('moves the whole range while preserving duration at day boundaries', () => {
+    expect(moveTimelineRange({ start: 100, end: 400 }, -500)).toEqual({ start: 0, end: 300 })
+    expect(moveTimelineRange({ start: 86000, end: 86300 }, 500)).toEqual({ start: 86100, end: 86400 })
+    expect(moveTimelineRange({ start: 3600, end: 4200 }, 90)).toEqual({ start: 3690, end: 4290 })
   })
 })
 
