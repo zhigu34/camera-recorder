@@ -124,7 +124,7 @@ onMounted(() => void loadFeed())
     <div class="event-feed-head">
       <div>
         <strong>检测事件</strong>
-        <span>{{ feedEvents.length }} 个可回放事件</span>
+        <span>{{ feedEvents.length }} 个移动事件</span>
       </div>
       <button type="button" class="event-refresh" :disabled="loading" @click="loadFeed">
         {{ loading ? '加载中' : '刷新' }}
@@ -145,7 +145,7 @@ onMounted(() => void loadFeed())
       </div>
       <div v-else-if="error" class="event-feed-state event-feed-error">{{ error }}</div>
       <div v-else-if="!visibleEvents.length" class="event-feed-state">
-        <strong>暂无可回放检测事件</strong>
+        <strong>暂无检测事件</strong>
         <span>只有落在实际录像范围内的移动事件会显示在这里</span>
       </div>
 
