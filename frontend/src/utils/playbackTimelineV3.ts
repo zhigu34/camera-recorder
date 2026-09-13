@@ -12,6 +12,11 @@ export interface TimelineRange {
   width: number
 }
 
+export interface TimelineSelectionRange {
+  start: number
+  end: number
+}
+
 export interface TimelineRecording {
   id: number
   started_at?: string | null
@@ -26,6 +31,64 @@ export interface TimelineMotionEvent {
 
 function round4(value: number) {
   return Math.round(value * 10_000) / 10_000
+}
+
+function clampDay(value: number) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(86400, value))
+}
+
+export function normalizeTimelineRange(start: number, end: number, minDuration = 1): TimelineSelectionRange {
+  let left = clampDay(Math.min(start, end))
+  let right = clampDay(Math.max(start, end))
+  const minimum = Math.max(0, Math.min(86400, Number.isFinite(minDuration) ? minDuration : 0))
+  if (right - left >= minimum) return { start: left, end: right }
+  if (left + minimum <= 86400) {
+    right = left + minimum
+  } else {
+    right = 86400
+    left = Math.max(0, right - minimum)
+  }
+  return { start: left, end: right }
+}
+
+export function resizeTimelineRange(
+  range: TimelineSelectionRange,
+  edge: 'start' | 'end',
+  target: number,
+  minDuration = 1,
+): TimelineSelectionRange {
+  const normalized = normalizeTimelineRange(range.start, range.end, minDuration)
+  const minimum = Math.max(0, Math.min(86400, Number.isFinite(minDuration) ? minDuration : 0))
+  const value = clampDay(target)
+  if (edge === 'start') {
+    return {
+      start: Math.min(value, normalized.end - minimum),
+      end: normalized.end,
+    }
+  }
+  return {
+    start: normalized.start,
+    end: Math.max(value, normalized.start + minimum),
+  }
+}
+
+export function moveTimelineRange(range: TimelineSelectionRange, deltaSeconds: number): TimelineSelectionRange {
+  const normalized = normalizeTimelineRange(range.start, range.end, 0)
+  const duration = normalized.end - normalized.start
+  if (duration >= 86400) return { start: 0, end: 86400 }
+  const delta = Number.isFinite(deltaSeconds) ? deltaSeconds : 0
+  let start = normalized.start + delta
+  let end = normalized.end + delta
+  if (start < 0) {
+    end -= start
+    start = 0
+  }
+  if (end > 86400) {
+    start -= end - 86400
+    end = 86400
+  }
+  return { start: Math.max(0, start), end: Math.min(86400, end) }
 }
 
 export function wallClockSeconds(value?: string | null) {
