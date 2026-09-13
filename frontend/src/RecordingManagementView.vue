@@ -125,6 +125,8 @@ const selectedRows = ref<RecordingItem[]>([])
 const deleting = ref(false)
 const calendarExpanded = ref(false)
 const viewportWidth = ref(typeof window === 'undefined' ? 1920 : window.innerWidth)
+const playerPanelRef = ref<HTMLElement | null>(null)
+const playbackPanelHeight = ref<number | null>(null)
 
 const activeRecording = ref<RecordingItem | null>(null)
 const videoSrc = ref('')
@@ -139,6 +141,7 @@ const navigationLoading = ref(false)
 const autoAdvance = ref(true)
 const browserHevcHint = ref(hevcSupportHint())
 let progressTimer: number | null = null
+let playerPanelObserver: ResizeObserver | null = null
 
 const recordings = computed(() => browserData.value?.items || [])
 const desktopLayout = computed(() => viewportWidth.value > 1080)
@@ -661,10 +664,18 @@ async function batchDelete() {
 function handleSelectionChange(rows: RecordingItem[]) { selectedRows.value = rows }
 function clearFilters() { storageFilter.value = ''; healthFilter.value = ''; uploadFilter.value = '' }
 function updateViewportWidth() { viewportWidth.value = window.innerWidth }
+function updatePlaybackPanelHeight() {
+  playbackPanelHeight.value = playerPanelRef.value ? Math.round(playerPanelRef.value.getBoundingClientRect().height) : null
+}
 
 onMounted(async () => {
   updateViewportWidth()
   window.addEventListener('resize', updateViewportWidth, { passive: true })
+  if (playerPanelRef.value && typeof ResizeObserver !== 'undefined') {
+    playerPanelObserver = new ResizeObserver(updatePlaybackPanelHeight)
+    playerPanelObserver.observe(playerPanelRef.value)
+    updatePlaybackPanelHeight()
+  }
   browserHevcHint.value = hevcSupportHint()
   try {
     const targetRecordingId = routeSelection().recordingId
@@ -681,6 +692,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', updateViewportWidth)
+  playerPanelObserver?.disconnect()
   stopProgressPolling()
   playbackTracker.reset()
   if (activeRecording.value && playbackMode.value === 'proxy-live') void axios.post(`/api/recordings/${activeRecording.value.id}/playback/cancel`).catch(() => undefined)
@@ -691,7 +703,7 @@ onBeforeUnmount(() => {
   <section class="recording-center">
     <div class="recording-layout">
       <aside id="playback-compatibility" class="playback-column">
-        <section class="panel player-panel">
+        <section ref="playerPanelRef" class="panel player-panel">
           <div class="panel-head player-head">
             <div><strong>片段播放</strong><span>{{ activeRecording ? `${selectedDate} ${localClock(activeRecording.started_at)}` : '选择录像片段' }}</span></div>
             <div class="player-head-meta"><el-tag size="small" type="primary">{{ currentCameraName }}</el-tag><el-tag v-if="playbackModeLabel" :type="playbackMode === 'original' ? 'success' : 'warning'" size="small">{{ playbackModeLabel }}</el-tag></div>
@@ -721,11 +733,6 @@ onBeforeUnmount(() => {
           </section>
 
           <section v-if="activeRecording" class="segment-inspector">
-            <div class="segment-primary">
-              <div class="segment-kicker"><span>当前片段</span><small v-if="activePosition">{{ activePosition }} / {{ playableRecordings.length }}</small></div>
-              <strong>{{ localClock(activeRecording.started_at) }} · {{ formatDuration(activeRecording.duration) }}</strong>
-              <small :title="activeRecording.filename">{{ activeRecording.filename }}</small>
-            </div>
             <dl class="segment-facts">
               <div><dt>日期</dt><dd>{{ selectedDate }}</dd></div>
               <div><dt>画面</dt><dd>{{ activeRecording.width || '-' }} × {{ activeRecording.height || '-' }}</dd></div>
@@ -733,6 +740,12 @@ onBeforeUnmount(() => {
               <div><dt>位置</dt><dd>{{ storageLabel(activeRecording) }}</dd></div>
               <div><dt>归档</dt><dd>{{ uploadLabel(activeRecording.upload_status) }}</dd></div>
             </dl>
+            <div class="segment-current">
+              <span>当前片段</span>
+              <strong>{{ localClock(activeRecording.started_at) }} · {{ formatDuration(activeRecording.duration) }}</strong>
+              <small :title="activeRecording.filename">{{ activeRecording.filename }}</small>
+              <small v-if="activePosition" class="segment-position">{{ activePosition }} / {{ playableRecordings.length }}</small>
+            </div>
             <div class="segment-controls">
               <label class="auto-advance"><span>自动续播</span><el-switch v-model="autoAdvance" /></label>
               <div class="segment-actions"><el-button :disabled="!isPlayable(activeRecording)" @click="play(activeRecording, true)">兼容播放</el-button><el-button type="danger" plain :icon="Delete" :disabled="!canDelete(activeRecording)" :loading="deleting" @click="deleteOne(activeRecording)">删除</el-button></div>
@@ -741,7 +754,7 @@ onBeforeUnmount(() => {
         </section>
       </aside>
 
-      <div class="catalog-column">
+      <div class="catalog-column" :style="desktopLayout && playbackPanelHeight ? { height: `${playbackPanelHeight}px` } : undefined">
         <section class="panel calendar-panel" v-loading="calendarLoading">
           <div class="panel-head calendar-head">
             <div><strong>录像浏览</strong><span>{{ selectedDate }}</span></div>
