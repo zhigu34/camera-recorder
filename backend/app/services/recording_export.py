@@ -15,7 +15,7 @@ class ExportSourceSlice:
     available: bool = True
 
 
-@dataclass(frozen=True)
+@dataclass
 class ExportInterval:
     start_at: datetime
     end_at: datetime
@@ -57,7 +57,12 @@ class ExportRangeAnalysis:
         return bool(self.groups)
 
 
-def _clip_interval(start: datetime, end: datetime, lower: datetime, upper: datetime) -> ExportInterval | None:
+def _clip_interval(
+    start: datetime,
+    end: datetime,
+    lower: datetime,
+    upper: datetime,
+) -> ExportInterval | None:
     clipped_start = max(start, lower)
     clipped_end = min(end, upper)
     if clipped_end <= clipped_start:
