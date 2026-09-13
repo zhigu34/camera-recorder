@@ -24,6 +24,26 @@ function offsetLabel(offsetMinutes: number) {
   return `${sign}${pad2(Math.floor(absolute / 60))}:${pad2(absolute % 60)}`
 }
 
+function isoTimezoneOffsetMinutes(value?: string | null) {
+  if (!value) return null
+  if (/Z$/i.test(value)) return 0
+  const match = value.match(/([+-])(\d{2}):(\d{2})$/)
+  if (!match) return null
+  const eastMinutes = (Number(match[2]) * 60 + Number(match[3])) * (match[1] === '+' ? 1 : -1)
+  return -eastMinutes
+}
+
+export function recordingTimezoneOffsetMinutes(
+  recordings: TimelineRecording[],
+  fallback = new Date().getTimezoneOffset(),
+) {
+  for (const recording of recordings) {
+    const offset = isoTimezoneOffsetMinutes(recording.started_at) ?? isoTimezoneOffsetMinutes(recording.ended_at)
+    if (offset !== null) return offset
+  }
+  return fallback
+}
+
 export function wallClockIso(
   date: string,
   seconds: number,
