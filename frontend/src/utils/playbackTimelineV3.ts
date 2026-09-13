@@ -19,6 +19,11 @@ export interface TimelineRecording {
   duration?: number | null
 }
 
+export interface TimelineMotionEvent {
+  started_at?: string | null
+  ended_at?: string | null
+}
+
 function round4(value: number) {
   return Math.round(value * 10_000) / 10_000
 }
@@ -39,6 +44,18 @@ export function clampViewport(start: number, span: number) {
 export function timeAtPointer(viewStart: number, viewSpan: number, pointerRatio: number) {
   const ratio = Math.max(0, Math.min(1, pointerRatio))
   return Math.max(0, Math.min(86400, viewStart + viewSpan * ratio))
+}
+
+export function timeAtTrackPointer(
+  viewStart: number,
+  viewSpan: number,
+  clientX: number,
+  trackLeft: number,
+  trackWidth: number,
+) {
+  if (!Number.isFinite(trackWidth) || trackWidth <= 0) return timeAtPointer(viewStart, viewSpan, 0)
+  const ratio = (clientX - trackLeft) / trackWidth
+  return timeAtPointer(viewStart, viewSpan, ratio)
 }
 
 export function rangePercent(start: number, end: number, viewStart: number, viewSpan: number): TimelineRange | null {
@@ -66,6 +83,20 @@ export function recordingRange(item: TimelineRecording) {
   const duration = Math.max(0, Number(item.duration || 0))
   const end = Math.max(start, Math.min(86400, explicitEnd ?? start + duration))
   return end > start ? { start, end } : null
+}
+
+export function motionEventOverlapsRecordings(
+  event: TimelineMotionEvent,
+  recordings: TimelineRecording[],
+) {
+  const start = wallClockSeconds(event.started_at)
+  if (start === null) return false
+  const parsedEnd = wallClockSeconds(event.ended_at)
+  const end = Math.max(start + 0.001, parsedEnd ?? start + 0.001)
+  return recordings.some((recording) => {
+    const range = recordingRange(recording)
+    return Boolean(range && start < range.end && end > range.start)
+  })
 }
 
 export function findRecordingAtWallTime<T extends TimelineRecording>(recordings: T[], wallSeconds: number): T | null {
