@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.cameras import router as cameras_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
+from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
 from app.api.playback_control import router as playback_control_router
 from app.api.playback_metrics import router as playback_metrics_router
@@ -115,6 +116,7 @@ app.include_router(notifications_router)
 app.include_router(settings_router)
 app.include_router(health_router)
 app.include_router(preview_wall_router)
+app.include_router(motion_detection_router)
 
 
 @app.get("/health")
