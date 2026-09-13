@@ -31,6 +31,7 @@ const emit = defineEmits<{
   seek: [seconds: number]
 }>()
 
+const zoomLevels: PlaybackZoom[] = ['24h', '6h', '1h', '15m']
 const zoom = ref<PlaybackZoom>('24h')
 const viewStart = ref(0)
 const cursorSeconds = ref(typeof props.activeWallSeconds === 'number' ? props.activeWallSeconds : 12 * 3600)
@@ -45,7 +46,7 @@ let suppressClickUntil = 0
 const span = computed(() => ZOOM_SPANS[zoom.value])
 const playheadSeconds = computed(() => Math.max(viewStart.value, Math.min(viewStart.value + span.value, cursorSeconds.value)))
 const playheadRatio = computed(() => Math.max(0, Math.min(1, (playheadSeconds.value - viewStart.value) / span.value)))
-const playheadStyle = computed(() => ({ left: `calc(var(--timeline-label-width) + (100% - var(--timeline-label-width)) * ${playheadRatio.value})` }))
+const playheadStyle = computed(() => ({ left: `${playheadRatio.value * 100}%` }))
 const tickCount = computed(() => zoom.value === '24h' ? 13 : zoom.value === '6h' ? 13 : zoom.value === '1h' ? 13 : 16)
 const ticks = computed(() => Array.from({ length: tickCount.value }, (_, index) => {
   const ratio = index / Math.max(1, tickCount.value - 1)
@@ -145,10 +146,9 @@ function handleWheel(event: WheelEvent) {
   event.preventDefault()
   const element = event.currentTarget as HTMLElement
   const ratio = pointerRatio(event, element)
-  const levels: PlaybackZoom[] = ['24h', '6h', '1h', '15m']
-  const current = levels.indexOf(zoom.value)
-  const next = event.deltaY < 0 ? Math.min(levels.length - 1, current + 1) : Math.max(0, current - 1)
-  chooseZoom(levels[next], ratio)
+  const current = zoomLevels.indexOf(zoom.value)
+  const next = event.deltaY < 0 ? Math.min(zoomLevels.length - 1, current + 1) : Math.max(0, current - 1)
+  chooseZoom(zoomLevels[next] || zoom.value, ratio)
 }
 
 function seekOverview(event: PointerEvent) {
@@ -195,7 +195,7 @@ onMounted(() => void loadMotionEvents())
         <span>{{ clockLabel(playheadSeconds, true) }}</span>
       </div>
       <div class="playback-v3-zoom" aria-label="时间轴缩放">
-        <button v-for="level in (Object.keys(ZOOM_SPANS) as PlaybackZoom[])" :key="level" type="button" :class="{ active: zoom === level }" @click="chooseZoom(level)">{{ level }}</button>
+        <button v-for="level in zoomLevels" :key="level" type="button" :class="{ active: zoom === level }" @click="chooseZoom(level)">{{ level }}</button>
       </div>
     </div>
 
@@ -227,7 +227,9 @@ onMounted(() => void loadMotionEvents())
           <div class="lane-track"><small class="lane-status">未启用</small></div>
         </div>
 
-        <div class="timeline-playhead" :style="playheadStyle" aria-hidden="true"><span>{{ clockLabel(playheadSeconds, true) }}</span></div>
+        <div class="timeline-track-overlay" aria-hidden="true">
+          <div class="timeline-playhead" :style="playheadStyle"><span>{{ clockLabel(playheadSeconds, true) }}</span></div>
+        </div>
       </div>
 
       <div class="timeline-overview" @pointerdown="seekOverview">
@@ -240,6 +242,6 @@ onMounted(() => void loadMotionEvents())
 </template>
 
 <style scoped>
-.playback-v3{--timeline-label-width:60px;border-top:1px solid var(--nvr-border);padding:14px 14px 10px;background:linear-gradient(180deg,rgba(10,14,19,.16),rgba(10,14,19,.42));user-select:none}.playback-v3-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px}.playback-v3-date{display:flex;align-items:baseline;gap:12px;color:var(--nvr-text)}.playback-v3-date strong{font-size:14px}.playback-v3-date span{font-variant-numeric:tabular-nums;font-size:12px;color:var(--nvr-muted)}.playback-v3-zoom{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-input)}.playback-v3-zoom button{border:0;background:transparent;color:var(--nvr-muted);font:inherit;font-size:12px;padding:5px 11px;border-radius:5px;cursor:pointer}.playback-v3-zoom button.active{background:var(--nvr-blue);color:#fff}.playback-v3-stage{position:relative}.timeline-ruler{position:relative;height:24px;margin-left:var(--timeline-label-width);border-bottom:1px solid var(--nvr-border)}.timeline-ruler span{position:absolute;top:5px;transform:translateX(-50%);font-size:10px;color:var(--nvr-subtle);font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-lanes{position:relative;cursor:crosshair}.timeline-lanes.dragging{cursor:grabbing}.timeline-lane-row{display:grid;grid-template-columns:var(--timeline-label-width) 1fr;min-height:28px;border-bottom:1px solid rgba(255,255,255,.035)}.lane-label{display:flex;align-items:center;padding-left:6px;font-size:11px;color:var(--nvr-muted)}.lane-track{position:relative;margin:6px 0;background:rgba(255,255,255,.025);overflow:hidden}.recording-block,.motion-block{position:absolute;top:0;bottom:0;border-radius:2px}.recording-block{background:linear-gradient(90deg,rgba(76,141,255,.82),rgba(76,141,255,.58))}.motion-block{background:var(--nvr-blue);box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}.disabled-row .lane-track{background:transparent}.lane-status{position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--nvr-subtle)}.timeline-playhead{position:absolute;top:0;bottom:0;width:1px;background:#dce8ff;box-shadow:0 0 0 1px rgba(76,141,255,.35);pointer-events:none}.timeline-playhead span{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:4px;background:#b9d4ff;color:#10223d;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-overview{position:relative;height:18px;margin:10px 0 0 var(--timeline-label-width);border:1px solid var(--nvr-border);border-radius:4px;background:rgba(255,255,255,.035);overflow:hidden;cursor:pointer}.overview-recording{position:absolute;top:3px;bottom:3px;background:rgba(130,149,176,.46)}.overview-window{position:absolute;top:0;bottom:0;border:1px solid var(--nvr-blue);background:rgba(76,141,255,.12);box-sizing:border-box}.overview-caption{display:flex;justify-content:space-between;margin:5px 2px 0 var(--timeline-label-width);font-size:10px;color:var(--nvr-subtle)}
+.playback-v3{--timeline-label-width:60px;border-top:1px solid var(--nvr-border);padding:14px 14px 10px;background:linear-gradient(180deg,rgba(10,14,19,.16),rgba(10,14,19,.42));user-select:none}.playback-v3-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:8px}.playback-v3-date{display:flex;align-items:baseline;gap:12px;color:var(--nvr-text)}.playback-v3-date strong{font-size:14px}.playback-v3-date span{font-variant-numeric:tabular-nums;font-size:12px;color:var(--nvr-muted)}.playback-v3-zoom{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-input)}.playback-v3-zoom button{border:0;background:transparent;color:var(--nvr-muted);font:inherit;font-size:12px;padding:5px 11px;border-radius:5px;cursor:pointer}.playback-v3-zoom button.active{background:var(--nvr-blue);color:#fff}.playback-v3-stage{position:relative}.timeline-ruler{position:relative;height:24px;margin-left:var(--timeline-label-width);border-bottom:1px solid var(--nvr-border)}.timeline-ruler span{position:absolute;top:5px;transform:translateX(-50%);font-size:10px;color:var(--nvr-subtle);font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-lanes{position:relative;cursor:crosshair}.timeline-lanes.dragging{cursor:grabbing}.timeline-lane-row{display:grid;grid-template-columns:var(--timeline-label-width) 1fr;min-height:28px;border-bottom:1px solid rgba(255,255,255,.035)}.lane-label{display:flex;align-items:center;padding-left:6px;font-size:11px;color:var(--nvr-muted)}.lane-track{position:relative;margin:6px 0;background:rgba(255,255,255,.025);overflow:hidden}.recording-block,.motion-block{position:absolute;top:0;bottom:0;border-radius:2px}.recording-block{background:linear-gradient(90deg,rgba(76,141,255,.82),rgba(76,141,255,.58))}.motion-block{background:var(--nvr-blue);box-shadow:0 0 0 1px rgba(255,255,255,.08) inset}.disabled-row .lane-track{background:transparent}.lane-status{position:absolute;left:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--nvr-subtle)}.timeline-track-overlay{position:absolute;left:var(--timeline-label-width);right:0;top:0;bottom:0;pointer-events:none}.timeline-playhead{position:absolute;top:0;bottom:0;width:1px;background:#dce8ff;box-shadow:0 0 0 1px rgba(76,141,255,.35)}.timeline-playhead span{position:absolute;top:-28px;left:50%;transform:translateX(-50%);padding:3px 6px;border-radius:4px;background:#b9d4ff;color:#10223d;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}.timeline-overview{position:relative;height:18px;margin:10px 0 0 var(--timeline-label-width);border:1px solid var(--nvr-border);border-radius:4px;background:rgba(255,255,255,.035);overflow:hidden;cursor:pointer}.overview-recording{position:absolute;top:3px;bottom:3px;background:rgba(130,149,176,.46)}.overview-window{position:absolute;top:0;bottom:0;border:1px solid var(--nvr-blue);background:rgba(76,141,255,.12);box-sizing:border-box}.overview-caption{display:flex;justify-content:space-between;margin:5px 2px 0 var(--timeline-label-width);font-size:10px;color:var(--nvr-subtle)}
 @media (max-width:900px){.playback-v3{--timeline-label-width:48px;padding-inline:8px}.playback-v3-zoom button{padding-inline:8px}}
 </style>
