@@ -16,6 +16,7 @@ import './styles/playback-workspace-density.css'
 import './styles/system-settings.css'
 import './styles/camera-device-center.css'
 import './styles/camera-device-layout.css'
+import './styles/camera-home-polish.css'
 import './styles/camera-detail-drawer.css'
 
 import Root from './Root.vue'
