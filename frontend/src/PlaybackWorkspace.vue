@@ -109,7 +109,7 @@ async function fetchDay() {
   recordings.value = data.items
 }
 
-async function openSelection(recording: RecordingItem | null, seekSeconds = 0) {
+function updateSelectionState(recording: RecordingItem | null, seekSeconds = 0) {
   activeRecordingId.value = recording?.id || null
   if (!recording) {
     activeWallSeconds.value = null
@@ -119,7 +119,21 @@ async function openSelection(recording: RecordingItem | null, seekSeconds = 0) {
   const start = wallClockSeconds(recording.started_at)
   activeWallSeconds.value = start === null ? null : Math.max(0, Math.min(86400, start + seekSeconds))
   syncPlaybackRoute(recording.id)
+}
+
+async function selectSelection(recording: RecordingItem | null, seekSeconds = 0) {
+  updateSelectionState(recording, seekSeconds)
   await nextTick()
+  playerRef.value?.select(recording, { seekSeconds })
+}
+
+async function openSelection(recording: RecordingItem | null, seekSeconds = 0) {
+  updateSelectionState(recording, seekSeconds)
+  await nextTick()
+  if (!recording) {
+    playerRef.value?.select(null)
+    return
+  }
   await playerRef.value?.open(recording, { seekSeconds })
 }
 
@@ -129,11 +143,13 @@ async function loadContext(preferredRecordingId: number | null = activeRecording
   try {
     await fetchDay()
     const selected = resolvePlaybackSelection(recordings.value, preferredRecordingId) as RecordingItem | null
-    await openSelection(selected)
+    await selectSelection(selected)
   } catch (error) {
     recordings.value = []
     activeRecordingId.value = null
     activeWallSeconds.value = null
+    await nextTick()
+    playerRef.value?.select(null)
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '回放录像加载失败')
   } finally {
     loading.value = false
@@ -167,7 +183,7 @@ async function initialize() {
     if (selectedCamera.value) {
       await fetchDay()
       const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
-      await openSelection(selected)
+      await selectSelection(selected)
     }
     initialized.value = true
   } catch (error) {
