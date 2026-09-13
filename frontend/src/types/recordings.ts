@@ -56,6 +56,7 @@ export interface BrowserResult {
 }
 
 export interface PlaybackPlayerHandle {
+  select(recording: RecordingItem | null, options?: { seekSeconds?: number }): void
   open(recording: RecordingItem, options?: { seekSeconds?: number; forceCompatibility?: boolean }): Promise<void>
   seek(seconds: number): void
   play(): Promise<void>

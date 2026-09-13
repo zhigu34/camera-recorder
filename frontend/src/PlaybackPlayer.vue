@@ -196,6 +196,31 @@ async function openRecordingSource(item: RecordingItem, forceCompatibility = fal
   await prepareProxy(item, 0, sourceReasonMessage(decision.reason, item))
 }
 
+function reset() {
+  stopProgressPolling()
+  videoSrc.value = ''
+  preparing.value = false
+  playbackMode.value = ''
+  playbackNotice.value = ''
+  proxyError.value = ''
+  proxyProgress.value = null
+  fallbackInProgress.value = false
+  pendingSeekSeconds.value = null
+  playbackTracker.reset()
+}
+
+function select(recording: RecordingItem | null, options: { seekSeconds?: number } = {}) {
+  const previous = activeRecording.value
+  if (previous && playbackMode.value === 'proxy-live' && previous.id !== recording?.id) {
+    void axios.post(`/api/recordings/${previous.id}/playback/cancel`).catch(() => undefined)
+  }
+  videoRef.value?.pause()
+  reset()
+  activeRecording.value = recording
+  pendingSeekSeconds.value = recording ? Math.max(0, Number(options.seekSeconds || 0)) : null
+  emit('recording-change', recording)
+}
+
 async function open(
   recording: RecordingItem,
   options: { seekSeconds?: number; forceCompatibility?: boolean } = {},
@@ -208,22 +233,18 @@ async function open(
   }
 
   const request = makePlaybackOpenRequest(recording, options.seekSeconds, options.forceCompatibility)
-  stopProgressPolling()
-  activeRecording.value = request.recording
+  select(request.recording, { seekSeconds: request.seekSeconds })
   preparing.value = true
-  proxyError.value = ''
-  playbackNotice.value = ''
-  proxyProgress.value = null
-  playbackTracker.reset()
-  pendingSeekSeconds.value = request.seekSeconds
-  emit('recording-change', request.recording)
   await openRecordingSource(request.recording, request.forceCompatibility)
 }
 
 function seek(seconds: number) {
-  const video = videoRef.value
-  if (!video) return
   const requested = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const video = videoRef.value
+  if (!video) {
+    pendingSeekSeconds.value = requested
+    return
+  }
   const maximum = Number.isFinite(video.duration) && video.duration > 0
     ? Math.max(0, video.duration - 0.1)
     : requested
@@ -235,7 +256,13 @@ function seek(seconds: number) {
 }
 
 async function playVideo() {
-  if (videoRef.value) await videoRef.value.play()
+  if (videoRef.value) {
+    await videoRef.value.play()
+    return
+  }
+  if (activeRecording.value) {
+    await open(activeRecording.value, { seekSeconds: pendingSeekSeconds.value || 0 })
+  }
 }
 
 function pause() {
@@ -315,20 +342,8 @@ function handleEnded() {
   emit('ended')
 }
 
-function reset() {
-  stopProgressPolling()
-  videoSrc.value = ''
-  preparing.value = false
-  playbackMode.value = ''
-  playbackNotice.value = ''
-  proxyError.value = ''
-  proxyProgress.value = null
-  fallbackInProgress.value = false
-  pendingSeekSeconds.value = null
-  playbackTracker.reset()
-}
-
 defineExpose<PlaybackPlayerHandle>({
+  select,
   open,
   seek,
   play: playVideo,

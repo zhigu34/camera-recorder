@@ -42,7 +42,8 @@ const runtimeStore = useRuntimeStore()
 const { cameras } = storeToRefs(cameraStore)
 const loading = ref(false)
 const layoutCount = ref<LayoutCount>(4)
-const wallPaused = ref(false)
+const wallPaused = ref(true)
+const wallStarted = ref(false)
 const draggingCameraId = ref<number | null>(null)
 const connectionState = ref<ConnectionState>('idle')
 let reconnectTimer: number | null = null
@@ -425,6 +426,7 @@ function openCameraConfig(cameraId: number | null) {
 }
 
 function togglePause() {
+  if (!wallStarted.value) wallStarted.value = true
   wallPaused.value = !wallPaused.value
   if (wallPaused.value) {
     closeSocket()
@@ -475,7 +477,7 @@ onBeforeUnmount(() => {
           {{ connectionState === 'connected' ? '画面已连接' : connectionState === 'connecting' ? '正在连接' : connectionState === 'retrying' ? '自动重连' : '未连接' }}
         </div>
         <div class="profile-pill">{{ previewProfile.label }}</div>
-        <el-button size="small" @click="togglePause">{{ wallPaused ? '恢复画面' : '暂停画面' }}</el-button>
+        <el-button size="small" @click="togglePause">{{ !wallStarted ? '开始监控' : wallPaused ? '恢复画面' : '暂停画面' }}</el-button>
         <el-button size="small" @click="autoFill()">自动布局</el-button>
         <el-button size="small" plain @click="clearWall">清空</el-button>
       </div>
@@ -526,8 +528,8 @@ onBeforeUnmount(() => {
 
           <div v-if="wallPaused" class="slot-state-message">
             <VideoCamera />
-            <strong>画面已暂停</strong>
-            <span>录像仍然继续</span>
+            <strong>{{ wallStarted ? '画面已暂停' : '监控未开始' }}</strong>
+            <span>{{ wallStarted ? '录像仍然继续' : '点击“开始监控”后加载实时画面' }}</span>
           </div>
 
           <div v-else-if="slot.failed" class="slot-state-message error">
