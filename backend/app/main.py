@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.cameras import router as cameras_router
 from app.api.events import router as events_router
+from app.api.exports import router as exports_router
 from app.api.health import router as health_router
 from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
@@ -29,6 +30,7 @@ from app.services.health_sampler import health_sampler
 from app.services.motion_manager import motion_detection_manager
 from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
 from app.services.recorder_manager import recorder_manager
+from app.services.recording_export import recording_export_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.segment_processor import segment_processor
 from app.services.storage_cleanup import storage_cleanup_manager
@@ -41,6 +43,7 @@ from app.services.upload_manager import upload_manager
 async def lifespan(_: FastAPI):
     for path in (
         settings.data_dir,
+        settings.data_dir / "exports",
         settings.recordings_dir,
         settings.staging_dir,
         settings.failed_dir,
@@ -61,6 +64,7 @@ async def lifespan(_: FastAPI):
     await alert_monitor.start()
     await segment_processor.start()
     await upload_manager.start()
+    await recording_export_manager.start()
 
     # Auto-record startup is owned by the schedule manager. With schedules disabled
     # this preserves the old 24/7 auto_record behavior; enabled weekly schedules only
@@ -80,6 +84,7 @@ async def lifespan(_: FastAPI):
     yield
 
     await playback_prefetch_manager.stop()
+    await recording_export_manager.stop()
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
     await motion_detection_manager.stop()
@@ -123,6 +128,7 @@ app.include_router(settings_router)
 app.include_router(health_router)
 app.include_router(preview_wall_router)
 app.include_router(motion_detection_router)
+app.include_router(exports_router)
 
 
 @app.get("/health")
@@ -137,6 +143,7 @@ async def system_status() -> dict:
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
         "segment_processor": segment_processor.status(),
+        "recording_export": recording_export_manager.status(),
         "upload": await upload_manager.status(),
         "alerts": {
             "monitor": alert_monitor.status(),
