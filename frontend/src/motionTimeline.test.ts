@@ -17,6 +17,10 @@ describe('eventSeekOffset', () => {
     expect(eventSeekOffset('2026-09-13T10:00:12+08:00', '2026-09-13T10:00:00+08:00')).toBe(10)
   })
 
+  it('compares deployment wall-clock values even when only one value has an offset', () => {
+    expect(eventSeekOffset('2026-09-13T10:00:12', '2026-09-13T10:00:00+08:00')).toBe(10)
+  })
+
   it('never returns a negative seek offset', () => {
     expect(eventSeekOffset('2026-09-13T10:00:01+08:00', '2026-09-13T10:00:00+08:00')).toBe(0)
   })
