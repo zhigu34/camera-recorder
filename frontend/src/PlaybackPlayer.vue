@@ -32,6 +32,7 @@ const playbackTracker = new PlaybackAttemptTracker()
 const browserHevcHint = ref(hevcSupportHint())
 const activeRecording = ref<RecordingItem | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
+const backdropRef = ref<HTMLCanvasElement | null>(null)
 const videoSrc = ref('')
 const preparing = ref(false)
 const playbackMode = ref<PlaybackMode>('')
@@ -242,6 +243,23 @@ function pause() {
   videoRef.value?.pause()
 }
 
+function drawBackdrop() {
+  const video = videoRef.value
+  const canvas = backdropRef.value
+  if (!video || !canvas || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return
+  const width = Math.min(640, video.videoWidth)
+  const height = Math.max(1, Math.round(width * video.videoHeight / video.videoWidth))
+  if (canvas.width !== width) canvas.width = width
+  if (canvas.height !== height) canvas.height = height
+  const context = canvas.getContext('2d', { alpha: false })
+  if (!context) return
+  try {
+    context.drawImage(video, 0, 0, width, height)
+  } catch {
+    // The foreground remains usable if a browser refuses a transient frame draw.
+  }
+}
+
 function applyPendingSeek() {
   if (pendingSeekSeconds.value === null) return
   seek(pendingSeekSeconds.value)
@@ -255,19 +273,23 @@ function handleLoadedMetadata() {
 
 function handleLoadedData() {
   playbackTracker.markLoadedData()
+  drawBackdrop()
 }
 
 function handleVideoCanPlay() {
   playbackTracker.markCanPlay(videoRef.value)
   preparing.value = false
+  drawBackdrop()
 }
 
 function handleVideoPlaying() {
   playbackTracker.markPlaying(videoRef.value)
   preparing.value = false
+  drawBackdrop()
 }
 
 function handleTimeUpdate() {
+  drawBackdrop()
   emit('timeupdate', Math.max(0, Number(videoRef.value?.currentTime || 0)))
 }
 
@@ -353,22 +375,25 @@ onBeforeUnmount(() => {
       v-loading="preparing"
       :element-loading-text="playbackMode === 'proxy-live' ? '正在准备兼容流…' : '正在加载录像…'"
     >
-      <video
-        v-if="videoSrc"
-        ref="videoRef"
-        :src="videoSrc"
-        controls
-        autoplay
-        playsinline
-        preload="auto"
-        @loadedmetadata="handleLoadedMetadata"
-        @loadeddata="handleLoadedData"
-        @canplay="handleVideoCanPlay"
-        @playing="handleVideoPlaying"
-        @timeupdate="handleTimeUpdate"
-        @ended="handleEnded"
-        @error="handleVideoError"
-      />
+      <template v-if="videoSrc">
+        <canvas ref="backdropRef" class="player-backdrop" aria-hidden="true" />
+        <video
+          ref="videoRef"
+          class="player-video"
+          :src="videoSrc"
+          controls
+          autoplay
+          playsinline
+          preload="auto"
+          @loadedmetadata="handleLoadedMetadata"
+          @loadeddata="handleLoadedData"
+          @canplay="handleVideoCanPlay"
+          @playing="handleVideoPlaying"
+          @timeupdate="handleTimeUpdate"
+          @ended="handleEnded"
+          @error="handleVideoError"
+        />
+      </template>
       <button
         v-else-if="activeRecording && isPlayable(activeRecording)"
         type="button"
@@ -397,5 +422,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.playback-player{min-width:0}.player-box{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-box video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.playback-notice,.playback-error{margin-top:8px;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin-top:8px;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}
+.playback-player{min-width:0}.player-box{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-backdrop{position:absolute;inset:-20px;width:calc(100% + 40px);height:calc(100% + 40px);object-fit:cover;filter:blur(20px) brightness(.48) saturate(.82);transform:scale(1.06);pointer-events:none}.player-video{position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;background:transparent}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.playback-notice,.playback-error{margin-top:8px;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin-top:8px;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}
 </style>
