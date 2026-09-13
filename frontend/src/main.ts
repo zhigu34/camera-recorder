@@ -18,6 +18,7 @@ import './styles/camera-device-center.css'
 import './styles/camera-device-layout.css'
 import './styles/camera-home-polish.css'
 import './styles/camera-detail-drawer.css'
+import './styles/camera-detail-drawer-v2.css'
 
 import Root from './Root.vue'
 import { router } from './router'

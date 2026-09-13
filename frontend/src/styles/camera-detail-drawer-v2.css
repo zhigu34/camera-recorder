@@ -1,0 +1,208 @@
+.camera-detail-drawer.el-drawer {
+  --camera-drawer-pad: 16px;
+  width: min(760px, 100vw) !important;
+  border-left: 1px solid var(--nvr-border-strong);
+  background: var(--nvr-bg);
+}
+
+.camera-detail-drawer .el-drawer__header {
+  margin: 0;
+  padding: 14px var(--camera-drawer-pad) 12px;
+  border-bottom: 1px solid var(--nvr-border);
+  background: color-mix(in srgb, var(--nvr-surface) 94%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+.camera-detail-drawer .el-drawer__body {
+  padding: 12px var(--camera-drawer-pad) 20px;
+  background: var(--nvr-bg);
+}
+
+.camera-detail-drawer .drawer-body-v2 {
+  gap: 10px;
+}
+
+.camera-detail-drawer .drawer-device-nav {
+  order: -5;
+  min-height: 32px;
+  margin: -2px -4px 0;
+  padding: 0 4px 7px;
+  border-bottom: 1px solid var(--nvr-border);
+}
+
+.camera-detail-drawer .device-overview {
+  order: -4;
+  min-height: 86px;
+  padding: 11px 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  background: var(--nvr-surface);
+}
+
+.camera-detail-drawer .device-overview-visual {
+  width: 58px;
+  height: 58px;
+  border-radius: 10px;
+  background: var(--nvr-input);
+}
+
+.camera-detail-drawer .device-overview-facts {
+  gap: 8px;
+}
+
+.camera-drawer-shortcuts {
+  order: -3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--nvr-surface) 92%, var(--nvr-blue) 8%);
+}
+
+.camera-drawer-shortcut-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.camera-drawer-shortcut-copy strong {
+  color: var(--nvr-text);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.camera-drawer-shortcut-copy span {
+  overflow: hidden;
+  color: var(--nvr-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-drawer-shortcut-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.camera-drawer-shortcut-actions button {
+  min-width: 94px;
+  display: grid;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 7px;
+  background: var(--nvr-input);
+  color: var(--nvr-text-soft);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.camera-drawer-shortcut-actions button:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 50%, var(--nvr-border));
+  background: color-mix(in srgb, var(--nvr-blue) 9%, var(--nvr-input));
+}
+
+.camera-drawer-shortcut-actions strong {
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.camera-drawer-shortcut-actions span {
+  color: var(--nvr-subtle);
+  font-size: 8px;
+}
+
+.camera-detail-drawer .preview-section {
+  order: -2;
+  padding: 10px 11px 11px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 9px;
+  background: var(--nvr-surface);
+}
+
+.camera-detail-drawer .preview-section-heading {
+  margin-bottom: 8px;
+}
+
+.camera-detail-drawer .preview-panel-v2 {
+  border-radius: 7px;
+}
+
+.camera-detail-drawer .drawer-operation-panel-v2 {
+  order: -1;
+  display: grid;
+  grid-template-columns: minmax(150px, .7fr) minmax(0, 1.3fr);
+  gap: 12px;
+  padding: 10px 11px;
+  border-radius: 9px;
+}
+
+.camera-detail-drawer .drawer-operation-copy span {
+  margin-top: 2px;
+  color: var(--nvr-subtle);
+  font-size: 9px;
+}
+
+.camera-detail-drawer .drawer-actions-v2 {
+  justify-content: flex-end;
+}
+
+.camera-detail-drawer .drawer-actions-v2 .el-button {
+  height: 28px;
+  margin: 0;
+  padding: 0 9px;
+  font-size: 9px;
+}
+
+.camera-detail-drawer .motion-portal-section {
+  order: 1;
+}
+
+.camera-detail-drawer .detail-columns,
+.camera-detail-drawer .runtime-section,
+.camera-detail-drawer .drawer-danger-zone {
+  order: 2;
+}
+
+.camera-detail-drawer .detail-columns {
+  gap: 10px;
+}
+
+.camera-detail-drawer .detail-section-v2 {
+  border-radius: 9px;
+  background: var(--nvr-surface);
+}
+
+.camera-detail-drawer .drawer-danger-zone {
+  margin-top: 2px;
+  border-radius: 9px;
+}
+
+@media (max-width: 760px) {
+  .camera-detail-drawer.el-drawer {
+    --camera-drawer-pad: 12px;
+    width: 100% !important;
+  }
+
+  .camera-drawer-shortcuts,
+  .camera-detail-drawer .drawer-operation-panel-v2 {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-drawer-shortcut-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camera-drawer-shortcut-actions button {
+    min-width: 0;
+  }
+
+  .camera-detail-drawer .drawer-actions-v2 {
+    justify-content: flex-start;
+  }
+}
