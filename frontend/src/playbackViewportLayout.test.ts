@@ -22,10 +22,15 @@ describe('Playback desktop viewport layout', () => {
     expect(workspaceSource).toContain(':deep(.playback-event-feed .event-feed-body){max-height:none;min-height:0;flex:1}')
   })
 
-  it('keeps the desktop playback workspace inside the application viewport', () => {
-    expect(workspaceSource).toContain('@media(min-width:1101px)')
-    expect(workspaceSource).toContain('height:calc(100dvh - 131px)')
-    expect(workspaceSource).toContain('grid-template-rows:minmax(0,1fr) auto')
-    expect(workspaceSource).toContain('.playback-main-grid{min-height:0')
+  it('keeps the timeline immediately below the player row instead of pinning it to the viewport bottom', () => {
+    expect(workspaceSource).not.toContain('height:calc(100dvh - 131px)')
+    expect(workspaceSource).not.toContain('grid-template-rows:minmax(0,1fr) auto')
+    expect(workspaceSource).toContain('@media(min-width:1101px){.playback-workspace{display:block;overflow:visible')
+  })
+
+  it('compacts the date picker to fit the 160px sidebar', () => {
+    expect(workspaceSource).toContain('.playback-date-picker{width:100%!important;min-width:0}')
+    expect(workspaceSource).toContain(':deep(.playback-date-picker .el-input__wrapper){min-width:0;padding:0 7px}')
+    expect(workspaceSource).toContain(':deep(.playback-date-picker .el-input__inner){min-width:0;font-size:11px}')
   })
 })
