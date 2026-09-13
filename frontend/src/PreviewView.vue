@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import {
+  Clock,
   Close,
   FullScreen,
   RefreshRight,
@@ -425,6 +426,13 @@ function openCameraConfig(cameraId: number | null) {
   void router.push({ path: '/cameras', query: { camera_id: String(cameraId) } })
 }
 
+function startMonitoring() {
+  wallStarted.value = true
+  if (!wallPaused.value) return
+  wallPaused.value = false
+  scheduleConnect()
+}
+
 function togglePause() {
   if (!wallStarted.value) wallStarted.value = true
   wallPaused.value = !wallPaused.value
@@ -568,7 +576,8 @@ onBeforeUnmount(() => {
           <div class="slot-actions">
             <button title="重新连接" @click="restartSlot(index)"><RefreshRight /></button>
             <button title="摄像头配置" @click="openCameraConfig(slot.cameraId)"><Setting /></button>
-            <button title="录像回放" @click="openPlayback"><VideoPlay /></button>
+            <button title="播放实时画面" @click="startMonitoring"><VideoPlay /></button>
+            <button title="录像回放" @click="openPlayback"><Clock /></button>
             <button title="全屏" @click="enterFullscreen(index)"><FullScreen /></button>
             <button title="移除" @click="clearSlot(index)"><Close /></button>
           </div>
