@@ -239,9 +239,12 @@ async function open(
 }
 
 function seek(seconds: number) {
-  const video = videoRef.value
-  if (!video) return
   const requested = Number.isFinite(seconds) ? Math.max(0, seconds) : 0
+  const video = videoRef.value
+  if (!video) {
+    pendingSeekSeconds.value = requested
+    return
+  }
   const maximum = Number.isFinite(video.duration) && video.duration > 0
     ? Math.max(0, video.duration - 0.1)
     : requested
@@ -253,7 +256,13 @@ function seek(seconds: number) {
 }
 
 async function playVideo() {
-  if (videoRef.value) await videoRef.value.play()
+  if (videoRef.value) {
+    await videoRef.value.play()
+    return
+  }
+  if (activeRecording.value) {
+    await open(activeRecording.value, { seekSeconds: pendingSeekSeconds.value || 0 })
+  }
 }
 
 function pause() {
