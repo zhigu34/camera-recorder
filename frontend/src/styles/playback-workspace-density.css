@@ -1,0 +1,186 @@
+/* Playback workspace density refinements.
+ * Keep media behavior in the Vue components; this layer only sharpens hierarchy and spacing.
+ */
+.playback-workspace .playback-video-panel.playback-video-panel {
+  padding: 0;
+  overflow: hidden;
+  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--nvr-border) 88%, transparent);
+  background: #000;
+}
+
+.playback-workspace .playback-video-meta.playback-video-meta {
+  min-height: 32px;
+  align-items: center;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--nvr-border);
+  background: var(--nvr-surface);
+}
+
+.playback-workspace .playback-video-title.playback-video-title {
+  gap: 6px;
+}
+
+.playback-workspace .playback-video-title.playback-video-title strong {
+  font-size: 10px;
+}
+
+.playback-workspace .playback-video-title.playback-video-title span {
+  font-size: 8px;
+}
+
+.playback-workspace .playback-video-actions.playback-video-actions {
+  gap: 7px;
+}
+
+.playback-workspace .playback-clock.playback-clock {
+  font-size: 11px;
+  letter-spacing: .025em;
+}
+
+.playback-workspace .playback-video-actions .el-button {
+  height: 26px;
+  padding: 0 9px;
+  border-color: color-mix(in srgb, var(--nvr-border) 82%, transparent);
+  background: color-mix(in srgb, var(--nvr-input) 78%, transparent);
+}
+
+.playback-workspace .playback-video-panel .playback-player .player-box {
+  border: 0;
+  border-radius: 0;
+  background: #000;
+}
+
+.playback-workspace .playback-video-panel .playback-player .playback-notice,
+.playback-workspace .playback-video-panel .playback-player .playback-error,
+.playback-workspace .playback-video-panel .playback-player .proxy-progress {
+  margin: 7px 9px 9px;
+}
+
+.playback-workspace .playback-v3.playback-v3 {
+  --timeline-label-width: 52px;
+  margin-top: 6px;
+  padding: 9px 10px 7px;
+  border-radius: 8px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-toolbar {
+  gap: 12px;
+  margin-bottom: 5px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-date {
+  gap: 9px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-date strong {
+  font-size: 12px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-date span {
+  font-size: 10px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-zoom {
+  padding: 1px;
+  border-radius: 6px;
+}
+
+.playback-workspace .playback-v3 .playback-v3-zoom button {
+  padding: 3px 9px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.playback-workspace .playback-v3 .timeline-ruler {
+  height: 19px;
+}
+
+.playback-workspace .playback-v3 .timeline-ruler span {
+  top: 3px;
+  font-size: 9px;
+}
+
+.playback-workspace .playback-v3 .timeline-lane-row {
+  min-height: 22px;
+}
+
+.playback-workspace .playback-v3 .lane-label {
+  padding-left: 4px;
+  font-size: 9px;
+}
+
+.playback-workspace .playback-v3 .lane-track {
+  margin: 5px 0;
+  border-radius: 2px;
+}
+
+.playback-workspace .playback-v3 .recording-block {
+  background: color-mix(in srgb, var(--nvr-blue) 72%, var(--nvr-input));
+}
+
+.playback-workspace .playback-v3 .motion-block {
+  background: var(--nvr-blue);
+  box-shadow: 0 0 0 1px color-mix(in srgb, #fff 12%, transparent) inset;
+}
+
+.playback-workspace .playback-v3 .disabled-row {
+  min-height: 20px;
+  opacity: .52;
+}
+
+.playback-workspace .playback-v3 .lane-status {
+  left: 6px;
+  font-size: 9px;
+}
+
+.playback-workspace .playback-v3 .timeline-playhead {
+  width: 2px;
+  box-shadow: none;
+}
+
+.playback-workspace .playback-v3 .timeline-playhead::after {
+  content: '';
+  position: absolute;
+  top: -3px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--nvr-blue);
+}
+
+.playback-workspace .playback-v3 .timeline-playhead span {
+  top: -23px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+}
+
+.playback-workspace .playback-v3 .timeline-overview {
+  height: 13px;
+  margin-top: 7px;
+  border-radius: 3px;
+}
+
+.playback-workspace .playback-v3 .overview-recording {
+  top: 2px;
+  bottom: 2px;
+}
+
+.playback-workspace .playback-v3 .overview-caption {
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+@media (max-width: 900px) {
+  .playback-workspace .playback-v3.playback-v3 {
+    --timeline-label-width: 44px;
+    padding-inline: 8px;
+  }
+
+  .playback-workspace .playback-v3 .playback-v3-zoom button {
+    padding-inline: 7px;
+  }
+}
