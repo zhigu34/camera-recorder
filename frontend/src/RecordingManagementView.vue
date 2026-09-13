@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, MoreFilled, Refresh, Search, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, MoreFilled, Refresh, VideoPlay } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
 import {
   PlaybackAttemptTracker,
@@ -118,7 +118,6 @@ const browserData = ref<BrowserResult | null>(null)
 const calendarData = ref<CalendarResult | null>(null)
 const loading = ref(false)
 const calendarLoading = ref(false)
-const searchText = ref('')
 const storageFilter = ref('')
 const healthFilter = ref('')
 const uploadFilter = ref('')
@@ -145,9 +144,7 @@ const recordings = computed(() => browserData.value?.items || [])
 const desktopLayout = computed(() => viewportWidth.value > 1080)
 const compactCatalog = computed(() => viewportWidth.value < 1580)
 const filteredRecordings = computed(() => {
-  const needle = searchText.value.trim().toLowerCase()
   return recordings.value.filter((item) => {
-    if (needle && ![item.filename, String(item.id), item.video_codec || '', item.audio_codec || ''].join(' ').toLowerCase().includes(needle)) return false
     if (storageFilter.value === 'local' && !item.playback?.original_available) return false
     if (storageFilter.value === 'cloud' && !isCloudOnly(item)) return false
     if (healthFilter.value === 'healthy' && (item.health_status !== 'healthy' || item.warning_count > 0)) return false
@@ -662,7 +659,7 @@ async function batchDelete() {
   } finally { deleting.value = false }
 }
 function handleSelectionChange(rows: RecordingItem[]) { selectedRows.value = rows }
-function clearFilters() { searchText.value = ''; storageFilter.value = ''; healthFilter.value = ''; uploadFilter.value = '' }
+function clearFilters() { storageFilter.value = ''; healthFilter.value = ''; uploadFilter.value = '' }
 function updateViewportWidth() { viewportWidth.value = window.innerWidth }
 
 onMounted(async () => {
@@ -725,7 +722,7 @@ onBeforeUnmount(() => {
 
           <section v-if="activeRecording" class="segment-inspector">
             <div class="segment-primary">
-              <span>当前片段</span>
+              <div class="segment-kicker"><span>当前片段</span><small v-if="activePosition">{{ activePosition }} / {{ playableRecordings.length }}</small></div>
               <strong>{{ localClock(activeRecording.started_at) }} · {{ formatDuration(activeRecording.duration) }}</strong>
               <small :title="activeRecording.filename">{{ activeRecording.filename }}</small>
             </div>
@@ -738,8 +735,7 @@ onBeforeUnmount(() => {
             </dl>
             <div class="segment-controls">
               <label class="auto-advance"><span>自动续播</span><el-switch v-model="autoAdvance" /></label>
-              <div><el-button :disabled="!isPlayable(activeRecording)" @click="play(activeRecording, true)">兼容流</el-button><el-button type="danger" plain :icon="Delete" :disabled="!canDelete(activeRecording)" :loading="deleting" @click="deleteOne(activeRecording)">删除</el-button></div>
-              <small v-if="activePosition">{{ activePosition }} / {{ playableRecordings.length }}</small>
+              <div class="segment-actions"><el-button :disabled="!isPlayable(activeRecording)" @click="play(activeRecording, true)">兼容播放</el-button><el-button type="danger" plain :icon="Delete" :disabled="!canDelete(activeRecording)" :loading="deleting" @click="deleteOne(activeRecording)">删除</el-button></div>
             </div>
           </section>
         </section>
@@ -756,7 +752,6 @@ onBeforeUnmount(() => {
           <div class="calendar-toolbar">
             <el-select v-model="selectedCamera" filterable placeholder="选择摄像头" class="camera-select" @change="handleCameraChange"><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" /></el-select>
             <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="date-picker" @change="handleDateChange" />
-            <el-input v-model="searchText" clearable :prefix-icon="Search" placeholder="搜索文件名或录像 ID" class="search-box" />
             <el-select v-model="storageFilter" clearable placeholder="存储位置" class="compact-select"><el-option label="本地" value="local" /><el-option label="仅云端" value="cloud" /></el-select>
             <el-select v-model="healthFilter" clearable placeholder="健康状态" class="compact-select"><el-option label="健康" value="healthy" /><el-option label="异常" value="abnormal" /></el-select>
             <el-select v-model="uploadFilter" clearable placeholder="归档状态" class="compact-select"><el-option label="待归档" value="pending" /><el-option label="上传中" value="uploading" /><el-option label="等待重试" value="retry_wait" /><el-option label="已归档" value="success" /><el-option label="失败" value="failed" /></el-select>
