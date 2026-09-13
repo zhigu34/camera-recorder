@@ -3,15 +3,23 @@ import workspaceSource from './PlaybackWorkspace.vue?raw'
 import eventFeedSource from './PlaybackEventFeed.vue?raw'
 
 describe('Playback desktop viewport layout', () => {
-  it('uses a sidebar, strict 16:9 player, wide event feed, and full-width timeline', () => {
+  it('uses narrow side columns around a strict 16:9 player', () => {
     expect(workspaceSource).toContain('class="playback-sidebar"')
     expect(workspaceSource).toContain('class="playback-camera-list"')
     expect(workspaceSource).toContain('class="camera-status-dot"')
     expect(workspaceSource).not.toContain('class="playback-context-bar"')
-    expect(workspaceSource).toContain('grid-template-columns:minmax(210px,240px) minmax(0,1fr) minmax(380px,460px)')
+    expect(workspaceSource).toContain('grid-template-columns:160px minmax(0,1fr) 280px')
     expect(workspaceSource).toContain(':deep(.playback-player .player-box){width:100%;aspect-ratio:16/9}')
-    expect(workspaceSource).toContain(':deep(.playback-event-feed .event-feed-body){max-height:none;min-height:0;flex:1}')
     expect(eventFeedSource).toContain('grid-template-columns:150px minmax(0,1fr) 12px')
+  })
+
+  it('sizes both side panels from the middle player panel height', () => {
+    expect(workspaceSource).toContain('class="playback-side-slot playback-left-slot"')
+    expect(workspaceSource).toContain('class="playback-side-slot playback-events-slot"')
+    expect(workspaceSource).toContain('.playback-side-slot{position:relative;min-width:0;min-height:0}')
+    expect(workspaceSource).toContain('.playback-left-slot>.playback-sidebar{position:absolute;inset:0}')
+    expect(workspaceSource).toContain('.playback-events-slot :deep(.playback-event-feed){position:absolute;inset:0')
+    expect(workspaceSource).toContain(':deep(.playback-event-feed .event-feed-body){max-height:none;min-height:0;flex:1}')
   })
 
   it('keeps the desktop playback workspace inside the application viewport', () => {
