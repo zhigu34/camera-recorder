@@ -1,0 +1,27 @@
+import { describe, expect, it } from 'vitest'
+
+import previewSource from './PreviewView.vue?raw'
+import playerSource from './PlaybackPlayer.vue?raw'
+import playbackWorkspaceSource from './PlaybackWorkspace.vue?raw'
+import managementSource from './RecordingManagementView.vue?raw'
+import recordingsTypesSource from './types/recordings.ts?raw'
+
+describe('manual media start', () => {
+  it('keeps live monitoring disconnected until the user starts it', () => {
+    expect(previewSource).toContain('const wallPaused = ref(true)')
+    expect(previewSource).toContain('const wallStarted = ref(false)')
+    expect(previewSource).toContain("'开始监控'")
+  })
+
+  it('stages playback selection without opening a media source on page entry', () => {
+    expect(recordingsTypesSource).toContain('select(recording: RecordingItem | null')
+    expect(playerSource).toContain('function select(')
+    expect(playbackWorkspaceSource).toContain('playerRef.value?.select(recording')
+    expect(playbackWorkspaceSource).not.toContain('await openSelection(selected)')
+  })
+
+  it('selects recording-management deep links without playing them', () => {
+    expect(managementSource).not.toContain('if (target) await play(target)')
+    expect(managementSource).toContain('if (target) selectRecording(target)')
+  })
+})
