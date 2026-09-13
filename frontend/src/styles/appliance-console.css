@@ -4,6 +4,10 @@
  */
 
 .nvr-shell {
+  --nvr-font-caption: 11px;
+  --nvr-font-body: 12px;
+  --nvr-font-control: 12px;
+  --nvr-font-heading: 14px;
   --nvr-radius-xs: 5px;
   --nvr-radius-sm: 7px;
   --nvr-radius-md: 9px;
