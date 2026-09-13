@@ -683,7 +683,7 @@ onMounted(async () => {
     await reloadAll()
     if (targetRecordingId) {
       const target = recordings.value.find((item) => item.id === targetRecordingId)
-      if (target) await play(target)
+      if (target) selectRecording(target)
       else ElMessage.warning('指定录像不在当前摄像头和日期的录像列表中')
     } else if (activeRecording.value) syncRoute(activeRecording.value)
   } catch (error) {
