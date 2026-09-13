@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasView from './CamerasView.vue'
+import MotionDetectionPanel from './MotionDetectionPanel.vue'
+import { cameraIdFromRouteQuery } from './utils/cameraMotionPortal'
 
 const emit = defineEmits<{
   (event: 'open-preview'): void
@@ -12,9 +14,26 @@ const route = useRoute()
 const router = useRouter()
 const batchVisible = ref(false)
 const cameraViewKey = ref(0)
+const motionPortalReady = ref(false)
+const selectedCameraId = computed(() => cameraIdFromRouteQuery(route.query.camera_id))
+let portalObserver: MutationObserver | null = null
+
+function refreshMotionPortalTarget() {
+  if (!selectedCameraId.value) {
+    motionPortalReady.value = false
+    return
+  }
+  motionPortalReady.value = Boolean(document.querySelector('.camera-detail-drawer .drawer-body-v2'))
+}
 
 watch(() => route.path, (path) => {
   batchVisible.value = path === '/cameras/batch'
+}, { immediate: true })
+
+watch(() => route.query.camera_id, async () => {
+  motionPortalReady.value = false
+  await nextTick()
+  refreshMotionPortalTarget()
 }, { immediate: true })
 
 function openBatch() {
@@ -28,6 +47,17 @@ function closeBatch() {
 function onBatchCompleted() {
   cameraViewKey.value += 1
 }
+
+onMounted(() => {
+  portalObserver = new MutationObserver(refreshMotionPortalTarget)
+  portalObserver.observe(document.body, { childList: true, subtree: true })
+  refreshMotionPortalTarget()
+})
+
+onBeforeUnmount(() => {
+  portalObserver?.disconnect()
+  portalObserver = null
+})
 </script>
 
 <template>
@@ -36,6 +66,12 @@ function onBatchCompleted() {
     @open-batch="openBatch"
     @open-preview="emit('open-preview')"
   />
+
+  <Teleport v-if="selectedCameraId && motionPortalReady" to=".camera-detail-drawer .drawer-body-v2">
+    <section class="motion-portal-section">
+      <MotionDetectionPanel :key="selectedCameraId" :camera-id="selectedCameraId" />
+    </section>
+  </Teleport>
 
   <el-dialog
     v-model="batchVisible"
@@ -55,6 +91,15 @@ function onBatchCompleted() {
 </template>
 
 <style scoped>
+.motion-portal-section {
+  order: 1;
+  min-width: 0;
+}
+:global(.camera-detail-drawer .detail-columns),
+:global(.camera-detail-drawer .runtime-section),
+:global(.camera-detail-drawer .drawer-danger-zone) {
+  order: 2;
+}
 :global(.batch-camera-dialog) {
   overflow: hidden;
   border: 1px solid var(--nvr-border-strong) !important;
