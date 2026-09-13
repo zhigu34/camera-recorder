@@ -1145,22 +1145,17 @@
 }
 
 .nvr-workspace-content .recording-center .calendar-toolbar {
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.55fr) repeat(3, minmax(0, .76fr)) !important;
-  grid-template-areas: "camera date search storage health upload" !important;
+  grid-template-columns: minmax(0, 1.25fr) minmax(180px, 1.15fr) repeat(3, minmax(0, .76fr)) !important;
+  grid-template-areas: "camera date storage health upload" !important;
   gap: 7px !important;
   padding: 10px 12px !important;
 }
 
 .nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(1) { grid-area: camera !important; }
 .nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(2) { grid-area: date !important; }
-.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(3),
-.nvr-workspace-content .recording-center .calendar-toolbar .search-box {
-  grid-area: search !important;
-  display: flex !important;
-}
-.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(4) { grid-area: storage !important; }
-.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(5) { grid-area: health !important; }
-.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(6) {
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(3) { grid-area: storage !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(4) { grid-area: health !important; }
+.nvr-workspace-content .recording-center .calendar-toolbar > :nth-child(5) {
   grid-area: upload !important;
   display: flex !important;
 }
@@ -1220,6 +1215,13 @@
   border-right: 1px solid var(--recording-soft-line);
 }
 
+.nvr-workspace-content .recording-center .segment-kicker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .nvr-workspace-content .recording-center .segment-primary span,
 .nvr-workspace-content .recording-center .segment-primary small,
 .nvr-workspace-content .recording-center .segment-facts dt,
@@ -1268,22 +1270,32 @@
 }
 
 .nvr-workspace-content .recording-center .segment-controls {
-  min-width: 122px;
+  min-width: 190px;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: center;
-  gap: 7px;
-  padding: 9px 10px;
+  gap: 10px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--nvr-bg-soft) 42%, transparent);
 }
 
-.nvr-workspace-content .recording-center .segment-controls > div {
-  display: flex;
-  gap: 5px;
+.nvr-workspace-content .recording-center .segment-actions {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px !important;
+}
+
+.nvr-workspace-content .recording-center .segment-actions .el-button {
+  width: 100%;
+  margin: 0 !important;
 }
 
 .nvr-workspace-content .recording-center .segment-controls .auto-advance {
   order: initial;
+  width: 100% !important;
+  align-self: stretch !important;
+  justify-content: space-between !important;
   min-height: 0 !important;
   margin: 0 !important;
   padding: 0 !important;
@@ -1326,31 +1338,26 @@
   width: 15px;
 }
 
-/* Keep the two desktop work areas on one shared vertical rhythm. The player
- * scrolls inside the left panel, while the recording rows use the remaining
- * space below the browser controls on the right. */
+/* The player defines the desktop workspace height. The catalog stretches to
+ * that natural height and the recording rows scroll inside the remaining room. */
 @media (min-width: 1081px) {
   .nvr-workspace-content .recording-center .recording-layout {
-    height: calc(100dvh - 98px);
-    min-height: 560px;
     align-items: stretch !important;
   }
 
   .nvr-workspace-content .recording-center .playback-column {
-    display: flex;
-    min-height: 0;
-    align-self: stretch !important;
+    display: block;
+    align-self: start !important;
   }
 
   .nvr-workspace-content .recording-center .player-panel {
-    flex: 1;
-    min-height: 0;
     max-height: none !important;
   }
 
   .nvr-workspace-content .recording-center .catalog-column {
-    height: 100%;
+    height: auto;
     min-height: 0;
+    align-self: stretch;
   }
 
   .nvr-workspace-content .recording-center .calendar-panel {
@@ -1374,7 +1381,7 @@
   .nvr-workspace-content .recording-center .calendar-toolbar {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.45fr) !important;
     grid-template-areas:
-      "camera date search"
+      "camera date date"
       "storage health upload" !important;
   }
 
@@ -1385,6 +1392,7 @@
   .nvr-workspace-content .recording-center .segment-controls {
     grid-column: 1 / -1;
     flex-direction: row;
+    align-items: center;
     justify-content: flex-end;
     border-top: 1px solid var(--recording-soft-line);
   }
@@ -1395,7 +1403,7 @@
     grid-template-columns: 1fr 1fr !important;
     grid-template-areas:
       "camera camera"
-      "date search"
+      "date date"
       "storage health"
       "upload upload" !important;
   }
