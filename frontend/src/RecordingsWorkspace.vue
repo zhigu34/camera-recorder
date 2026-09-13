@@ -1,21 +1,27 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 
 import PlaybackWorkspace from './PlaybackWorkspace.vue'
 import RecordingExportHistoryDrawer from './RecordingExportHistoryDrawer.vue'
 import RecordingManagementView from './RecordingManagementView.vue'
+import { useCameraStore } from './stores/cameras'
 import { recordingModeFromMeta, recordingTabLocation } from './utils/recordingsWorkspace'
 
 const route = useRoute()
 const router = useRouter()
+const cameraStore = useCameraStore()
+const { cameras } = storeToRefs(cameraStore)
 const mode = computed(() => recordingModeFromMeta(route.meta.recordingMode))
 const exportHistoryVisible = ref(false)
-const selectedCameraId = computed(() => {
+const routeCameraId = computed(() => {
   const raw = Array.isArray(route.query.camera_id) ? route.query.camera_id[0] : route.query.camera_id
   const value = Number(raw || 0)
   return Number.isInteger(value) && value > 0 ? value : null
 })
+const selectedCameraId = computed(() => routeCameraId.value || cameras.value[0]?.id || null)
+const selectedCameraName = computed(() => cameras.value.find((camera) => camera.id === selectedCameraId.value)?.name)
 const selectedDate = computed(() => {
   const raw = Array.isArray(route.query.date) ? route.query.date[0] : route.query.date
   return typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : undefined
@@ -25,6 +31,8 @@ function switchMode(next: 'playback' | 'manage') {
   if (next === mode.value) return
   void router.push(recordingTabLocation(next, route.query, route.hash))
 }
+
+onMounted(() => void cameraStore.load())
 </script>
 
 <template>
@@ -45,6 +53,7 @@ function switchMode(next: 'playback' | 'manage') {
       <RecordingExportHistoryDrawer
         v-model="exportHistoryVisible"
         :camera-id="selectedCameraId"
+        :camera-name="selectedCameraName"
         :date="selectedDate"
       />
     </template>
