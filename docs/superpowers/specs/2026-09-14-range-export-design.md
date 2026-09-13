@@ -112,7 +112,7 @@ recording.ended_at > requested_start
 - `export_mode`: `fast | exact`
 - `gap_policy`: `merge | split`
 - `package_mode`: `individual | zip`
-- 当 `gap_policy=merge` 时忽略或拒绝 `package_mode=zip`
+- 当 `gap_policy=merge` 时，`package_mode` 必须为 `individual`；`zip` 只允许用于 `split`
 - 无缺口时按单文件导出处理，不因为 `package_mode` 人为拆分
 
 ### 查询任务
