@@ -3,8 +3,10 @@ import {
   ZOOM_SPANS,
   clampViewport,
   findRecordingAtWallTime,
+  motionEventOverlapsRecordings,
   rangePercent,
   timeAtPointer,
+  timeAtTrackPointer,
   zoomAround,
 } from './utils/playbackTimelineV3'
 
@@ -27,6 +29,23 @@ describe('timeAtPointer', () => {
     expect(timeAtPointer(3600, 3600, 0)).toBe(3600)
     expect(timeAtPointer(3600, 3600, 0.5)).toBe(5400)
     expect(timeAtPointer(3600, 3600, 1)).toBe(7200)
+  })
+})
+
+describe('timeAtTrackPointer', () => {
+  it('uses only the actual time track bounds and ignores the label column', () => {
+    const viewStart = 16 * 3600 + 20 * 60 + 55
+    const viewSpan = 8 * 60
+    const trackLeft = 160
+    const trackWidth = 1740
+
+    expect(timeAtTrackPointer(viewStart, viewSpan, trackLeft + trackWidth * 0.75, trackLeft, trackWidth))
+      .toBe(16 * 3600 + 26 * 60 + 55)
+  })
+
+  it('clamps clicks outside the time track to the visible window', () => {
+    expect(timeAtTrackPointer(3600, 900, 50, 100, 1000)).toBe(3600)
+    expect(timeAtTrackPointer(3600, 900, 1200, 100, 1000)).toBe(4500)
   })
 })
 
@@ -63,5 +82,30 @@ describe('findRecordingAtWallTime', () => {
 
   it('returns null for a recording gap', () => {
     expect(findRecordingAtWallTime(recordings, 10 * 3600 + 15 * 60)).toBeNull()
+  })
+})
+
+describe('motionEventOverlapsRecordings', () => {
+  const recordings = [
+    {
+      id: 1,
+      started_at: '2026-09-13T16:20:55+08:00',
+      ended_at: '2026-09-13T16:24:55+08:00',
+      duration: 240,
+    },
+  ]
+
+  it('keeps motion events that have playable recording coverage', () => {
+    expect(motionEventOverlapsRecordings({
+      started_at: '2026-09-13T16:22:00+08:00',
+      ended_at: '2026-09-13T16:22:05+08:00',
+    }, recordings)).toBe(true)
+  })
+
+  it('rejects motion events that fall entirely inside a recording gap', () => {
+    expect(motionEventOverlapsRecordings({
+      started_at: '2026-09-13T16:26:55+08:00',
+      ended_at: '2026-09-13T16:27:00+08:00',
+    }, recordings)).toBe(false)
   })
 })
