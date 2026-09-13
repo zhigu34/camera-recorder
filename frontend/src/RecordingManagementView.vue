@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Refresh, Search, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, MoreFilled, Refresh, Search, VideoPlay } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
 import {
   PlaybackAttemptTracker,
@@ -124,6 +124,8 @@ const healthFilter = ref('')
 const uploadFilter = ref('')
 const selectedRows = ref<RecordingItem[]>([])
 const deleting = ref(false)
+const calendarExpanded = ref(false)
+const viewportWidth = ref(typeof window === 'undefined' ? 1920 : window.innerWidth)
 
 const activeRecording = ref<RecordingItem | null>(null)
 const videoSrc = ref('')
@@ -140,6 +142,7 @@ const browserHevcHint = ref(hevcSupportHint())
 let progressTimer: number | null = null
 
 const recordings = computed(() => browserData.value?.items || [])
+const compactCatalog = computed(() => viewportWidth.value < 1580)
 const filteredRecordings = computed(() => {
   const needle = searchText.value.trim().toLowerCase()
   return recordings.value.filter((item) => {
@@ -329,6 +332,10 @@ function isPlayable(item: RecordingItem) {
 function isCloudOnly(item: RecordingItem) { return !item.playback?.original_available && Boolean(item.playback?.remote_available) }
 function canDelete(item: RecordingItem) { return item.status !== 'deleted' && item.upload_status !== 'uploading' }
 function recordingRowClassName({ row }: { row: RecordingItem }) { return row.id === activeRecording.value?.id ? 'active-recording-row' : '' }
+function handleRecordingCommand(command: string, item: RecordingItem) {
+  if (command === 'compatibility') void play(item, true)
+  if (command === 'delete') void deleteOne(item)
+}
 
 async function loadInitialSelection() {
   const [, recentResponse] = await Promise.all([
@@ -655,8 +662,11 @@ async function batchDelete() {
 }
 function handleSelectionChange(rows: RecordingItem[]) { selectedRows.value = rows }
 function clearFilters() { searchText.value = ''; storageFilter.value = ''; healthFilter.value = ''; uploadFilter.value = '' }
+function updateViewportWidth() { viewportWidth.value = window.innerWidth }
 
 onMounted(async () => {
+  updateViewportWidth()
+  window.addEventListener('resize', updateViewportWidth, { passive: true })
   browserHevcHint.value = hevcSupportHint()
   try {
     const targetRecordingId = routeSelection().recordingId
@@ -672,6 +682,7 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportWidth)
   stopProgressPolling()
   playbackTracker.reset()
   if (activeRecording.value && playbackMode.value === 'proxy-live') void axios.post(`/api/recordings/${activeRecording.value.id}/playback/cancel`).catch(() => undefined)
@@ -695,7 +706,6 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="player-nav"><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playPrevious">上一段</el-button><el-button type="primary" :disabled="!activeRecording || !isPlayable(activeRecording)" @click="activeRecording && play(activeRecording)"><VideoPlay class="button-icon" />播放</el-button><el-button :disabled="!activeRecording" :loading="navigationLoading" @click="playNext">下一段</el-button></div>
-          <label class="auto-advance"><span>自动续播（支持跨日）</span><el-switch v-model="autoAdvance" /></label>
           <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
           <div v-if="proxyError" class="playback-error">{{ proxyError }}</div>
           <div v-if="playbackMode === 'proxy-live' && proxyProgress" class="proxy-progress"><div><strong>兼容转码</strong><span>{{ effectiveProgressPercent.toFixed(1) }}%</span></div><el-progress :percentage="effectiveProgressPercent" :stroke-width="8" /><el-button size="small" type="danger" plain :loading="cancellingProxy" @click="cancelProxy">停止转码</el-button></div>
@@ -712,48 +722,57 @@ onBeforeUnmount(() => {
             <div class="heat-legend"><span><i class="heat-normal"></i>录像覆盖</span><span><i class="heat-warning"></i>有告警</span><span><i class="heat-cloud"></i>含云端</span><span><i class="heat-empty"></i>无录像</span></div>
           </section>
 
-          <template v-if="activeRecording">
-            <div class="detail-title">当前片段信息</div>
-            <dl class="detail-grid">
-              <div><dt>开始时间</dt><dd>{{ selectedDate }} {{ localClock(activeRecording.started_at) }}</dd></div>
-              <div><dt>时长</dt><dd>{{ formatDuration(activeRecording.duration) }}</dd></div>
+          <section v-if="activeRecording" class="segment-inspector">
+            <div class="segment-primary">
+              <span>当前片段</span>
+              <strong>{{ localClock(activeRecording.started_at) }} · {{ formatDuration(activeRecording.duration) }}</strong>
+              <small :title="activeRecording.filename">{{ activeRecording.filename }}</small>
+            </div>
+            <dl class="segment-facts">
+              <div><dt>日期</dt><dd>{{ selectedDate }}</dd></div>
+              <div><dt>画面</dt><dd>{{ activeRecording.width || '-' }} × {{ activeRecording.height || '-' }}</dd></div>
               <div><dt>编码</dt><dd>{{ activeRecording.video_codec || '-' }} / {{ activeRecording.audio_codec || '-' }}</dd></div>
-              <div><dt>分辨率</dt><dd>{{ activeRecording.width || '-' }} × {{ activeRecording.height || '-' }}</dd></div>
-              <div><dt>存储位置</dt><dd>{{ storageLabel(activeRecording) }}</dd></div>
-              <div><dt>归档状态</dt><dd>{{ uploadLabel(activeRecording.upload_status) }}</dd></div>
-              <div class="wide"><dt>文件名</dt><dd>{{ activeRecording.filename }}</dd></div>
+              <div><dt>位置</dt><dd>{{ storageLabel(activeRecording) }}</dd></div>
+              <div><dt>归档</dt><dd>{{ uploadLabel(activeRecording.upload_status) }}</dd></div>
             </dl>
-            <div class="player-actions"><el-button :disabled="!isPlayable(activeRecording)" @click="play(activeRecording, true)">兼容流</el-button><el-button type="danger" plain :icon="Delete" :disabled="!canDelete(activeRecording)" :loading="deleting" @click="deleteOne(activeRecording)">删除</el-button></div>
-            <div v-if="activePosition" class="position-note">当天可播放片段 {{ activePosition }} / {{ playableRecordings.length }}</div>
-          </template>
+            <div class="segment-controls">
+              <label class="auto-advance"><span>自动续播</span><el-switch v-model="autoAdvance" /></label>
+              <div><el-button :disabled="!isPlayable(activeRecording)" @click="play(activeRecording, true)">兼容流</el-button><el-button type="danger" plain :icon="Delete" :disabled="!canDelete(activeRecording)" :loading="deleting" @click="deleteOne(activeRecording)">删除</el-button></div>
+              <small v-if="activePosition">{{ activePosition }} / {{ playableRecordings.length }}</small>
+            </div>
+          </section>
         </section>
       </aside>
 
       <div class="catalog-column">
         <section class="panel calendar-panel" v-loading="calendarLoading">
           <div class="panel-head calendar-head">
-            <div><strong>录像日历</strong><span>{{ calendarMonth }}</span></div>
+            <div><strong>录像浏览</strong><span>{{ selectedDate }}</span></div>
             <div class="calendar-summary"><span>当日 {{ recordings.length }} 段</span><span>{{ formatDuration(browserData?.total_duration) }}</span><span :class="{ danger: abnormalCount > 0 }">异常 {{ abnormalCount }}</span><span>仅云端 {{ remoteOnlyCount }}</span></div>
-            <div class="head-actions"><el-button size="small" @click="shiftCalendarMonth(-1)">‹</el-button><el-button size="small" @click="jumpToToday">今天</el-button><el-button size="small" @click="shiftCalendarMonth(1)">›</el-button></div>
+            <div class="head-actions"><template v-if="calendarExpanded"><el-button size="small" @click="shiftCalendarMonth(-1)">‹</el-button><el-button size="small" @click="jumpToToday">今天</el-button><el-button size="small" @click="shiftCalendarMonth(1)">›</el-button></template><el-button size="small" text type="primary" @click="calendarExpanded = !calendarExpanded">{{ calendarExpanded ? '收起日历' : '查看日历' }}</el-button></div>
           </div>
 
           <div class="calendar-toolbar">
             <el-select v-model="selectedCamera" filterable placeholder="选择摄像头" class="camera-select" @change="handleCameraChange"><el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" /></el-select>
             <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" class="date-picker" @change="handleDateChange" />
+            <el-input v-model="searchText" clearable :prefix-icon="Search" placeholder="搜索文件名或录像 ID" class="search-box" />
             <el-select v-model="storageFilter" clearable placeholder="存储位置" class="compact-select"><el-option label="本地" value="local" /><el-option label="仅云端" value="cloud" /></el-select>
             <el-select v-model="healthFilter" clearable placeholder="健康状态" class="compact-select"><el-option label="健康" value="healthy" /><el-option label="异常" value="abnormal" /></el-select>
             <el-select v-model="uploadFilter" clearable placeholder="归档状态" class="compact-select"><el-option label="待归档" value="pending" /><el-option label="上传中" value="uploading" /><el-option label="等待重试" value="retry_wait" /><el-option label="已归档" value="success" /><el-option label="失败" value="failed" /></el-select>
-            <el-input v-model="searchText" clearable :prefix-icon="Search" placeholder="搜索文件名或录像 ID" class="search-box" />
           </div>
-          <div class="calendar-actions"><span>显示 {{ filteredRecordings.length }} / {{ recordings.length }} 段</span><el-button link @click="clearFilters">清除筛选</el-button><el-button :icon="Refresh" :loading="loading || calendarLoading" @click="reloadAll">刷新</el-button><el-button @click="jumpToLatest">最新录像</el-button><el-button @click="router.push('/uploads')">上传管理</el-button><el-button v-if="selectedRows.length" type="danger" plain :icon="Delete" :loading="deleting" @click="batchDelete">删除 {{ selectedRows.length }} 条</el-button></div>
+          <div class="browser-actions"><span>显示 {{ filteredRecordings.length }} / {{ recordings.length }} 段</span><div><el-button link @click="clearFilters">清除筛选</el-button><el-button :icon="Refresh" :loading="loading || calendarLoading" @click="reloadAll">刷新</el-button><el-button @click="jumpToLatest">最新录像</el-button><el-button @click="router.push('/uploads')">上传管理</el-button><el-button v-if="selectedRows.length" type="danger" plain :icon="Delete" :loading="deleting" @click="batchDelete">删除 {{ selectedRows.length }} 条</el-button></div></div>
 
-          <div class="calendar-weekdays"><span v-for="label in ['日','一','二','三','四','五','六']" :key="label">周{{ label }}</span></div>
-          <div class="recording-calendar">
-            <div v-for="cell in calendarCells" :key="cell.key" class="calendar-cell">
-              <button v-if="cell.date" class="calendar-day" :class="{ selected: cell.date === selectedDate, has: !!cell.info, cloud: (cell.info?.remote_only || 0) > 0, warn: (cell.info?.warning_count || 0) > 0 }" @click="selectCalendarDay(cell)"><span>{{ cell.day }}</span><strong v-if="cell.info">{{ cell.info.count }} 段</strong><i v-if="cell.info"></i></button>
+          <el-collapse-transition>
+            <div v-show="calendarExpanded" class="calendar-body">
+              <div class="calendar-weekdays"><span v-for="label in ['日','一','二','三','四','五','六']" :key="label">周{{ label }}</span></div>
+              <div class="recording-calendar">
+                <div v-for="cell in calendarCells" :key="cell.key" class="calendar-cell">
+                  <button v-if="cell.date" class="calendar-day" :class="{ selected: cell.date === selectedDate, has: !!cell.info, cloud: (cell.info?.remote_only || 0) > 0, warn: (cell.info?.warning_count || 0) > 0 }" @click="selectCalendarDay(cell)"><span>{{ cell.day }}</span><strong v-if="cell.info">{{ cell.info.count }} 段</strong><i v-if="cell.info"></i></button>
+                </div>
+              </div>
+              <div class="calendar-legend"><span><i class="ok"></i>有录像</span><span><i class="warn"></i>有告警</span><span><i class="cloud"></i>含云端</span></div>
             </div>
-          </div>
-          <div class="calendar-legend"><span><i class="ok"></i>有录像</span><span><i class="warn"></i>有告警</span><span><i class="cloud"></i>含云端</span></div>
+          </el-collapse-transition>
         </section>
 
         <section class="panel list-panel" v-loading="loading">
@@ -762,12 +781,12 @@ onBeforeUnmount(() => {
             <el-table-column type="selection" width="38" :selectable="canDelete" />
             <el-table-column label="开始时间" width="86"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
             <el-table-column label="时长" width="68"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
-            <el-table-column label="大小" width="74"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
+            <el-table-column v-if="!compactCatalog" label="大小" width="74"><template #default="{ row }">{{ formatSize(row.file_size) }}</template></el-table-column>
             <el-table-column label="位置" width="66"><template #default="{ row }"><el-tag :type="storageType(row)" size="small">{{ storageLabel(row) }}</el-tag></template></el-table-column>
             <el-table-column label="健康" width="62"><template #default="{ row }"><el-tag :type="healthType(row)" size="small">{{ healthLabel(row) }}</el-tag></template></el-table-column>
             <el-table-column label="归档" width="70"><template #default="{ row }">{{ uploadLabel(row.upload_status) }}</template></el-table-column>
-            <el-table-column prop="filename" label="文件名" min-width="120" show-overflow-tooltip />
-            <el-table-column label="操作" width="112"><template #default="{ row }"><el-button size="small" type="primary" plain :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-button size="small" type="danger" link :disabled="!canDelete(row)" @click.stop="deleteOne(row)">删除</el-button></template></el-table-column>
+            <el-table-column v-if="!compactCatalog" prop="filename" label="文件名" min-width="120" show-overflow-tooltip />
+            <el-table-column label="操作" width="94" align="right"><template #default="{ row }"><div class="recording-row-actions"><el-button size="small" text type="primary" :icon="VideoPlay" :disabled="!isPlayable(row)" @click.stop="play(row)">播放</el-button><el-dropdown trigger="click" @command="handleRecordingCommand($event, row)"><button type="button" class="row-more" title="更多操作" @click.stop><MoreFilled /></button><template #dropdown><el-dropdown-menu><el-dropdown-item command="compatibility" :disabled="!isPlayable(row)">兼容流播放</el-dropdown-item><el-dropdown-item command="delete" :disabled="!canDelete(row)" divided>删除录像</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div></template></el-table-column>
           </el-table>
         </section>
       </div>
