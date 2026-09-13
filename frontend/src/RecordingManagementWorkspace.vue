@@ -99,7 +99,7 @@ function bindSeek(video: HTMLVideoElement, pending: PendingSeek) {
 }
 
 function refreshTargets() {
-  timelineTargetReady.value = Boolean(document.querySelector('.recording-center .heat-section'))
+  timelineTargetReady.value = Boolean(document.querySelector('.recording-center .recording-layout'))
   const video = document.querySelector<HTMLVideoElement>('.recording-center .player-box video')
   observeVideo(video)
   const pending = pendingSeek.value
@@ -196,7 +196,7 @@ onBeforeUnmount(() => {
 
   <Teleport
     v-if="cameraId && selectedDate && timelineTargetReady"
-    to=".recording-center .heat-section"
+    to=".recording-center .recording-layout"
   >
     <PlaybackTimelineV3
       :camera-id="cameraId"
@@ -209,19 +209,15 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
-.recording-center .heat-section > .section-head,
-.recording-center .heat-section > .heat-map,
-.recording-center .heat-section > .heat-axis,
-.recording-center .heat-section > .heat-legend {
+.recording-center .heat-section {
   display: none !important;
 }
 
-.recording-center .heat-section {
-  padding: 0 !important;
-  overflow: visible !important;
-}
-
-.recording-center .heat-section > .playback-v3 {
-  margin: 0;
+.recording-center .recording-layout > .playback-v3 {
+  grid-column: 1 / -1;
+  min-width: 0;
+  border: 1px solid var(--nvr-border);
+  border-radius: 10px;
+  background: var(--nvr-surface);
 }
 </style>
