@@ -7,6 +7,21 @@ function round4(value: number) {
   return Math.round(value * 10_000) / 10_000
 }
 
+function wallClockMilliseconds(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/)
+  if (!match) return null
+  const milliseconds = Number((match[7] || '').padEnd(3, '0').slice(0, 3))
+  return Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]),
+    Number(match[4]),
+    Number(match[5]),
+    Number(match[6]),
+    milliseconds,
+  )
+}
+
 export function timelineRange(
   startSeconds: number,
   endSeconds: number,
@@ -27,9 +42,9 @@ export function timelineRange(
 }
 
 export function eventSeekOffset(eventStartedAt: string, recordingStartedAt: string, leadSeconds = 2) {
-  const eventMs = Date.parse(eventStartedAt)
-  const recordingMs = Date.parse(recordingStartedAt)
-  if (!Number.isFinite(eventMs) || !Number.isFinite(recordingMs)) return 0
+  const eventMs = wallClockMilliseconds(eventStartedAt)
+  const recordingMs = wallClockMilliseconds(recordingStartedAt)
+  if (eventMs === null || recordingMs === null) return 0
   return Math.max(0, (eventMs - recordingMs) / 1000 - Math.max(0, leadSeconds))
 }
 
