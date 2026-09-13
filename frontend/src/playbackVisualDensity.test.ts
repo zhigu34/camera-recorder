@@ -7,9 +7,9 @@ describe('Playback visual density', () => {
     expect(mainSource).toContain("import './styles/playback-workspace-density.css'")
   })
 
-  it('keeps the player fitting policy unchanged while visual refinements are applied', () => {
+  it('keeps the player fitting policy and video canvas unchanged while visual refinements are applied', () => {
     expect(playerSource).toContain('aspect-ratio:16/9')
-    expect(playerSource).toContain('object-fit:contain')
+    expect(playerSource).toContain('object-fit:contain;background:#000')
     expect(playerSource).not.toContain('object-fit:cover')
     expect(playerSource).not.toContain('filter:blur')
   })

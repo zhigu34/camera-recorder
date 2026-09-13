@@ -1,12 +1,22 @@
 /* Playback workspace density refinements.
  * Keep media behavior in the Vue components; this layer only sharpens hierarchy and spacing.
  */
+.playback-workspace {
+  --playback-frame-bg: #000;
+  --playback-placeholder-bg: #05090d;
+}
+
+:root[data-theme="light"] .playback-workspace {
+  --playback-frame-bg: var(--nvr-surface);
+  --playback-placeholder-bg: var(--nvr-surface-2);
+}
+
 .playback-workspace .playback-video-panel.playback-video-panel {
   padding: 0;
   overflow: hidden;
   border-radius: 8px;
   border-color: color-mix(in srgb, var(--nvr-border) 88%, transparent);
-  background: #000;
+  background: var(--playback-frame-bg);
 }
 
 .playback-workspace .playback-video-meta.playback-video-meta {
@@ -48,7 +58,25 @@
 .playback-workspace .playback-video-panel .playback-player .player-box {
   border: 0;
   border-radius: 0;
-  background: #000;
+  background: var(--playback-frame-bg);
+}
+
+.playback-workspace .playback-video-panel .playback-player .play-placeholder {
+  color: var(--nvr-text-soft);
+  background: radial-gradient(circle at 50% 45%, color-mix(in srgb, var(--nvr-blue) 12%, transparent), transparent 42%), var(--playback-placeholder-bg);
+}
+
+.playback-workspace .playback-video-panel .playback-player .play-placeholder small {
+  color: var(--nvr-muted);
+}
+
+.playback-workspace .playback-video-panel .playback-player .player-empty {
+  color: var(--nvr-subtle);
+  background: var(--playback-frame-bg);
+}
+
+.playback-workspace .playback-video-panel .playback-player .player-empty strong {
+  color: var(--nvr-muted);
 }
 
 .playback-workspace .playback-video-panel .playback-player .playback-notice,
