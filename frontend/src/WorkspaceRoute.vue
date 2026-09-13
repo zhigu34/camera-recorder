@@ -33,7 +33,7 @@ async function openPlaybackCompatibility() {
   <CamerasWorkspace v-else-if="renderKey === 'cameras'" @open-preview="go('/preview')" />
   <RecordingsWorkspace v-else-if="renderKey === 'recordings'" />
   <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="go('/settings')" @open-recordings="go('/recordings/manage')" />
-  <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="go('/cameras')" @open-recordings="go('/recordings/manage')" @open-uploads="go('/uploads')" @open-health="go('/health-center')" />
+  <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="go('/cameras')" @open-recordings="go('/recordings/playback')" @open-uploads="go('/uploads')" @open-health="go('/health-center')" />
   <PreviewView v-else-if="renderKey === 'preview'" />
   <RecordingScheduleView v-else-if="renderKey === 'schedule'" />
   <template v-else-if="renderKey === 'health'">
