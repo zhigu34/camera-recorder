@@ -54,3 +54,10 @@ export interface BrowserResult {
   total_size: number
   items: RecordingItem[]
 }
+
+export interface PlaybackPlayerHandle {
+  open(recording: RecordingItem, options?: { seekSeconds?: number; forceCompatibility?: boolean }): Promise<void>
+  seek(seconds: number): void
+  play(): Promise<void>
+  pause(): void
+}
