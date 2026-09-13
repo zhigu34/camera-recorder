@@ -1192,7 +1192,14 @@
   font-size: var(--nvr-font-caption) !important;
 }
 
-.nvr-workspace-content .recording-center .calendar-toolbar .date-picker .el-input__wrapper {
+.nvr-workspace-content .recording-center .calendar-toolbar .date-picker.el-date-editor.el-input {
+  overflow: hidden;
+  border-radius: 10px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.nvr-workspace-content .recording-center .calendar-toolbar .date-picker > .el-input__wrapper {
   overflow: hidden;
   border-radius: 10px !important;
 }

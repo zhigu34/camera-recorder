@@ -164,7 +164,6 @@ button, input, textarea, select { font: inherit; }
 .el-select__wrapper,
 .el-textarea__inner,
 .el-date-editor.el-input__wrapper,
-.el-date-editor.el-input,
 .el-input-number {
   background: var(--nvr-input) !important;
   box-shadow: 0 0 0 1px var(--nvr-border) inset !important;
