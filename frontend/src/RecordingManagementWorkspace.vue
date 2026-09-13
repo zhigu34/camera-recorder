@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+import PlaybackEventFeed from './PlaybackEventFeed.vue'
 import PlaybackTimelineV3 from './PlaybackTimelineV3.vue'
 import RecordingManagementView from './RecordingManagementView.vue'
 import { cameraIdFromRouteQuery } from './utils/cameraMotionPortal'
@@ -206,6 +207,19 @@ onBeforeUnmount(() => {
       @seek="handleTimelineSeek"
     />
   </Teleport>
+
+  <Teleport
+    v-if="cameraId && selectedDate && timelineTargetReady"
+    to=".recording-center .catalog-column"
+  >
+    <PlaybackEventFeed
+      :camera-id="cameraId"
+      :date="selectedDate"
+      :recordings="recordings"
+      :active-wall-seconds="activeWallSeconds"
+      @seek="handleTimelineSeek"
+    />
+  </Teleport>
 </template>
 
 <style>
@@ -219,5 +233,10 @@ onBeforeUnmount(() => {
   border: 1px solid var(--nvr-border);
   border-radius: 10px;
   background: var(--nvr-surface);
+}
+
+.recording-center .catalog-column > .playback-event-feed {
+  order: -1;
+  min-width: 0;
 }
 </style>
