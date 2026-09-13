@@ -19,6 +19,7 @@ from app.schemas.motion import (
     MotionZoneRead,
     MotionZoneUpdate,
 )
+from app.services.motion_manager import motion_detection_manager
 
 router = APIRouter(tags=["motion-detection"])
 
@@ -37,19 +38,20 @@ async def _zones(camera_id: int, db: AsyncSession) -> list[MotionZone]:
     return list(result)
 
 
-def _runtime(settings: MotionDetectionSettings | None) -> MotionRuntimeRead:
+def _runtime(
+    camera_id: int,
+    settings: MotionDetectionSettings | None,
+) -> MotionRuntimeRead:
     if settings is None or not settings.enabled:
         return MotionRuntimeRead(state="disabled")
-    # The worker manager is added in the next implementation stage. Persisted
-    # settings can already be enabled without implying that a worker is running.
-    return MotionRuntimeRead(state="stopped")
+    return MotionRuntimeRead(**motion_detection_manager.status(camera_id))
 
 
 async def _read_settings(camera_id: int, db: AsyncSession) -> MotionDetectionRead:
     settings = await db.get(MotionDetectionSettings, camera_id)
     zones = await _zones(camera_id, db)
     if settings is None:
-        return MotionDetectionRead(runtime=_runtime(None), zones=zones)
+        return MotionDetectionRead(runtime=_runtime(camera_id, None), zones=zones)
     return MotionDetectionRead(
         enabled=settings.enabled,
         sensitivity=settings.sensitivity,
@@ -57,7 +59,7 @@ async def _read_settings(camera_id: int, db: AsyncSession) -> MotionDetectionRea
         analysis_width=settings.analysis_width,
         min_duration_ms=settings.min_duration_ms,
         merge_gap_ms=settings.merge_gap_ms,
-        runtime=_runtime(settings),
+        runtime=_runtime(camera_id, settings),
         zones=zones,
     )
 
@@ -90,6 +92,7 @@ async def update_motion_detection(
         setattr(settings, field, value)
     await db.commit()
     await db.refresh(settings)
+    await motion_detection_manager.restart_camera(camera_id)
     return await _read_settings(camera_id, db)
 
 
@@ -113,6 +116,7 @@ async def create_motion_zone(
     db.add(zone)
     await db.commit()
     await db.refresh(zone)
+    await motion_detection_manager.restart_camera(camera_id)
     return zone
 
 
@@ -144,6 +148,7 @@ async def update_motion_zone(
         setattr(zone, field, value)
     await db.commit()
     await db.refresh(zone)
+    await motion_detection_manager.restart_camera(camera_id)
     return zone
 
 
@@ -160,6 +165,7 @@ async def delete_motion_zone(
     zone = await _zone_or_404(camera_id, zone_id, db)
     await db.delete(zone)
     await db.commit()
+    await motion_detection_manager.restart_camera(camera_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
