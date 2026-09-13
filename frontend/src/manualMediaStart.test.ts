@@ -26,7 +26,10 @@ describe('manual media start', () => {
   })
 
   it('selects recording-management deep links without playing them', () => {
-    expect(managementSource).not.toContain('if (target) await play(target)')
-    expect(managementSource).toContain('if (target) selectRecording(target)')
+    const mountedStart = managementSource.indexOf('onMounted(async () => {')
+    const mountedEnd = managementSource.indexOf('onBeforeUnmount(', mountedStart)
+    const mountedBlock = managementSource.slice(mountedStart, mountedEnd)
+    expect(mountedBlock).toContain('if (target) selectRecording(target)')
+    expect(mountedBlock).not.toContain('await play(target)')
   })
 })
