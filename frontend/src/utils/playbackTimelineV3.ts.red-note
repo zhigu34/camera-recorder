@@ -1,0 +1,1 @@
+The RED phase for recordingSeekOffset is defined by frontend/src/playbackTimelineV3.interaction.test.ts and must fail until recordingSeekOffset is implemented.
