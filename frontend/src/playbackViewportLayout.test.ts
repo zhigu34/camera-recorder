@@ -10,7 +10,7 @@ describe('Playback desktop viewport layout', () => {
     expect(workspaceSource).not.toContain('class="playback-context-bar"')
     expect(workspaceSource).toContain('grid-template-columns:160px minmax(0,1fr) 280px')
     expect(workspaceSource).toContain(':deep(.playback-player .player-box){width:100%;aspect-ratio:16/9}')
-    expect(eventFeedSource).toContain('grid-template-columns:150px minmax(0,1fr) 12px')
+    expect(eventFeedSource).toContain('grid-template-columns:96px minmax(0,1fr) 10px')
   })
 
   it('sizes both side panels from the middle player panel height', () => {
