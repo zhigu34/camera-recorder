@@ -20,6 +20,11 @@ describe('manual media start', () => {
     expect(playbackWorkspaceSource).not.toContain('await openSelection(selected)')
   })
 
+  it('starts a staged playback only after an explicit play or seek action', () => {
+    expect(playerSource).toContain('pendingSeekSeconds.value = requested')
+    expect(playerSource).toContain('await open(activeRecording.value, { seekSeconds: pendingSeekSeconds.value || 0 })')
+  })
+
   it('selects recording-management deep links without playing them', () => {
     expect(managementSource).not.toContain('if (target) await play(target)')
     expect(managementSource).toContain('if (target) selectRecording(target)')
