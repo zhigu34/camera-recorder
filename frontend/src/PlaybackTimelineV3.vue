@@ -5,6 +5,7 @@ import axios from 'axios'
 import {
   ZOOM_SPANS,
   clampViewport,
+  findRecordingAtWallTime,
   motionEventOverlapsRecordings,
   rangePercent,
   recordingRange,
@@ -42,6 +43,7 @@ const motionError = ref('')
 const dragging = ref(false)
 const dragStartX = ref(0)
 const dragViewStart = ref(0)
+const dragCursorStart = ref(cursorSeconds.value)
 const dragMoved = ref(false)
 let suppressClickUntil = 0
 
@@ -106,12 +108,18 @@ function pointerTime(event: PointerEvent | WheelEvent, element: HTMLElement) {
   return timeAtTrackPointer(viewStart.value, span.value, event.clientX, rect.left, rect.width)
 }
 
+function hasRecordingAt(seconds: number) {
+  return Boolean(findRecordingAtWallTime(props.recordings, seconds))
+}
+
 function seekAtPointer(event: PointerEvent) {
   if (Date.now() < suppressClickUntil) return
   const element = event.currentTarget as HTMLElement
   const target = pointerTime(event, element)
-  cursorSeconds.value = target
-  if (zoom.value !== '24h') centerOn(target)
+  if (hasRecordingAt(target)) {
+    cursorSeconds.value = target
+    if (zoom.value !== '24h') centerOn(target)
+  }
   emit('seek', target)
 }
 
@@ -121,6 +129,7 @@ function startDrag(event: PointerEvent) {
   dragMoved.value = false
   dragStartX.value = event.clientX
   dragViewStart.value = viewStart.value
+  dragCursorStart.value = cursorSeconds.value
   ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
 }
 
@@ -140,8 +149,10 @@ function endDrag() {
   if (!dragging.value) return
   dragging.value = false
   if (dragMoved.value) {
+    const target = cursorSeconds.value
     suppressClickUntil = Date.now() + 150
-    emit('seek', cursorSeconds.value)
+    if (!hasRecordingAt(target)) cursorSeconds.value = dragCursorStart.value
+    emit('seek', target)
   }
 }
 
@@ -159,8 +170,10 @@ function seekOverview(event: PointerEvent) {
   const element = event.currentTarget as HTMLElement
   const rect = element.getBoundingClientRect()
   const target = timeAtTrackPointer(0, 86400, event.clientX, rect.left, rect.width)
-  cursorSeconds.value = target
-  if (zoom.value !== '24h') centerOn(target)
+  if (hasRecordingAt(target)) {
+    cursorSeconds.value = target
+    if (zoom.value !== '24h') centerOn(target)
+  }
   emit('seek', target)
 }
 
