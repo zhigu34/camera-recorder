@@ -1,0 +1,379 @@
+/* Camera home polish.
+ * Keep camera behavior in CamerasView.vue; this layer only refines hierarchy,
+ * density and responsive presentation for the device overview.
+ */
+.nvr-workspace-content .camera-page {
+  max-width: 1800px !important;
+  grid-template-columns: minmax(300px, 1fr) auto max-content !important;
+  grid-template-areas:
+    "toolbar summary heading"
+    "devices devices devices" !important;
+  column-gap: 8px !important;
+  row-gap: 10px !important;
+  padding: 12px 16px 24px !important;
+}
+
+/* One quiet control band: search -> state filters -> page actions. */
+.nvr-workspace-content .camera-page .toolbar,
+.nvr-workspace-content .camera-page .summary-grid,
+.nvr-workspace-content .camera-page .page-heading,
+.nvr-workspace-content .camera-page .heading-actions {
+  min-height: 34px !important;
+  height: 34px !important;
+  align-items: center !important;
+}
+
+.nvr-workspace-content .camera-page .toolbar {
+  gap: 6px !important;
+}
+
+.nvr-workspace-content .camera-page .search-box {
+  width: min(460px, 100%) !important;
+}
+
+.nvr-workspace-content .camera-page .search-box .el-input__wrapper,
+.nvr-workspace-content .camera-page .camera-sort-select .el-select__wrapper {
+  min-height: 32px !important;
+  height: 32px !important;
+  border-radius: 7px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: 0 0 0 1px var(--nvr-border) inset !important;
+}
+
+.nvr-workspace-content .camera-page .camera-toolbar-actions {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-sort-select {
+  width: 108px !important;
+  flex-basis: 108px !important;
+}
+
+.nvr-workspace-content .camera-page .batch-probe-button,
+.nvr-workspace-content .camera-page .heading-actions .el-button {
+  min-height: 32px !important;
+  height: 32px !important;
+  margin: 0 !important;
+  border-radius: 7px !important;
+}
+
+.nvr-workspace-content .camera-page .heading-actions {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .camera-page .heading-actions .el-button:not(.el-button--primary),
+.nvr-workspace-content .camera-page .batch-probe-button {
+  border-color: var(--nvr-border) !important;
+  background: var(--nvr-surface) !important;
+  color: var(--nvr-text-soft) !important;
+  box-shadow: none !important;
+}
+
+.nvr-workspace-content .camera-page .result-count {
+  margin-left: 2px;
+  color: var(--nvr-subtle) !important;
+  font-size: 9px !important;
+}
+
+/* State filters read as a compact segmented control, not dashboard KPI cards. */
+.nvr-workspace-content .camera-page .summary-grid {
+  gap: 2px !important;
+  padding: 2px !important;
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 8px !important;
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-workspace-content .camera-page .summary-card {
+  min-height: 28px !important;
+  height: 28px !important;
+  gap: 5px !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.nvr-workspace-content .camera-page .summary-card:hover {
+  background: var(--nvr-hover) !important;
+}
+
+.nvr-workspace-content .camera-page .summary-card.active {
+  background: var(--nvr-surface-2) !important;
+  box-shadow: inset 0 0 0 1px var(--nvr-border) !important;
+}
+
+.nvr-workspace-content .camera-page .summary-card span {
+  font-size: 8px !important;
+  font-weight: 560 !important;
+}
+
+.nvr-workspace-content .camera-page .summary-card strong {
+  font-size: 11px !important;
+  font-weight: 680 !important;
+}
+
+/* Device wall: flatter, denser cards with identity and state taking priority. */
+.nvr-workspace-content .camera-page .camera-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card {
+  grid-template-columns: 52px minmax(0, 1fr) !important;
+  grid-template-areas:
+    "glyph identity"
+    "signals signals" !important;
+  column-gap: 10px !important;
+  row-gap: 0 !important;
+  padding: 10px 11px 9px !important;
+  border-color: color-mix(in srgb, var(--nvr-border) 82%, transparent) !important;
+  border-radius: 9px !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition: border-color .14s ease, background .14s ease, box-shadow .14s ease !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card:hover {
+  border-color: var(--nvr-border-strong) !important;
+  background: color-mix(in srgb, var(--nvr-hover) 42%, var(--nvr-surface)) !important;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--nvr-text) 5%, transparent) !important;
+  transform: none !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card.selected {
+  border-color: color-mix(in srgb, var(--nvr-blue) 56%, var(--nvr-border)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nvr-blue) 18%, transparent) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card:has(.health-badge.offline)::before,
+.nvr-workspace-content .camera-page .camera-card:has(.health-badge.unknown)::before {
+  display: none !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card-topline,
+.nvr-workspace-content .camera-page .camera-copy {
+  min-height: 52px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-icon {
+  width: 52px !important;
+  height: 52px !important;
+  padding: 8px !important;
+  border-radius: 10px !important;
+  border-color: var(--nvr-border) !important;
+  background: var(--nvr-surface-2) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-icon.online,
+.nvr-workspace-content .camera-page .camera-icon.offline,
+.nvr-workspace-content .camera-page .camera-icon.unknown {
+  background: var(--nvr-surface-2) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-icon.online {
+  color: var(--nvr-green) !important;
+  border-color: color-mix(in srgb, var(--nvr-green) 15%, var(--nvr-border)) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-icon.offline {
+  color: var(--nvr-red) !important;
+  border-color: color-mix(in srgb, var(--nvr-red) 16%, var(--nvr-border)) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-icon.unknown {
+  color: var(--nvr-yellow) !important;
+  border-color: color-mix(in srgb, var(--nvr-yellow) 16%, var(--nvr-border)) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-copy {
+  justify-content: flex-start !important;
+  padding: 0 12px 0 0 !important;
+}
+
+.nvr-workspace-content .camera-page .camera-name-row {
+  gap: 5px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-name-row > strong {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+  font-size: 12px !important;
+  font-weight: 670 !important;
+}
+
+/* Status uses dots and text; inactive recording state does not compete for attention. */
+.nvr-workspace-content .camera-page .health-badge,
+.nvr-workspace-content .camera-page .record-badge {
+  height: 17px !important;
+  min-height: 17px !important;
+  padding: 0 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  font-size: 8px !important;
+  line-height: 17px !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge i,
+.nvr-workspace-content .camera-page .record-badge i {
+  width: 5px !important;
+  height: 5px !important;
+  flex-basis: 5px !important;
+}
+
+.nvr-workspace-content .camera-page .record-badge:not(.active) {
+  display: none !important;
+}
+
+.nvr-workspace-content .camera-page .record-badge.active {
+  color: var(--nvr-red) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-identity {
+  margin-top: 3px !important;
+  color: var(--nvr-text-soft) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-video {
+  margin-top: 3px !important;
+  color: var(--nvr-muted) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-address {
+  margin-top: 2px !important;
+  color: var(--nvr-subtle) !important;
+  font-size: 8px !important;
+}
+
+.nvr-workspace-content .camera-page .camera-card-id {
+  top: 8px !important;
+  right: 9px !important;
+  opacity: 0 !important;
+  transition: opacity .14s ease;
+}
+
+.nvr-workspace-content .camera-page .camera-card:hover .camera-card-id,
+.nvr-workspace-content .camera-page .camera-card:focus-visible .camera-card-id {
+  opacity: .45 !important;
+}
+
+/* Secondary recording policy becomes a quiet footer line. Substream detail lives in the drawer. */
+.nvr-workspace-content .camera-page .camera-signals {
+  display: flex !important;
+  align-items: center !important;
+  gap: 7px !important;
+  margin-top: 8px !important;
+  padding-top: 7px !important;
+  border-top: 1px solid color-mix(in srgb, var(--nvr-border) 62%, transparent) !important;
+}
+
+.nvr-workspace-content .camera-page .camera-signals > div {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+.nvr-workspace-content .camera-page .camera-signals > div:nth-child(3) {
+  display: none !important;
+}
+
+.nvr-workspace-content .camera-page .camera-signals > div + div::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--nvr-subtle);
+}
+
+.nvr-workspace-content .camera-page .camera-signals span {
+  display: none !important;
+}
+
+.nvr-workspace-content .camera-page .camera-signals b {
+  overflow: hidden;
+  color: var(--nvr-subtle) !important;
+  font-size: 8px !important;
+  font-weight: 520 !important;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nvr-workspace-content .camera-page .camera-card.needs-probe .camera-card-footer.quick-probe-footer {
+  margin-top: 7px !important;
+  padding-top: 7px !important;
+  border-top-color: color-mix(in srgb, var(--nvr-border) 62%, transparent) !important;
+}
+
+.nvr-workspace-content .camera-page .empty-state {
+  min-height: 260px !important;
+  border-radius: 9px !important;
+  background: color-mix(in srgb, var(--nvr-surface) 88%, transparent) !important;
+}
+
+@media (max-width: 1380px) {
+  .nvr-workspace-content .camera-page {
+    grid-template-columns: minmax(280px, 1fr) max-content !important;
+    grid-template-areas:
+      "toolbar heading"
+      "summary summary"
+      "devices devices" !important;
+    row-gap: 7px !important;
+  }
+  .nvr-workspace-content .camera-page .summary-grid {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 1100px) {
+  .nvr-workspace-content .camera-page .camera-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .nvr-workspace-content .camera-page {
+    grid-template-columns: 1fr !important;
+    grid-template-areas:
+      "heading"
+      "toolbar"
+      "summary"
+      "devices" !important;
+    padding-inline: 12px !important;
+  }
+  .nvr-workspace-content .camera-page .toolbar,
+  .nvr-workspace-content .camera-page .summary-grid,
+  .nvr-workspace-content .camera-page .page-heading,
+  .nvr-workspace-content .camera-page .heading-actions {
+    height: auto !important;
+  }
+  .nvr-workspace-content .camera-page .toolbar {
+    align-items: stretch !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .nvr-workspace-content .camera-page .camera-list {
+    grid-template-columns: 1fr !important;
+  }
+  .nvr-workspace-content .camera-page .camera-card {
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+    padding: 9px 10px 8px !important;
+  }
+  .nvr-workspace-content .camera-page .camera-card-topline,
+  .nvr-workspace-content .camera-page .camera-copy {
+    min-height: 48px !important;
+  }
+  .nvr-workspace-content .camera-page .camera-icon {
+    width: 48px !important;
+    height: 48px !important;
+    padding: 7px !important;
+  }
+}
