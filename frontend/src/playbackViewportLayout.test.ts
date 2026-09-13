@@ -1,8 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-
-const source = readFileSync(fileURLToPath(new URL('./PlaybackWorkspace.vue', import.meta.url)), 'utf8')
+import source from './PlaybackWorkspace.vue?raw'
 
 describe('Playback desktop viewport layout', () => {
   it('keeps the desktop playback workspace inside the application viewport', () => {
