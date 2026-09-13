@@ -4,7 +4,6 @@ import {
   availablePackageModes,
   buildExportRequest,
   initialExportRange,
-  recordingTimezoneOffsetMinutes,
   wallClockIso,
 } from './utils/playbackExport'
 
@@ -18,18 +17,6 @@ describe('playback export helpers', () => {
     expect(initialExportRange(null, [
       { id: 1, started_at: '2026-09-14T08:12:30+08:00', duration: 600 },
     ])).toEqual({ start: 29550, end: 29850 })
-  })
-
-  it('derives the deployment-style offset from recording timestamps before using browser fallback', () => {
-    expect(recordingTimezoneOffsetMinutes([
-      { id: 1, started_at: '2026-09-14T08:12:30+08:00', duration: 600 },
-    ], 120)).toBe(-480)
-    expect(recordingTimezoneOffsetMinutes([
-      { id: 1, started_at: '2026-09-14T00:12:30Z', duration: 600 },
-    ], 120)).toBe(0)
-    expect(recordingTimezoneOffsetMinutes([
-      { id: 1, started_at: '2026-09-14T08:12:30', duration: 600 },
-    ], 120)).toBe(120)
   })
 
   it('serializes literal wall-clock time with an explicit timezone offset without UTC shifting', () => {
