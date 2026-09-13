@@ -1,0 +1,51 @@
+/* Recording management player theme adaptation.
+ * Keep the real video canvas black; only the surrounding frame and empty states follow the UI theme.
+ */
+.nvr-workspace-content .recording-center {
+  --recording-player-frame-bg: #020609;
+  --recording-player-placeholder-bg: #03070b;
+  --recording-player-text: #d8e4ef;
+  --recording-player-muted: #718095;
+  --recording-player-empty: #59687b;
+  --recording-player-empty-strong: #8e9cac;
+  --recording-player-frame-shadow:
+    0 0 0 1px color-mix(in srgb, white 2%, transparent) inset,
+    0 18px 36px color-mix(in srgb, #000 22%, transparent);
+}
+
+:root[data-theme="light"] .nvr-workspace-content .recording-center {
+  --recording-player-frame-bg: var(--nvr-surface);
+  --recording-player-placeholder-bg: var(--nvr-surface-2);
+  --recording-player-text: var(--nvr-text-soft);
+  --recording-player-muted: var(--nvr-muted);
+  --recording-player-empty: var(--nvr-subtle);
+  --recording-player-empty-strong: var(--nvr-muted);
+  --recording-player-frame-shadow:
+    0 0 0 1px var(--nvr-border) inset,
+    0 8px 22px color-mix(in srgb, var(--nvr-text) 6%, transparent);
+}
+
+.nvr-workspace-content .recording-center .player-box {
+  background: var(--recording-player-frame-bg) !important;
+  box-shadow: var(--recording-player-frame-shadow) !important;
+}
+
+.nvr-workspace-content .recording-center .play-placeholder {
+  color: var(--recording-player-text) !important;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--nvr-blue) 17%, transparent), transparent 36%),
+    var(--recording-player-placeholder-bg) !important;
+}
+
+.nvr-workspace-content .recording-center .play-placeholder small {
+  color: var(--recording-player-muted) !important;
+}
+
+.nvr-workspace-content .recording-center .player-empty {
+  color: var(--recording-player-empty) !important;
+  background: var(--recording-player-frame-bg) !important;
+}
+
+.nvr-workspace-content .recording-center .player-empty strong {
+  color: var(--recording-player-empty-strong) !important;
+}
