@@ -1,6 +1,7 @@
 from app.models.camera import Camera
 from app.models.event import Event
 from app.models.health_sample import CameraHealthSample
+from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.notification_settings import NotificationSettings
 from app.models.recording import Recording
 from app.models.system_settings import SystemSettings
@@ -14,4 +15,7 @@ __all__ = [
     "CameraHealthSample",
     "NotificationSettings",
     "SystemSettings",
+    "MotionDetectionSettings",
+    "MotionZone",
+    "MotionEvent",
 ]
