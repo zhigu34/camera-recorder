@@ -22,7 +22,7 @@ type ThemeMode = 'light' | 'dark'
 const navEntries: NavEntry[] = [
   { key: 'dashboard', label: '总览', description: '运行概览与异常状态', target: '/', group: 'core', icon: markRaw(DataAnalysis) },
   { key: 'preview', label: '实时监控', description: '实时画面与码流状态', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
-  { key: 'recordings', label: '录像管理', description: '检索、日历、时间轴、播放与清理', target: '/recordings/manage', group: 'core', icon: markRaw(Files) },
+  { key: 'recordings', label: '录像', description: '连续回放与录像管理', target: '/recordings/playback', group: 'core', icon: markRaw(Files) },
   { key: 'cameras', label: '摄像头', description: '设备、码流与录像配置', target: '/cameras', group: 'core', icon: markRaw(Camera) },
   { key: 'schedule', label: '录制计划', description: '自动录像与时间窗口', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
   { key: 'health', label: '系统健康', description: '录像服务、存储与稳定性', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
