@@ -1326,6 +1326,50 @@
   width: 15px;
 }
 
+/* Keep the two desktop work areas on one shared vertical rhythm. The player
+ * scrolls inside the left panel, while the recording rows use the remaining
+ * space below the browser controls on the right. */
+@media (min-width: 1081px) {
+  .nvr-workspace-content .recording-center .recording-layout {
+    height: calc(100dvh - 98px);
+    min-height: 560px;
+    align-items: stretch !important;
+  }
+
+  .nvr-workspace-content .recording-center .playback-column {
+    display: flex;
+    min-height: 0;
+    align-self: stretch !important;
+  }
+
+  .nvr-workspace-content .recording-center .player-panel {
+    flex: 1;
+    min-height: 0;
+    max-height: none !important;
+  }
+
+  .nvr-workspace-content .recording-center .catalog-column {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .nvr-workspace-content .recording-center .calendar-panel {
+    flex: 0 0 auto;
+  }
+
+  .nvr-workspace-content .recording-center .list-panel {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .nvr-workspace-content .recording-center .list-panel .el-table {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
 @media (max-width: 1580px) {
   .nvr-workspace-content .recording-center .calendar-toolbar {
     grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.45fr) !important;

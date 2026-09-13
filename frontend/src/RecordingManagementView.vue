@@ -142,6 +142,7 @@ const browserHevcHint = ref(hevcSupportHint())
 let progressTimer: number | null = null
 
 const recordings = computed(() => browserData.value?.items || [])
+const desktopLayout = computed(() => viewportWidth.value > 1080)
 const compactCatalog = computed(() => viewportWidth.value < 1580)
 const filteredRecordings = computed(() => {
   const needle = searchText.value.trim().toLowerCase()
@@ -777,7 +778,7 @@ onBeforeUnmount(() => {
 
         <section class="panel list-panel" v-loading="loading">
           <div class="panel-head"><div><strong>录像片段列表</strong><span>共 {{ filteredRecordings.length }} 条</span></div><span class="list-hint">单击选择 · 双击播放</span></div>
-          <el-table :data="filteredRecordings" row-key="id" max-height="520" empty-text="当前日期暂无录像" :row-class-name="recordingRowClassName" @selection-change="handleSelectionChange" @row-click="selectRecording" @row-dblclick="play">
+          <el-table :data="filteredRecordings" row-key="id" :height="desktopLayout ? '100%' : undefined" :max-height="desktopLayout ? undefined : 520" empty-text="当前日期暂无录像" :row-class-name="recordingRowClassName" @selection-change="handleSelectionChange" @row-click="selectRecording" @row-dblclick="play">
             <el-table-column type="selection" width="38" :selectable="canDelete" />
             <el-table-column label="开始时间" width="86"><template #default="{ row }">{{ localClock(row.started_at) }}</template></el-table-column>
             <el-table-column label="时长" width="68"><template #default="{ row }">{{ formatDuration(row.duration) }}</template></el-table-column>
