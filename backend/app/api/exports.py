@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -90,6 +90,19 @@ async def analyze_export_range(
         payload.end_at,
     )
     return _analysis_payload(payload.camera_id, analysis)
+
+
+@router.get("", response_model=list[ExportJobRead])
+async def list_export_jobs(
+    camera_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> list[ExportJob]:
+    statement = select(ExportJob)
+    if camera_id is not None:
+        statement = statement.where(ExportJob.camera_id == camera_id)
+    statement = statement.order_by(ExportJob.created_at.desc(), ExportJob.id.desc()).limit(limit)
+    return list(await db.scalars(statement))
 
 
 @router.post("", response_model=ExportJobRead, status_code=status.HTTP_201_CREATED)
