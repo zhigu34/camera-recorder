@@ -8,7 +8,7 @@ import EventCenterView from './EventCenterView.vue'
 import HealthView from './HealthView.vue'
 import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
 import PreviewView from './PreviewView.vue'
-import RecordingManagementView from './RecordingManagementView.vue'
+import RecordingManagementWorkspace from './RecordingManagementWorkspace.vue'
 import RecordingScheduleView from './RecordingScheduleView.vue'
 import SystemSettingsWorkspace from './SystemSettingsWorkspace.vue'
 import UploadManagementView from './UploadManagementView.vue'
@@ -31,7 +31,7 @@ async function openPlaybackCompatibility() {
 <template>
   <DashboardView v-if="renderKey === 'dashboard'" />
   <CamerasWorkspace v-else-if="renderKey === 'cameras'" @open-preview="go('/preview')" />
-  <RecordingManagementView v-else-if="renderKey === 'recordings'" />
+  <RecordingManagementWorkspace v-else-if="renderKey === 'recordings'" />
   <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="go('/settings')" @open-recordings="go('/recordings/manage')" />
   <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="go('/cameras')" @open-recordings="go('/recordings/manage')" @open-uploads="go('/uploads')" @open-health="go('/health-center')" />
   <PreviewView v-else-if="renderKey === 'preview'" />
