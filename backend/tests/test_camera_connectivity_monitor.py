@@ -1,4 +1,7 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from app.models.camera import Camera
 
@@ -65,6 +68,31 @@ def test_single_rtsp_success_recovers_offline_camera() -> None:
     assert result.status == "online"
     assert result.consecutive_failures == 0
     assert result.source == "rtsp"
+
+
+@pytest.mark.asyncio
+async def test_lightweight_probe_accepts_any_rtsp_response() -> None:
+    from app.services.camera_connectivity_monitor import probe_rtsp_service
+
+    request_seen = asyncio.Event()
+
+    async def handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        request = await reader.readuntil(b"\r\n\r\n")
+        assert request.startswith(b"OPTIONS rtsp://")
+        request_seen.set()
+        writer.write(b"RTSP/1.0 401 Unauthorized\r\nCSeq: 1\r\n\r\n")
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    try:
+        assert await probe_rtsp_service("127.0.0.1", port, "/stream", timeout_seconds=1.0)
+        assert request_seen.is_set()
+    finally:
+        server.close()
+        await server.wait_closed()
 
 
 def test_stale_persisted_online_state_becomes_unknown() -> None:
