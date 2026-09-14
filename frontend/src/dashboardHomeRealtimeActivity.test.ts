@@ -36,4 +36,10 @@ describe('dashboard realtime activity semantics', () => {
     expect(dashboardSource).toContain('connectivitySourceLabel')
     expect(dashboardSource).toContain('connectivity_source')
   })
+
+  it('lets the events backend seed the cursor from its current tail when today is empty', () => {
+    expect(dashboardSource).not.toContain('seedActivityCursor')
+    expect(dashboardSource).toContain("if (activityMotionCursor > 0) params.set('after_motion_id'")
+    expect(dashboardSource).not.toContain('HOME_SYSTEM_EVENT_CURSOR')
+  })
 })
