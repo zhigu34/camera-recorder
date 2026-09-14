@@ -20,7 +20,7 @@ describe('Protect workspace visual consistency', () => {
     expect(workspaceCss).toContain('--protect-page-gutter: 18px')
   })
 
-  it('does not redefine media fitting or start media connections', () => {
+  it('keeps media rendering and connection behavior outside the visual layer', () => {
     expect(workspaceCss).not.toContain('object-fit')
     expect(workspaceCss).not.toContain('/ws/preview-wall')
     expect(workspaceCss).not.toContain('WebSocket')
