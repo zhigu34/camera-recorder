@@ -19,6 +19,7 @@ import './styles/camera-device-layout.css'
 import './styles/camera-home-polish.css'
 import './styles/camera-detail-drawer.css'
 import './styles/camera-detail-drawer-v2.css'
+import './styles/protect-workspace-unification.css'
 
 import Root from './Root.vue'
 import { router } from './router'

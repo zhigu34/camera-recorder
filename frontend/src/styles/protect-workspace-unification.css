@@ -1,0 +1,172 @@
+/* Cross-workspace Protect visual consistency.
+ * This layer is deliberately behavior-free: it aligns the visual skeleton of
+ * Home, Live, Activity, Playback and Cameras without touching media sizing,
+ * playback state, navigation, or page-specific information architecture.
+ */
+.nvr-shell {
+  --protect-content-max: 1760px;
+  --protect-page-gutter: 18px;
+  --protect-page-gutter-mobile: 12px;
+  --protect-section-gap: 10px;
+  --protect-control-height: 32px;
+  --protect-surface-radius: 10px;
+}
+
+/* One content rail for the five core Protect workspaces. Keep each page's
+ * vertical rhythm intact while removing the left/right drift between routes.
+ */
+.nvr-shell .nvr-workspace-content .protect-home,
+.nvr-shell .nvr-workspace-content .protect-live-page,
+.nvr-shell .nvr-workspace-content .events-page,
+.nvr-shell .nvr-workspace-content .camera-page,
+.nvr-shell .nvr-workspace-content .playback-workspace {
+  width: 100%;
+  max-width: var(--protect-content-max) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding-left: var(--protect-page-gutter) !important;
+  padding-right: var(--protect-page-gutter) !important;
+}
+
+/* The shell top bar is the canonical page title. Home and Live were the last
+ * core routes still repeating a second full page heading inside the content.
+ * Keep only their contextual/action side of the header so the hierarchy reads
+ * the same way as Cameras and the recording workspace.
+ */
+.nvr-shell .nvr-workspace-content .protect-home .home-heading,
+.nvr-shell .nvr-workspace-content .protect-live-page .live-header > div:first-child {
+  display: none;
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .home-header,
+.nvr-shell .nvr-workspace-content .protect-live-page .live-header {
+  min-height: 34px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: var(--protect-section-gap);
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .health-pill {
+  min-height: var(--protect-control-height);
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+.nvr-shell .nvr-workspace-content .protect-live-page .header-actions {
+  min-height: 34px;
+}
+
+/* Activity/System Events is a sub-view switcher rather than a duplicate page
+ * title. Preserve it, but use the same compact hierarchy as other action rows.
+ */
+.nvr-shell .nvr-workspace-content .events-page .event-mode-bar {
+  min-height: 34px;
+  align-items: center;
+  margin-bottom: var(--protect-section-gap);
+}
+
+.nvr-shell .nvr-workspace-content .events-page .event-mode-copy {
+  gap: 2px;
+}
+
+.nvr-shell .nvr-workspace-content .events-page .event-mode-copy strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.nvr-shell .nvr-workspace-content .events-page .event-mode-copy span {
+  font-size: 9px;
+}
+
+/* Repeated control surfaces share one restrained geometry. Individual page
+ * layouts remain untouched; only chrome, height and spacing are normalized.
+ */
+.nvr-shell .nvr-workspace-content .protect-live-page .live-toolbar,
+.nvr-shell .nvr-workspace-content .events-page .activity-toolbar,
+.nvr-shell .nvr-workspace-content .events-page .filter-bar {
+  min-height: 42px;
+  margin-bottom: var(--protect-section-gap);
+  padding: 7px 9px;
+  border-color: var(--nvr-border);
+  border-radius: 9px;
+  background: var(--nvr-surface);
+  box-shadow: none;
+}
+
+.nvr-shell .nvr-workspace-content .protect-live-page .layout-switcher button,
+.nvr-shell .nvr-workspace-content .protect-live-page .camera-chip,
+.nvr-shell .nvr-workspace-content .events-page .event-mode-tabs button {
+  min-height: 28px;
+}
+
+/* Keep the common panel language quiet and flat. Media fitting stays owned by
+ * each page so this layer cannot alter the 16:9 player and preview contracts.
+ */
+.nvr-shell .nvr-workspace-content .protect-home .surface,
+.nvr-shell .nvr-workspace-content .events-page .table-panel,
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-sidebar,
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-video-panel,
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-export-panel,
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-export-job,
+.nvr-shell .nvr-workspace-content .camera-page .camera-card {
+  border-radius: var(--protect-surface-radius) !important;
+  box-shadow: none;
+}
+
+/* Empty states should read as quiet workspace placeholders instead of large
+ * admin-console cards. Home has an in-surface empty state and intentionally
+ * keeps its own borderless treatment.
+ */
+.nvr-shell .nvr-workspace-content .events-page .activity-empty,
+.nvr-shell .nvr-workspace-content .camera-page .empty-state {
+  min-height: 280px;
+  border: 1px dashed var(--nvr-border);
+  border-radius: var(--protect-surface-radius);
+  background: color-mix(in srgb, var(--nvr-surface) 72%, transparent);
+  box-shadow: none;
+}
+
+/* Cameras already owns a dense single-line command band. Align only its outer
+ * rail with the other workspaces and keep the specialized 34px controls.
+ */
+.nvr-shell .nvr-workspace-content .camera-page .page-heading,
+.nvr-shell .nvr-workspace-content .camera-page .summary-grid,
+.nvr-shell .nvr-workspace-content .camera-page .toolbar {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+/* Playback's route tabs remain the workspace-level sub-navigation. Align their
+ * horizontal inset to the same content rail without changing the three-column
+ * player/event layout below.
+ */
+.nvr-shell .nvr-workspace-content .recordings-tabs {
+  padding-left: var(--protect-page-gutter);
+  padding-right: var(--protect-page-gutter);
+}
+
+@media (max-width: 720px) {
+  .nvr-shell {
+    --protect-page-gutter: var(--protect-page-gutter-mobile);
+  }
+
+  .nvr-shell .nvr-workspace-content .protect-home .home-header,
+  .nvr-shell .nvr-workspace-content .protect-live-page .live-header {
+    min-height: 0;
+    align-items: stretch;
+  }
+
+  .nvr-shell .nvr-workspace-content .protect-home .health-pill {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .nvr-shell .nvr-workspace-content .protect-live-page .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .event-mode-bar {
+    align-items: flex-start;
+  }
+}
