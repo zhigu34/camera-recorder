@@ -12,6 +12,9 @@ if TYPE_CHECKING:
     from app.models.recording import Recording
 
 
+_CONNECTIVITY_STALE_SECONDS = 60.0
+
+
 class Camera(Base):
     __tablename__ = "cameras"
 
@@ -49,9 +52,9 @@ class Camera(Base):
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_frame_samples: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Kept for API/database compatibility. From now on this field is owned only
-    # by connectivity probing and represents unknown/online/offline. Recorder and
-    # schedule state are exposed independently through the properties below.
+    # Kept for API/database compatibility. Connectivity observations own this field
+    # and represent unknown/online/offline. Recorder and schedule state are exposed
+    # independently through the properties below.
     status: Mapped[str] = mapped_column(String(32), default="unknown")
     last_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -77,7 +80,13 @@ class Camera(Base):
 
     @property
     def connectivity_status(self) -> str:
-        """Connectivity result owned by Probe, independent of recording/schedule state."""
+        """Return fresh connectivity independently of recording/schedule state."""
+
+        probed_at = self._utc(self.last_probe_at)
+        if probed_at is not None:
+            age = (datetime.now(timezone.utc) - probed_at).total_seconds()
+            if age > _CONNECTIVITY_STALE_SECONDS:
+                return "unknown"
 
         if self.status == "online":
             return "online"
@@ -86,7 +95,6 @@ class Camera(Base):
 
         # Recover a correct value for rows whose legacy status was overwritten by
         # recorder/scheduler values such as recording, stopped or scheduled.
-        probed_at = self._utc(self.last_probe_at)
         if probed_at is None:
             return "unknown"
         online_at = self._utc(self.last_online_at)

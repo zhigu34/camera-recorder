@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.models.camera import Camera
+from app.services.camera_connectivity_monitor import camera_connectivity_monitor
 from app.services.health_monitor import health_snapshot, health_trends
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule import schedule_label
@@ -43,7 +44,7 @@ def _timestamp_guidance(mode: str, warning_count: int) -> dict | None:
 
 
 async def _schedule_aware_snapshot() -> dict:
-    """Enrich health data from the same three camera state owners used by /api/cameras."""
+    """Enrich health data from connectivity, recorder, and schedule state owners."""
 
     snapshot = await health_snapshot()
     runtime_by_camera = {
@@ -67,7 +68,13 @@ async def _schedule_aware_snapshot() -> dict:
 
         runtime = runtime_by_camera.get(camera.id, {})
         recorder_state = str(runtime.get("state") or camera.recorder_state or "STOPPED")
-        connectivity_status = camera.connectivity_status
+        recorder_pid = runtime.get("pid")
+        if recorder_state == "RECORDING" and recorder_pid is not None:
+            connectivity_status = "online"
+            connectivity_source = "recorder"
+        else:
+            connectivity_status = camera.connectivity_status
+            connectivity_source = camera_connectivity_monitor.source_for(camera.id) or "persisted"
         schedule_state = recording_schedule_manager.state_for(camera)
         expected = schedule_state in _EXPECTED_RECORDING_STATES
         timestamp_warning_count = int(runtime.get("timestamp_warning_count") or 0)
@@ -91,6 +98,8 @@ async def _schedule_aware_snapshot() -> dict:
         )
 
         row["connectivity_status"] = connectivity_status
+        row["connectivity_source"] = connectivity_source
+        row["connectivity_failures"] = camera_connectivity_monitor.failures_for(camera.id)
         row["recorder_state"] = recorder_state
         row["schedule_state"] = schedule_state
         # Compatibility aliases for existing health clients.

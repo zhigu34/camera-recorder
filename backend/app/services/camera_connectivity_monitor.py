@@ -1,0 +1,261 @@
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+from sqlalchemy import select
+
+from app.core.database import SessionLocal
+from app.models.camera import Camera
+from app.services.recorder_manager import recorder_manager
+
+_CHECK_INTERVAL_SECONDS = 15.0
+_PROBE_TIMEOUT_SECONDS = 2.0
+_FAILURE_THRESHOLD = 3
+_MAX_CONCURRENCY = 8
+
+
+@dataclass(frozen=True)
+class ConnectivityObservation:
+    status: str
+    consecutive_failures: int
+    source: str
+
+
+def resolve_connectivity_observation(
+    *,
+    previous_status: str,
+    recorder_state: str,
+    recorder_pid: int | None,
+    probe_ok: bool | None,
+    previous_failures: int,
+) -> ConnectivityObservation:
+    """Resolve one connectivity observation with recorder priority and failure hysteresis."""
+
+    if recorder_state == "RECORDING" and recorder_pid is not None:
+        return ConnectivityObservation(
+            status="online",
+            consecutive_failures=0,
+            source="recorder",
+        )
+
+    if probe_ok is True:
+        return ConnectivityObservation(
+            status="online",
+            consecutive_failures=0,
+            source="rtsp",
+        )
+
+    if probe_ok is False:
+        failures = max(0, previous_failures) + 1
+        if failures >= _FAILURE_THRESHOLD:
+            status = "offline"
+        elif previous_status in {"online", "offline"}:
+            status = previous_status
+        else:
+            status = "unknown"
+        return ConnectivityObservation(
+            status=status,
+            consecutive_failures=failures,
+            source="rtsp",
+        )
+
+    return ConnectivityObservation(
+        status=previous_status if previous_status in {"online", "offline"} else "unknown",
+        consecutive_failures=max(0, previous_failures),
+        source="persisted",
+    )
+
+
+async def probe_rtsp_service(
+    ip: str,
+    port: int,
+    rtsp_path: str,
+    *,
+    timeout_seconds: float = _PROBE_TIMEOUT_SECONDS,
+) -> bool:
+    """Check the RTSP control plane without authenticating, decoding, or pulling media.
+
+    Any syntactically valid RTSP response counts as reachable, including 401 and 404.
+    That distinguishes device/service availability from credential or stream configuration.
+    """
+
+    host = ip.strip()
+    authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    path = rtsp_path if rtsp_path.startswith("/") else f"/{rtsp_path}"
+    writer: asyncio.StreamWriter | None = None
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port),
+            timeout=timeout_seconds,
+        )
+        request = (
+            f"OPTIONS rtsp://{authority}:{port}{path} RTSP/1.0\r\n"
+            "CSeq: 1\r\n"
+            "User-Agent: CameraRecorder/1.0\r\n"
+            "\r\n"
+        )
+        writer.write(request.encode("ascii", errors="ignore"))
+        await asyncio.wait_for(writer.drain(), timeout=timeout_seconds)
+        response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout_seconds)
+        first_line = response.split(b"\r\n", 1)[0].strip().upper()
+        return first_line.startswith(b"RTSP/")
+    except (OSError, TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+        return False
+    finally:
+        if writer is not None:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except OSError:
+                pass
+
+
+@dataclass(frozen=True)
+class _CameraTarget:
+    camera_id: int
+    ip: str
+    rtsp_port: int
+    rtsp_path: str
+    previous_status: str
+
+
+class CameraConnectivityMonitor:
+    def __init__(self) -> None:
+        self._task: asyncio.Task | None = None
+        self._stop = asyncio.Event()
+        self._failures: dict[int, int] = {}
+        self._sources: dict[int, str] = {}
+        self._last_cycle_at: datetime | None = None
+        self._last_cycle_count = 0
+
+    async def start(self) -> None:
+        if self._task and not self._task.done():
+            return
+        self._stop.clear()
+        self._task = asyncio.create_task(self._run(), name="camera-connectivity-monitor")
+
+    async def stop(self) -> None:
+        self._stop.set()
+        task = self._task
+        if task and not task.done():
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except TimeoutError:
+                task.cancel()
+        self._task = None
+
+    async def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=_CHECK_INTERVAL_SECONDS)
+                break
+            except TimeoutError:
+                pass
+
+            try:
+                await self.check_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Connectivity observation must never affect recording or API availability.
+                continue
+
+    async def check_once(self) -> int:
+        runtime_rows = recorder_manager.status()
+        runtime_by_camera = {
+            int(item["camera_id"]): item
+            for item in runtime_rows
+            if isinstance(item, dict) and item.get("camera_id") is not None
+        }
+
+        async with SessionLocal() as session:
+            cameras = list(
+                await session.scalars(
+                    select(Camera).where(Camera.enabled.is_(True)).order_by(Camera.id)
+                )
+            )
+            targets = [
+                _CameraTarget(
+                    camera_id=camera.id,
+                    ip=camera.ip,
+                    rtsp_port=camera.rtsp_port,
+                    rtsp_path=camera.rtsp_path,
+                    previous_status=camera.connectivity_status,
+                )
+                for camera in cameras
+            ]
+
+        semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+        async def observe(target: _CameraTarget) -> tuple[int, ConnectivityObservation]:
+            runtime = runtime_by_camera.get(target.camera_id, {})
+            recorder_state = str(runtime.get("state") or "STOPPED")
+            recorder_pid = runtime.get("pid")
+            probe_ok: bool | None = None
+            if not (recorder_state == "RECORDING" and recorder_pid is not None):
+                async with semaphore:
+                    probe_ok = await probe_rtsp_service(
+                        target.ip,
+                        target.rtsp_port,
+                        target.rtsp_path,
+                    )
+            result = resolve_connectivity_observation(
+                previous_status=target.previous_status,
+                recorder_state=recorder_state,
+                recorder_pid=int(recorder_pid) if recorder_pid is not None else None,
+                probe_ok=probe_ok,
+                previous_failures=self._failures.get(target.camera_id, 0),
+            )
+            return target.camera_id, result
+
+        results = await asyncio.gather(*(observe(target) for target in targets))
+        observed_at = datetime.now(timezone.utc)
+
+        async with SessionLocal() as session:
+            for camera_id, result in results:
+                camera = await session.get(Camera, camera_id)
+                if camera is None or not camera.enabled:
+                    continue
+                camera.status = result.status
+                camera.last_probe_at = observed_at
+                if result.status == "online":
+                    camera.last_online_at = observed_at
+                self._failures[camera_id] = result.consecutive_failures
+                self._sources[camera_id] = result.source
+            await session.commit()
+
+        active_ids = {target.camera_id for target in targets}
+        self._failures = {
+            camera_id: failures
+            for camera_id, failures in self._failures.items()
+            if camera_id in active_ids
+        }
+        self._sources = {
+            camera_id: source
+            for camera_id, source in self._sources.items()
+            if camera_id in active_ids
+        }
+        self._last_cycle_at = observed_at
+        self._last_cycle_count = len(results)
+        return len(results)
+
+    def source_for(self, camera_id: int) -> str | None:
+        return self._sources.get(camera_id)
+
+    def failures_for(self, camera_id: int) -> int:
+        return self._failures.get(camera_id, 0)
+
+    def snapshot(self) -> dict:
+        return {
+            "running": bool(self._task and not self._task.done()),
+            "interval_seconds": int(_CHECK_INTERVAL_SECONDS),
+            "probe_timeout_seconds": _PROBE_TIMEOUT_SECONDS,
+            "failure_threshold": _FAILURE_THRESHOLD,
+            "last_cycle_at": self._last_cycle_at.isoformat() if self._last_cycle_at else None,
+            "last_cycle_count": self._last_cycle_count,
+        }
+
+
+camera_connectivity_monitor = CameraConnectivityMonitor()
