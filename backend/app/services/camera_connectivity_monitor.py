@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.models.camera import Camera
+from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
 
 _CHECK_INTERVAL_SECONDS = 15.0
@@ -21,6 +23,29 @@ class ConnectivityObservation:
     status: str
     consecutive_failures: int
     source: str
+
+
+def recorder_runtime_is_healthy(runtime: dict[str, Any] | None) -> bool:
+    """Return whether Recorder runtime is a trustworthy positive connectivity signal.
+
+    A live FFmpeg PID remains the strongest signal, but existing Recorder outage/failure
+    evidence wins over process existence. This avoids masking an unhealthy source merely
+    because an FFmpeg process is still alive or reconnecting internally.
+    """
+
+    if not isinstance(runtime, dict):
+        return False
+    if str(runtime.get("state") or "STOPPED") != "RECORDING":
+        return False
+    if runtime.get("pid") is None:
+        return False
+    if runtime.get("offline_since"):
+        return False
+    if runtime.get("offline_alert_active"):
+        return False
+    if runtime.get("continuous_failure_active"):
+        return False
+    return int(runtime.get("current_offline_seconds") or 0) <= 0
 
 
 def resolve_connectivity_observation(
@@ -68,41 +93,43 @@ def resolve_connectivity_observation(
     )
 
 
-async def probe_rtsp_service(
+async def _probe_rtsp_method(
     ip: str,
     port: int,
     rtsp_path: str,
     *,
-    timeout_seconds: float = _PROBE_TIMEOUT_SECONDS,
-) -> bool:
-    """Check the RTSP control plane without authenticating, decoding, or pulling media.
-
-    Any syntactically valid RTSP response counts as reachable, including 401 and 404.
-    That distinguishes device/service availability from credential or stream configuration.
-    """
+    method: str,
+    cseq: int,
+    timeout_seconds: float,
+) -> tuple[bool, bool]:
+    """Return (tcp_connected, valid_rtsp_response) for one control request."""
 
     host = ip.strip()
     authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
     path = rtsp_path if rtsp_path.startswith("/") else f"/{rtsp_path}"
     writer: asyncio.StreamWriter | None = None
+    connected = False
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port),
             timeout=timeout_seconds,
         )
-        request = (
-            f"OPTIONS rtsp://{authority}:{port}{path} RTSP/1.0\r\n"
-            "CSeq: 1\r\n"
-            "User-Agent: CameraRecorder/1.0\r\n"
-            "\r\n"
-        )
+        connected = True
+        headers = [
+            f"{method} rtsp://{authority}:{port}{path} RTSP/1.0",
+            f"CSeq: {cseq}",
+            "User-Agent: CameraRecorder/1.0",
+        ]
+        if method == "DESCRIBE":
+            headers.append("Accept: application/sdp")
+        request = "\r\n".join(headers) + "\r\n\r\n"
         writer.write(request.encode("ascii", errors="ignore"))
         await asyncio.wait_for(writer.drain(), timeout=timeout_seconds)
         response = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), timeout=timeout_seconds)
         first_line = response.split(b"\r\n", 1)[0].strip().upper()
-        return first_line.startswith(b"RTSP/")
+        return True, first_line.startswith(b"RTSP/")
     except (OSError, TimeoutError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
-        return False
+        return connected, False
     finally:
         if writer is not None:
             writer.close()
@@ -112,6 +139,45 @@ async def probe_rtsp_service(
                 pass
 
 
+async def probe_rtsp_service(
+    ip: str,
+    port: int,
+    rtsp_path: str,
+    *,
+    timeout_seconds: float = _PROBE_TIMEOUT_SECONDS,
+) -> bool:
+    """Check RTSP control-plane reachability without credentials or media decode.
+
+    OPTIONS is the normal lightweight request. Some otherwise reachable RTSP servers
+    accept the TCP connection and immediately close OPTIONS; only in that case do we
+    retry on a fresh connection with DESCRIBE. A successful TCP connect by itself is
+    never considered online: at least one syntactically valid RTSP response is required.
+    """
+
+    options_connected, options_valid = await _probe_rtsp_method(
+        ip,
+        port,
+        rtsp_path,
+        method="OPTIONS",
+        cseq=1,
+        timeout_seconds=timeout_seconds,
+    )
+    if options_valid:
+        return True
+    if not options_connected:
+        return False
+
+    _describe_connected, describe_valid = await _probe_rtsp_method(
+        ip,
+        port,
+        rtsp_path,
+        method="DESCRIBE",
+        cseq=2,
+        timeout_seconds=timeout_seconds,
+    )
+    return describe_valid
+
+
 @dataclass(frozen=True)
 class _CameraTarget:
     camera_id: int
@@ -119,6 +185,7 @@ class _CameraTarget:
     rtsp_port: int
     rtsp_path: str
     previous_status: str
+    previous_failures: int
 
 
 class CameraConnectivityMonitor:
@@ -129,6 +196,9 @@ class CameraConnectivityMonitor:
         self._sources: dict[int, str] = {}
         self._last_cycle_at: datetime | None = None
         self._last_cycle_count = 0
+        self._error_count = 0
+        self._last_error_at: datetime | None = None
+        self._last_error: str | None = None
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -149,18 +219,40 @@ class CameraConnectivityMonitor:
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
+                await self.check_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                try:
+                    await self._record_monitor_error(exc)
+                except Exception:
+                    # Observability must never make the observer affect recording/API uptime.
+                    pass
+
+            if self._stop.is_set():
+                break
+            try:
                 await asyncio.wait_for(self._stop.wait(), timeout=_CHECK_INTERVAL_SECONDS)
                 break
             except TimeoutError:
                 pass
 
-            try:
-                await self.check_once()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                # Connectivity observation must never affect recording or API availability.
-                continue
+    async def _record_monitor_error(self, exc: Exception) -> None:
+        observed_at = datetime.now(timezone.utc)
+        reason = str(exc)[-1000:] or exc.__class__.__name__
+        self._error_count += 1
+        self._last_error_at = observed_at
+        self._last_error = reason
+        async with SessionLocal() as session:
+            add_event(
+                session,
+                level="error",
+                category="system",
+                code="connectivity_monitor.error",
+                message="摄像头连接监控周期失败",
+                metadata={"reason": reason, "error_count": self._error_count},
+            )
+            await session.commit()
 
     async def check_once(self) -> int:
         runtime_rows = recorder_manager.status()
@@ -183,6 +275,7 @@ class CameraConnectivityMonitor:
                     rtsp_port=camera.rtsp_port,
                     rtsp_path=camera.rtsp_path,
                     previous_status=camera.connectivity_status,
+                    previous_failures=camera.connectivity_failures,
                 )
                 for camera in cameras
             ]
@@ -191,22 +284,24 @@ class CameraConnectivityMonitor:
 
         async def observe(target: _CameraTarget) -> tuple[int, ConnectivityObservation]:
             runtime = runtime_by_camera.get(target.camera_id, {})
-            recorder_state = str(runtime.get("state") or "STOPPED")
-            recorder_pid = runtime.get("pid")
+            recorder_healthy = recorder_runtime_is_healthy(runtime)
+            recorder_state = str(runtime.get("state") or "STOPPED") if recorder_healthy else "STOPPED"
+            recorder_pid = runtime.get("pid") if recorder_healthy else None
             probe_ok: bool | None = None
-            if not (recorder_state == "RECORDING" and recorder_pid is not None):
+            if not recorder_healthy:
                 async with semaphore:
                     probe_ok = await probe_rtsp_service(
                         target.ip,
                         target.rtsp_port,
                         target.rtsp_path,
                     )
+            previous_failures = self._failures.get(target.camera_id, target.previous_failures)
             result = resolve_connectivity_observation(
                 previous_status=target.previous_status,
                 recorder_state=recorder_state,
                 recorder_pid=int(recorder_pid) if recorder_pid is not None else None,
                 probe_ok=probe_ok,
-                previous_failures=self._failures.get(target.camera_id, 0),
+                previous_failures=previous_failures,
             )
             return target.camera_id, result
 
@@ -219,6 +314,7 @@ class CameraConnectivityMonitor:
                 if camera is None or not camera.enabled:
                     continue
                 camera.status = result.status
+                camera.connectivity_failures = result.consecutive_failures
                 camera.last_probe_at = observed_at
                 if result.status == "online":
                     camera.last_online_at = observed_at
@@ -241,6 +337,15 @@ class CameraConnectivityMonitor:
         self._last_cycle_count = len(results)
         return len(results)
 
+    def reconcile_manual_probe(self, camera_id: int, *, success: bool) -> int:
+        if success:
+            failures = 0
+        else:
+            failures = max(_FAILURE_THRESHOLD, self._failures.get(camera_id, 0) + 1)
+        self._failures[camera_id] = failures
+        self._sources[camera_id] = "manual_probe"
+        return failures
+
     def source_for(self, camera_id: int) -> str | None:
         return self._sources.get(camera_id)
 
@@ -255,6 +360,9 @@ class CameraConnectivityMonitor:
             "failure_threshold": _FAILURE_THRESHOLD,
             "last_cycle_at": self._last_cycle_at.isoformat() if self._last_cycle_at else None,
             "last_cycle_count": self._last_cycle_count,
+            "error_count": self._error_count,
+            "last_error_at": self._last_error_at.isoformat() if self._last_error_at else None,
+            "last_error": self._last_error,
         }
 
 

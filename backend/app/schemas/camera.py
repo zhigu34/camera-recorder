@@ -187,6 +187,7 @@ class CameraRead(CameraBase):
     # dimension from another.
     status: str
     connectivity_status: str = "unknown"
+    connectivity_failures: int = 0
     recorder_state: str = "STOPPED"
     schedule_state: str = "disabled"
     last_probe_at: datetime | None = None
