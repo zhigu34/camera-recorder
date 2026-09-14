@@ -56,6 +56,7 @@ class MotionWorkerConfig:
     min_duration_ms: int
     merge_gap_ms: int
     zones: list[dict[str, Any]]
+    event_min_interval_ms: int = 60_000
 
 
 def select_motion_path(main_path: str, sub_path: str | None) -> tuple[str, MotionStream]:
@@ -244,6 +245,7 @@ class MotionWorker:
             state = MotionEventStateMachine(
                 min_duration_ms=self.config.min_duration_ms,
                 merge_gap_ms=self.config.merge_gap_ms,
+                event_min_interval_ms=self.config.event_min_interval_ms,
             )
             frame_size = output_width * output_height * 3
             best_frame: np.ndarray | None = None

@@ -37,6 +37,9 @@ def test_motion_settings_and_zone_crud_are_camera_scoped() -> None:
         assert body["sensitivity"] == "medium"
         assert body["analysis_fps"] == 5
         assert body["analysis_width"] == 640
+        assert body["min_duration_ms"] == 800
+        assert body["merge_gap_ms"] == 10_000
+        assert body["event_min_interval_ms"] == 60_000
         assert body["zones"] == []
         assert body["runtime"]["state"] == "disabled"
 
@@ -48,12 +51,15 @@ def test_motion_settings_and_zone_crud_are_camera_scoped() -> None:
                 "analysis_fps": 4,
                 "analysis_width": 640,
                 "min_duration_ms": 900,
-                "merge_gap_ms": 2500,
+                "merge_gap_ms": 15_000,
+                "event_min_interval_ms": 120_000,
             },
         )
         assert response.status_code == 200, response.text
         assert response.json()["enabled"] is True
         assert response.json()["sensitivity"] == "high"
+        assert response.json()["merge_gap_ms"] == 15_000
+        assert response.json()["event_min_interval_ms"] == 120_000
 
         polygon = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
         response = client.post(

@@ -59,6 +59,7 @@ async def _read_settings(camera_id: int, db: AsyncSession) -> MotionDetectionRea
         analysis_width=settings.analysis_width,
         min_duration_ms=settings.min_duration_ms,
         merge_gap_ms=settings.merge_gap_ms,
+        event_min_interval_ms=settings.event_min_interval_ms,
         runtime=_runtime(camera_id, settings),
         zones=zones,
     )

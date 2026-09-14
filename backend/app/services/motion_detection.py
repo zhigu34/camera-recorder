@@ -83,11 +83,18 @@ class ClosedMotionEvent:
 
 
 class MotionEventStateMachine:
-    """Convert frame-level motion into durable events using duration and merge-gap rules."""
+    """Convert frame-level motion into durable playback-anchor events."""
 
-    def __init__(self, *, min_duration_ms: int, merge_gap_ms: int) -> None:
+    def __init__(
+        self,
+        *,
+        min_duration_ms: int,
+        merge_gap_ms: int,
+        event_min_interval_ms: int = 0,
+    ) -> None:
         self.min_duration = timedelta(milliseconds=min_duration_ms)
         self.merge_gap = timedelta(milliseconds=merge_gap_ms)
+        self.event_min_interval = timedelta(milliseconds=event_min_interval_ms)
         self._candidate_started_at: datetime | None = None
         self._candidate_zone_id: int | None = None
         self._started_at: datetime | None = None
@@ -106,6 +113,14 @@ class MotionEventStateMachine:
         self._zone_id = None
         self._peak_score = 0.0
         self._pending_end_at = None
+
+    def _close_ready(self, timestamp: datetime) -> bool:
+        if self._started_at is None or self._pending_end_at is None:
+            return False
+        return (
+            timestamp - self._pending_end_at > self.merge_gap
+            and timestamp - self._started_at >= self.event_min_interval
+        )
 
     def _close_active(self) -> ClosedMotionEvent | None:
         if self._started_at is None:
@@ -132,11 +147,13 @@ class MotionEventStateMachine:
 
         if motion:
             if self.active and self._pending_end_at is not None:
-                if timestamp - self._pending_end_at > self.merge_gap:
+                if self._close_ready(timestamp):
                     event = self._close_active()
                     if event is not None:
                         closed.append(event)
                 else:
+                    # Keep one playback anchor while the minimum anchor interval is
+                    # still open, even if the shorter activity merge gap elapsed.
                     self._pending_end_at = None
 
             if self._candidate_started_at is None and not self.active:
@@ -158,7 +175,7 @@ class MotionEventStateMachine:
             if self._pending_end_at is None:
                 self._pending_end_at = timestamp
                 return closed
-            if timestamp - self._pending_end_at > self.merge_gap:
+            if self._close_ready(timestamp):
                 event = self._close_active()
                 if event is not None:
                     closed.append(event)

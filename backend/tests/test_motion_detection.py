@@ -66,3 +66,31 @@ def test_state_machine_confirms_and_merges_motion_inside_gap() -> None:
     assert event.zone_id == 7
     assert event.peak_score == 0.7
     assert state.active is False
+
+
+def test_state_machine_coalesces_repeated_activity_inside_event_min_interval() -> None:
+    state = MotionEventStateMachine(
+        min_duration_ms=500,
+        merge_gap_ms=10_000,
+        event_min_interval_ms=60_000,
+    )
+    start = datetime(2026, 9, 14, 7, 0, tzinfo=timezone.utc)
+
+    assert state.update(start, motion=True, score=0.2, zone_id=3) == []
+    assert state.update(start + timedelta(seconds=1), motion=True, score=0.4, zone_id=3) == []
+    assert state.update(start + timedelta(seconds=5), motion=False, score=0.0, zone_id=None) == []
+
+    # The normal merge gap has expired, but this movement is still inside the
+    # 60-second anchor interval, so it must extend the same event.
+    assert state.update(start + timedelta(seconds=20), motion=True, score=0.8, zone_id=3) == []
+    assert state.active is True
+    assert state.update(start + timedelta(seconds=25), motion=False, score=0.0, zone_id=None) == []
+
+    closed = state.update(start + timedelta(seconds=61), motion=False, score=0.0, zone_id=None)
+    assert len(closed) == 1
+    event = closed[0]
+    assert event.started_at == start
+    assert event.ended_at == start + timedelta(seconds=25)
+    assert event.zone_id == 3
+    assert event.peak_score == 0.8
+    assert state.active is False

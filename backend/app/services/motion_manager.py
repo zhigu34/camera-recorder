@@ -71,6 +71,7 @@ async def _default_config_loader(camera_id: int) -> MotionWorkerConfig | None:
             min_duration_ms=motion.min_duration_ms,
             merge_gap_ms=motion.merge_gap_ms,
             zones=zones,
+            event_min_interval_ms=motion.event_min_interval_ms,
         )
 
 

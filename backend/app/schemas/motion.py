@@ -13,7 +13,8 @@ class MotionDetectionUpdate(BaseModel):
     analysis_fps: int = Field(default=5, ge=1, le=10)
     analysis_width: int = Field(default=640, ge=320, le=1280)
     min_duration_ms: int = Field(default=800, ge=100, le=10_000)
-    merge_gap_ms: int = Field(default=3000, ge=0, le=30_000)
+    merge_gap_ms: int = Field(default=10_000, ge=0, le=30_000)
+    event_min_interval_ms: int = Field(default=60_000, ge=0, le=600_000)
 
 
 class MotionZoneBase(BaseModel):

@@ -20,7 +20,8 @@ class MotionDetectionSettings(Base):
     analysis_fps: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     analysis_width: Mapped[int] = mapped_column(Integer, default=640, nullable=False)
     min_duration_ms: Mapped[int] = mapped_column(Integer, default=800, nullable=False)
-    merge_gap_ms: Mapped[int] = mapped_column(Integer, default=3000, nullable=False)
+    merge_gap_ms: Mapped[int] = mapped_column(Integer, default=10_000, nullable=False)
+    event_min_interval_ms: Mapped[int] = mapped_column(Integer, default=60_000, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
