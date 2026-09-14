@@ -43,7 +43,7 @@
 - `backend/tests/test_motion_manager.py` — diagnostic propagation and reconnect/restart behavior.
 - `backend/tests/test_motion_api.py` — runtime response schema/regression coverage.
 - `frontend/src/MotionDetectionPanel.vue` — add `warming_up`/`stabilizing` labels and restrained diagnostics summary; keep settings surface unchanged.
-- Existing frontend test file that covers source/behavior contracts for `MotionDetectionPanel.vue` (if none exists, create `frontend/src/MotionDetectionPanel.test.ts`) — runtime-label and diagnostics rendering tests.
+- Existing frontend test file that covers `MotionDetectionPanel.vue`; if none exists, create `frontend/src/MotionDetectionPanel.test.ts`.
 
 ---
 
@@ -61,7 +61,7 @@
 
 - [ ] **Step 1: Write failing profile and confidence tests**
 
-Add tests that assert the exact profile ordering and temporal behavior:
+Add tests that assert profile ordering and practical temporal confirmation:
 
 ```python
 def test_sensitivity_profiles_order_false_positive_tolerance() -> None:
@@ -78,16 +78,16 @@ def test_sensitivity_profiles_order_false_positive_tolerance() -> None:
     assert low.global_change_ratio < medium.global_change_ratio < high.global_change_ratio
 
 
-def test_confidence_tracker_requires_accumulation_and_uses_hysteresis() -> None:
+def test_confidence_tracker_accumulates_valid_motion_and_uses_hysteresis() -> None:
     tracker = MotionConfidenceTracker(sensitivity_profile("medium"))
 
-    first = tracker.update(1.0)
+    first = tracker.update(0.25)
     assert first.motion is False
     assert 0.0 < first.confidence < 0.65
 
     result = first
     for _ in range(8):
-        result = tracker.update(1.0)
+        result = tracker.update(0.25)
         if result.motion:
             break
     assert result.motion is True
@@ -117,8 +117,6 @@ def test_confidence_tracker_suppression_resets_state() -> None:
 
 - [ ] **Step 2: Run targeted tests and verify RED**
 
-Run:
-
 ```bash
 cd backend && uv run pytest tests/test_motion_detection.py -q
 ```
@@ -131,53 +129,28 @@ Use these initial values:
 
 ```python
 _PROFILES = {
-    "low": SensitivityProfile(
-        var_threshold=32,
-        min_area_ratio=0.012,
-        min_zone_overlap_ratio=0.35,
-        global_change_ratio=0.50,
-        global_block_ratio=0.75,
-        confidence_gain=0.12,
-        confidence_decay=0.18,
-        enter_confidence=0.75,
-        exit_confidence=0.20,
-    ),
-    "medium": SensitivityProfile(
-        var_threshold=24,
-        min_area_ratio=0.006,
-        min_zone_overlap_ratio=0.25,
-        global_change_ratio=0.60,
-        global_block_ratio=0.75,
-        confidence_gain=0.18,
-        confidence_decay=0.14,
-        enter_confidence=0.65,
-        exit_confidence=0.20,
-    ),
-    "high": SensitivityProfile(
-        var_threshold=16,
-        min_area_ratio=0.0025,
-        min_zone_overlap_ratio=0.15,
-        global_change_ratio=0.70,
-        global_block_ratio=0.75,
-        confidence_gain=0.25,
-        confidence_decay=0.10,
-        enter_confidence=0.55,
-        exit_confidence=0.15,
-    ),
+    "low": SensitivityProfile(32, 0.012, 0.35, 0.50, 0.75, 0.12, 0.18, 0.75, 0.20),
+    "medium": SensitivityProfile(24, 0.006, 0.25, 0.60, 0.75, 0.18, 0.14, 0.65, 0.20),
+    "high": SensitivityProfile(16, 0.0025, 0.15, 0.70, 0.75, 0.25, 0.10, 0.55, 0.15),
 }
 ```
 
-Implement `MotionConfidenceTracker.update()` so positive `raw_score` adds `raw_score * confidence_gain`, zero score subtracts `confidence_decay`, confidence is clamped to `[0,1]`, and state changes use enter/exit hysteresis. `suppressed=True` must reset confidence and stable motion to zero/false.
+Prefer keyword construction in production code for readability. For accepted motion evidence, update confidence exactly as approved in the spec:
+
+```python
+evidence_weight = 0.6 + 0.4 * raw_score
+confidence += profile.confidence_gain * evidence_weight
+```
+
+For no accepted motion, subtract `profile.confidence_decay`. Clamp to `[0,1]`; enter stable motion at `enter_confidence`, exit only at/below `exit_confidence`. `suppressed=True` hard-resets confidence and stable motion.
 
 - [ ] **Step 4: Run targeted tests and verify GREEN**
-
-Run:
 
 ```bash
 cd backend && uv run pytest tests/test_motion_detection.py -q
 ```
 
-Expected: PASS for new profile/confidence tests and all pre-existing state-machine tests.
+Expected: PASS for new profile/confidence tests and all pre-existing event-state tests.
 
 - [ ] **Step 5: Commit**
 
@@ -193,10 +166,9 @@ git commit -m "feat: add motion confidence tracking"
 **Files:**
 - Create: `backend/app/services/motion_analysis.py`
 - Create: `backend/tests/test_motion_analysis.py`
-- Modify: `backend/app/services/motion_detection.py` only if a shared typed profile import needs to move; avoid circular imports.
 
 **Interfaces:**
-- Consumes: `SensitivityProfile` from Task 1.
+- Consumes: `SensitivityProfile` and `sensitivity_profile()` from Task 1.
 - Produces:
 
 ```python
@@ -214,25 +186,33 @@ class MotionAnalysisResult:
 
 - Produces: `MotionFrameAnalyzer(sensitivity: str, *, analysis_fps: int)`.
 - Produces: `analyze(frame: np.ndarray, zones: list[dict[str, Any]]) -> MotionAnalysisResult`.
-- Analyzer internally caches rasterized enabled-zone masks for the first observed frame dimensions. Worker recreation remains the cache invalidation mechanism.
+- Analyzer caches enabled-zone masks for the first observed frame dimensions; worker recreation invalidates the cache.
 
 - [ ] **Step 1: Write failing warm-up and normal-motion tests**
 
-Use deterministic 360x640 black frames and white rectangles. Add helpers that feed exactly `round(fps * 2.0)` warm-up frames. Assert all warm-up results have `warming_up=True`, `raw_score=0`, no primary zone, and that a post-warm-up local rectangle yields positive raw score.
+Use deterministic 360x640 black frames and white rectangles. Feed exactly `max(1, round(fps * 2.0))` warm-up frames. Assert warm-up frames report `warming_up=True`, `raw_score=0`, no primary zone, and cannot create valid motion evidence. Then assert local motion after warm-up yields positive `raw_score`.
 
 - [ ] **Step 2: Write failing global-change/stabilization tests**
 
-Cover all of these cases:
+Cover:
 
 ```text
 full-frame black -> full-frame white => global_change=True, raw_score=0
 stabilization frames => stabilizing=True, raw_score=0
 second whole-frame transition during stabilization => stabilization window restarts
 post-stabilization local rectangle => raw_score>0
-large local rectangle occupying only part of the 4x4 grid => global_change=False
+large local rectangle affecting only part of the grid => global_change=False
+reference rolls forward during stabilization and converges to the new scene
 ```
 
-Use a per-pixel absolute-delta threshold of 20 and a 4x4 changed-block distribution check. A block is considered changed when at least 25% of its pixels exceed the delta threshold; keep this constant internal and test it directly.
+Use the approved constants exactly:
+
+```text
+pixel_delta_threshold = 20
+global grid = 4x4
+block_changed when >=30% of block pixels exceed pixel delta
+global change only when changed_pixel_ratio >= profile.global_change_ratio AND changed_block_ratio >= profile.global_block_ratio
+```
 
 - [ ] **Step 3: Write failing zone-overlap/effective-area tests**
 
@@ -240,17 +220,16 @@ Cover:
 
 ```text
 no enabled zones => full-frame mode, primary_zone_id=None
-center outside zone but >= overlap threshold => accepted
+disabled zones ignored
+center outside zone but overlap >= threshold => accepted
 small edge touch below overlap threshold => rejected
 small zone + valid local motion => accepted using zone area, not whole-frame area
 multi-zone hit => primary zone is largest actual intersection area
 ```
 
-The accepted motion area for a zone must be based on foreground pixels actually inside that zone, and minimum area pixels must be `zone_area_pixels * profile.min_area_ratio`.
+The accepted motion area for a zone is foreground pixels actually inside the zone. Minimum area pixels are `zone_area_pixels * profile.min_area_ratio`.
 
 - [ ] **Step 4: Run analyzer tests and verify RED**
-
-Run:
 
 ```bash
 cd backend && uv run pytest tests/test_motion_analysis.py -q
@@ -271,13 +250,22 @@ warmup_frames = max(1, round(analysis_fps * 2.0))
 stabilization_frames = max(1, round(analysis_fps * 1.5))
 pixel_delta_threshold = 20
 global grid = 4x4
-block_changed if >=25% pixels in that block exceed pixel delta
-global change if changed_pixel_ratio >= profile.global_change_ratio AND changed_block_ratio >= profile.global_block_ratio
+block occupancy threshold = 30%
 ```
 
-Reference-frame rule: compare against the last accepted stable grayscale frame; on a detected global change, update/rebase the reference during stabilization so the analyzer cannot remain permanently anchored to the pre-transition scene. Another global change while stabilizing restarts the stabilization frame counter.
+Reference semantics are exact:
 
-For scoring, use accepted foreground union pixels to avoid double counting and normalize with:
+```text
+normal non-global frame -> becomes next reference_gray
+first global-change frame -> set reference_gray=current_gray and enter stabilization
+stabilizing -> compare against previous stabilization frame, then roll reference to current frame
+repeated global transition -> restart full stabilization countdown
+completion -> latest frame is already the new stable reference
+```
+
+Zone matching is based on contour mask intersection, not bounding-box center. Use `overlap_ratio = contour_pixels_inside_zone / contour_pixels`. Choose primary zone by largest intersection area.
+
+For scoring, use a union mask of accepted foreground pixels to avoid double counting and normalize with:
 
 ```python
 area_score = min(1.0, effective_area_ratio / max(profile.min_area_ratio * 5.0, 1e-9))
@@ -286,8 +274,6 @@ raw_score = min(1.0, area_score * overlap_score)
 ```
 
 - [ ] **Step 6: Run analyzer tests and verify GREEN**
-
-Run:
 
 ```bash
 cd backend && uv run pytest tests/test_motion_analysis.py -q
@@ -312,20 +298,20 @@ git commit -m "feat: add motion v2 frame analysis"
 
 **Interfaces:**
 - Produces: `MotionEventStateMachine.flush(timestamp: datetime) -> list[ClosedMotionEvent]`.
-- State machine must track the last valid stable-motion timestamp so flush does not fabricate duration from later warm-up/stabilization/disconnect time.
+- State machine tracks the last valid stable-motion timestamp so flush never fabricates duration from stabilization, missing frames, or reconnect delay.
 
 - [ ] **Step 1: Write failing flush tests**
 
-Add tests for:
+Add concrete tests:
 
 ```python
 def test_state_machine_flush_discards_unconfirmed_candidate(): ...
 def test_state_machine_flush_closes_confirmed_event_at_last_motion_time(): ...
-def test_state_machine_flush_uses_pending_end_when_present(): ...
+def test_state_machine_flush_does_not_extend_to_later_pending_silence(): ...
 def test_state_machine_flush_is_idempotent(): ...
 ```
 
-For a confirmed event that last saw valid motion at `t=5s` and is flushed at `t=30s`, assert `ended_at == t=5s`, not `t=30s`.
+For a confirmed event whose last valid motion is at `t=5s`, first no-motion frame is `t=6s`, and flush happens at `t=30s`, assert the event never ends after the accurate last-motion boundary. If a pending-end boundary is earlier than the recorded last-motion boundary due to an explicit state transition, choose that earlier accurate boundary.
 
 - [ ] **Step 2: Run targeted tests and verify RED**
 
@@ -333,19 +319,20 @@ For a confirmed event that last saw valid motion at `t=5s` and is flushed at `t=
 cd backend && uv run pytest tests/test_motion_detection.py -q
 ```
 
-Expected: FAIL because `flush()` and last-valid-motion tracking do not exist.
+Expected: FAIL because explicit flush/finalization does not exist.
 
 - [ ] **Step 3: Implement minimal flush behavior**
 
-Track `_last_motion_at` only on stable `motion=True` updates. `flush(timestamp)` must:
+Track `_last_motion_at` only on stable `motion=True`. `flush(timestamp)` must:
 
 ```text
-candidate only => reset, emit []
-confirmed active => emit exactly one ClosedMotionEvent using pending_end_at if present, otherwise last_motion_at, otherwise started_at
+unconfirmed candidate => reset, emit []
+confirmed active => emit exactly one event
+end boundary => earliest accurate valid boundary from last_motion_at/pending_end_at, never flush timestamp
 already reset => emit []
 ```
 
-Do not change the configured `min_duration_ms`, `merge_gap_ms`, or `event_min_interval_ms` semantics.
+Keep `min_duration_ms`, `merge_gap_ms`, and `event_min_interval_ms` semantics unchanged.
 
 - [ ] **Step 4: Run targeted tests and verify GREEN**
 
@@ -373,7 +360,7 @@ git commit -m "fix: flush active motion events safely"
 **Interfaces:**
 - Consumes: `MotionFrameAnalyzer` / `MotionAnalysisResult` from Task 2.
 - Consumes: `MotionConfidenceTracker` / `MotionConfidenceResult` and `MotionEventStateMachine.flush()` from Tasks 1 and 3.
-- Change `StatusCallback` to carry diagnostics explicitly:
+- Change `StatusCallback` to:
 
 ```python
 StatusCallback = Callable[
@@ -382,21 +369,21 @@ StatusCallback = Callable[
 ]
 ```
 
-- Diagnostic payload keys are exactly: `confidence`, `raw_score`, `moving_area_ratio`, `global_change_ratio`, `primary_zone_id`, `global_change`.
+- Diagnostic keys are exactly: `confidence`, `raw_score`, `moving_area_ratio`, `global_change_ratio`, `primary_zone_id`, `global_change`.
 
-- [ ] **Step 1: Write failing orchestration tests**
+- [ ] **Step 1: Write failing worker/orchestration tests**
 
-Add worker-level tests using injected/fake analyzer/state dependencies where practical, or extract a small pure helper for translating `MotionAnalysisResult + MotionConfidenceResult` into runtime state/diagnostics. Cover:
+Cover:
 
 ```text
-warming_up analysis => runtime state warming_up, confidence reset, no snapshot candidate
-stabilizing/global_change => runtime state stabilizing, no snapshot candidate
-normal frame => runtime state running with diagnostics
-strongest valid frame prefers higher confidence, then raw_score
+warming_up result => runtime warming_up, confidence reset, frame not snapshot-eligible
+stabilizing/global-change => runtime stabilizing, frame not snapshot-eligible
+normal result => runtime running with all six diagnostics
+snapshot ranking prefers higher stable confidence, then raw_score
 suppressed frames never replace best snapshot
 ```
 
-Preserve existing tests for path selection, scaled dimensions, and FFmpeg command construction.
+Retain existing path-selection, scaling, and FFmpeg command tests.
 
 - [ ] **Step 2: Run worker tests and verify RED**
 
@@ -404,48 +391,59 @@ Preserve existing tests for path selection, scaled dimensions, and FFmpeg comman
 cd backend && uv run pytest tests/test_motion_worker.py -q
 ```
 
-Expected: FAIL on the new runtime/diagnostic behavior.
+Expected: FAIL on new orchestration/status behavior.
 
-- [ ] **Step 3: Replace embedded `MotionFrameAnalyzer` implementation with imports from `motion_analysis.py`**
+- [ ] **Step 3: Replace embedded analyzer with V2 pipeline**
 
-Remove image-analysis code from `motion_worker.py`. Construct:
+Remove image-analysis implementation from `motion_worker.py`. Construct:
 
 ```python
 analyzer = MotionFrameAnalyzer(self.config.sensitivity, analysis_fps=self.config.analysis_fps)
 tracker = MotionConfidenceTracker(sensitivity_profile(self.config.sensitivity))
-state = MotionEventStateMachine(...)
+state = MotionEventStateMachine(
+    min_duration_ms=self.config.min_duration_ms,
+    merge_gap_ms=self.config.merge_gap_ms,
+    event_min_interval_ms=self.config.event_min_interval_ms,
+)
 ```
 
-For each frame:
+Per frame:
 
-```text
-analysis = analyzer.analyze(frame, zones)
+```python
+analysis = analyzer.analyze(frame, self.config.zones)
 suppressed = analysis.warming_up or analysis.stabilizing or analysis.global_change
 confidence = tracker.update(analysis.raw_score, suppressed=suppressed)
-stable motion + analysis.primary_zone_id -> MotionEventStateMachine.update(...)
+closed = state.update(
+    timestamp,
+    motion=confidence.motion,
+    score=confidence.confidence,
+    zone_id=analysis.primary_zone_id,
+)
 ```
 
-Use stable confidence as the event score input so `peak_score` remains meaningful under V2.
+This keeps temporal confidence separate from user event policy and stores V2 peak confidence in the existing `peak_score` field.
 
-- [ ] **Step 4: Implement snapshot selection and runtime callback**
+- [ ] **Step 4: Implement snapshot selection and runtime state**
 
-A frame is snapshot-eligible only when it contributes valid motion evidence and is not warm-up/global-change/stabilization. Compare candidate keys as `(confidence.confidence, analysis.raw_score)`.
+Snapshot eligibility requires accepted motion evidence and excludes warm-up/global-change/stabilization. Rank candidate frames by `(confidence.confidence, analysis.raw_score)`.
 
-Runtime state precedence per analyzed frame:
+Runtime precedence:
 
 ```text
 warming_up -> warming_up
-stabilizing or global_change -> stabilizing
+global_change or stabilizing -> stabilizing
 otherwise -> running
 ```
 
-Emit the six diagnostic fields every analyzed frame.
+Emit all six diagnostics with each analyzed-frame status update.
 
-- [ ] **Step 5: Flush confirmed events in `finally` before stopping FFmpeg**
+- [ ] **Step 5: Finalize confirmed events on every worker exit path**
 
-On normal stop, cancellation, settings restart, or stream failure, call `state.flush(deployment_now())` and emit returned events with the current best valid snapshot exactly once. If no event is active, do nothing. Do not swallow cancellation; flush first, then re-raise `asyncio.CancelledError`.
+Ensure cleanup runs for normal stream end, cancellation/settings restart, and exception/disconnect. Call `state.flush(deployment_now())`, emit returned event exactly once with the preserved best valid snapshot, then stop FFmpeg. Cancellation must still re-raise `asyncio.CancelledError` after finalization.
 
-- [ ] **Step 6: Run worker tests and verify GREEN**
+Do not let snapshot/event-sink failure convert a recording lifecycle into a dependency; this worker remains isolated from recorder services.
+
+- [ ] **Step 6: Run worker/backend detector tests and verify GREEN**
 
 ```bash
 cd backend && uv run pytest tests/test_motion_worker.py tests/test_motion_detection.py tests/test_motion_analysis.py -q
@@ -467,7 +465,7 @@ git commit -m "feat: wire motion v2 worker pipeline"
 **Files:**
 - Modify: `backend/app/services/motion_manager.py`
 - Modify: `backend/app/schemas/motion.py`
-- Modify: `backend/app/api/motion_detection.py` only if runtime construction needs adaptation.
+- Modify: `backend/app/api/motion_detection.py` only if runtime construction requires adaptation.
 - Test: `backend/tests/test_motion_manager.py`
 - Test: `backend/tests/test_motion_api.py`
 
@@ -482,11 +480,11 @@ Literal[
 ```
 
 - `MotionRuntimeRead` adds nullable `confidence`, `raw_score`, `moving_area_ratio`, `global_change_ratio`, `primary_zone_id`, plus `global_change: bool = False`.
-- Manager status callback accepts the Task 4 diagnostics dict and retains prior diagnostics when a lifecycle-only update does not supply new values.
+- Manager status callback accepts Task 4 diagnostics and preserves useful prior diagnostics when a lifecycle-only update supplies none.
 
 - [ ] **Step 1: Write failing schema/API tests**
 
-Assert a runtime payload containing:
+Assert this runtime payload validates and is returned by `GET /api/cameras/{id}/motion-detection` when the manager reports it:
 
 ```json
 {
@@ -501,11 +499,11 @@ Assert a runtime payload containing:
 }
 ```
 
-validates and is returned by `GET /api/cameras/{id}/motion-detection` when the manager reports it.
+Also assert existing settings/event response shapes remain unchanged.
 
 - [ ] **Step 2: Write failing manager propagation tests**
 
-Update fake workers to call `on_status(..., diagnostics)` and assert `manager.status(camera_id)` contains diagnostics while reconnecting lifecycle changes preserve useful `stream`/last-frame context.
+Update fake workers to call `on_status(..., diagnostics)`. Assert `manager.status(camera_id)` includes diagnostics and reconnecting/starting lifecycle transitions preserve useful stream/last-frame data without persisting diagnostics to the database.
 
 - [ ] **Step 3: Run tests and verify RED**
 
@@ -517,9 +515,9 @@ Expected: FAIL on callback signature/schema fields/new runtime states.
 
 - [ ] **Step 4: Implement manager/schema/API plumbing**
 
-Extend `_set_status()` with `diagnostics: dict[str, Any] | None = None`, initialize safe default diagnostic values, merge only known keys, and keep runtime data in memory only.
+Extend `_set_status()` with `diagnostics: dict[str, Any] | None = None`, initialize safe diagnostic defaults, merge only the six known diagnostic keys, and keep them in memory only.
 
-Change persisted event metadata in `_default_event_sink()` from:
+Change new event metadata from:
 
 ```python
 {"detector": "motion-v1"}
@@ -531,7 +529,7 @@ to:
 {"detector": "motion-v2"}
 ```
 
-Do not add a migration or settings fields.
+Do not add database columns or migration files.
 
 - [ ] **Step 5: Run manager/API tests and verify GREEN**
 
@@ -554,16 +552,16 @@ git commit -m "feat: expose motion v2 runtime diagnostics"
 
 **Files:**
 - Modify: `frontend/src/MotionDetectionPanel.vue`
-- Test: existing frontend test covering `MotionDetectionPanel.vue`; if none exists, create `frontend/src/MotionDetectionPanel.test.ts`.
+- Test: existing frontend test covering `MotionDetectionPanel.vue`; if absent, create `frontend/src/MotionDetectionPanel.test.ts`.
 
 **Interfaces:**
 - Extend frontend `MotionRuntime.state` with `warming_up | stabilizing`.
-- Extend frontend runtime type with the six diagnostics from Task 5.
+- Add the six diagnostics from Task 5 to the frontend runtime type.
 - Do not add controls for internal thresholds.
 
 - [ ] **Step 1: Write failing frontend behavior tests**
 
-Cover these user-visible mappings:
+Cover:
 
 ```text
 warming_up => 背景学习中
@@ -575,27 +573,21 @@ primary_zone_id matching zone => 活动区域 <zone name>
 primary_zone_id null => 活动区域 整个画面
 ```
 
-Also assert the existing controls are still present and there are no controls/labels exposing `min_zone_overlap_ratio`, `global_change_ratio`, `enter_confidence`, or `exit_confidence`.
+Assert existing controls remain present and no user-facing controls/labels expose `min_zone_overlap_ratio`, `global_change_ratio`, `enter_confidence`, or `exit_confidence`.
 
 - [ ] **Step 2: Run frontend tests and verify RED**
 
-Run the repository's existing frontend test command, targeting the new test where supported:
+Try targeted execution first:
 
 ```bash
 cd frontend && npm test -- MotionDetectionPanel
 ```
 
-If the test runner does not support name filtering, run:
+If the repository runner does not support that filter, run `npm test`. Expected: FAIL because the new states/diagnostics are missing.
 
-```bash
-cd frontend && npm test
-```
+- [ ] **Step 3: Implement compact diagnostics UI**
 
-Expected: FAIL because the new states/diagnostics UI is missing.
-
-- [ ] **Step 3: Implement runtime labels and diagnostics strip**
-
-Keep the existing panel hierarchy. Add only a compact diagnostic summary near the current runtime strip. Suggested visible fields:
+Keep the existing panel hierarchy. Add a restrained read-only summary near the runtime strip:
 
 ```text
 状态      背景学习中 / 检测中 / 画面稳定中
@@ -605,7 +597,7 @@ Keep the existing panel hierarchy. Add only a compact diagnostic summary near th
 最近帧    HH:mm:ss
 ```
 
-Use subdued styling consistent with the existing Protect-like dense UI. `warming_up` and `stabilizing` should use the warning/yellow runtime indicator, not error red.
+Use subdued Protect-like styling. `warming_up` and `stabilizing` use warning/yellow indicators, never error red. Preserve the existing no-enabled-zone explanation and all user controls.
 
 - [ ] **Step 4: Run frontend tests and build**
 
@@ -622,38 +614,38 @@ git add frontend/src/MotionDetectionPanel.vue frontend/src/MotionDetectionPanel.
 git commit -m "feat: show motion v2 runtime diagnostics"
 ```
 
-If an existing test file was modified instead of creating `MotionDetectionPanel.test.ts`, add that actual path to the commit.
+If an existing test file is modified instead of creating `MotionDetectionPanel.test.ts`, stage that actual path.
 
 ---
 
 ### Task 7: End-to-End Regression and Failure-Isolation Coverage
 
 **Files:**
-- Modify tests only as needed: `backend/tests/test_motion_worker.py`, `backend/tests/test_motion_manager.py`, `backend/tests/test_motion_api.py`, `backend/tests/test_motion_detection.py`, `backend/tests/test_motion_analysis.py`.
-- No production refactor unless a failing behavior requires the smallest correction.
+- Modify tests as needed: `backend/tests/test_motion_worker.py`, `backend/tests/test_motion_manager.py`, `backend/tests/test_motion_api.py`, `backend/tests/test_motion_detection.py`, `backend/tests/test_motion_analysis.py`.
+- Production code changes only for the smallest correction revealed by a failing behavior test.
 
 **Interfaces:**
-- Verifies the complete V2 contract from frame evidence through runtime/event persistence boundaries.
+- Verifies the complete V2 contract from frame evidence through stable motion, event finalization, API diagnostics, and failure isolation.
 
-- [ ] **Step 1: Add regression test for event continuity across global-change suppression**
+- [ ] **Step 1: Add event-continuity regression across global-change suppression**
 
-Create a deterministic state sequence showing:
+Exercise:
 
 ```text
-stable motion active -> global change suppression -> real motion resumes within merge_gap
+stable motion active -> global change/stabilization -> real motion resumes inside merge_gap
 ```
 
-Assert there is still one event anchor, not two, and the suppressed frames do not increase peak score or snapshot quality.
+Assert the event policy keeps one playback anchor, suppressed frames contribute no peak score, and suppressed frames cannot replace the snapshot.
 
-- [ ] **Step 2: Add regression test for disconnect/restart flush**
+- [ ] **Step 2: Add disconnect/restart flush regression**
 
-Simulate a confirmed active event followed by worker cancellation/disconnect. Assert exactly one event is emitted, its end time is the last valid stable-motion time, and a reconnect starts a fresh warm-up rather than extending the old event.
+Simulate confirmed active motion followed by cancellation/disconnect. Assert exactly one event is emitted, end time is the last accurate valid-motion boundary, and replacement worker/analyzer starts from fresh warm-up rather than extending the previous event.
 
-- [ ] **Step 3: Add regression test proving motion failure does not touch recording lifecycle**
+- [ ] **Step 3: Add recording-isolation regression**
 
-Keep this at the manager/service boundary: a motion worker failure must move runtime to `reconnecting`/`error` without invoking recording stop/restart code. If there is no direct recording dependency in the manager, assert the module/service graph remains independent and no recording service callback is introduced.
+At the manager/service boundary, force motion-worker analysis failure and assert runtime proceeds through reconnect/error supervision without invoking or importing recording-worker stop/restart behavior. Preserve the existing independent service boundary.
 
-- [ ] **Step 4: Run the complete backend suite**
+- [ ] **Step 4: Run complete backend verification**
 
 ```bash
 cd backend && uv run python -m compileall app && uv run pytest -q
@@ -661,7 +653,7 @@ cd backend && uv run python -m compileall app && uv run pytest -q
 
 Expected: all backend tests PASS.
 
-- [ ] **Step 5: Run the complete frontend suite**
+- [ ] **Step 5: Run complete frontend verification**
 
 ```bash
 cd frontend && npm test && npm run build
@@ -669,15 +661,15 @@ cd frontend && npm test && npm run build
 
 Expected: all frontend tests PASS and production build succeeds.
 
-- [ ] **Step 6: Commit regression coverage/final fixes**
+- [ ] **Step 6: Commit final regression coverage/fixes**
 
 ```bash
-git add backend/tests frontend/src
-# add any minimal production files changed by the final regression pass
+git add backend frontend/src
+# commit only paths actually changed
 git commit -m "test: cover motion v2 regressions"
 ```
 
-Skip this commit if Task 7 requires no file changes.
+Skip this commit when Task 7 produces no changes.
 
 ---
 
@@ -687,45 +679,46 @@ Skip this commit if Task 7 requires no file changes.
 - No planned production-file changes.
 
 **Interfaces:**
-- Applies the repository workflow in `AGENTS.md`: one PR CI, self-review, merge directly if green and no blocker; no second `main` CI wait by default.
+- Apply repository `AGENTS.md`: one PR CI, self-review, merge directly if green and no blocker; do not wait for a second `main` CI by default.
 
-- [ ] **Step 1: Review full branch diff against the spec**
+- [ ] **Step 1: Review the full implementation diff against the spec**
 
-Verify specifically:
+Verify:
 
 ```text
 no AI/recognition scope slipped in
-no new DB migration/config controls were added
+no new DB threshold config or migration exists
 no-zone semantics remain full-frame
 warm-up/global-change/stabilization frames cannot become snapshots
+rolling global-change reference converges instead of looping
 large local objects do not trip global-change solely on area
 small zones use zone area thresholds
-primary zone uses largest intersection
-confidence/hysteresis is separate from event policy
-flush cannot duplicate events or fabricate end duration
+primary zone uses largest real intersection
+confidence uses approved evidence weighting and remains separate from event policy
+flush cannot duplicate events or fabricate duration
 runtime diagnostics are transient only
-recording code/lifecycle remains untouched by detector failures
+recording lifecycle remains independent
 deployment entry remains git pull && ./deploy.sh
 ```
 
-- [ ] **Step 2: Open a PR from the implementation branch to `main`**
+- [ ] **Step 2: Open one implementation PR to `main`**
 
-Use a title such as:
+Suggested title:
 
 ```text
 feat: add motion detection v2
 ```
 
-PR body should summarize algorithm changes, runtime UI, compatibility/no migration, and testing.
+Summarize algorithm changes, runtime UI, compatibility/no migration, and test coverage.
 
-- [ ] **Step 3: Let the single PR CI run**
+- [ ] **Step 3: Run the single PR CI**
 
-Expected paths for this mixed backend/frontend change: changes detection, backend tests, frontend tests/build, and Docker smoke all pass according to current workflow gating.
+For this mixed backend/frontend change, expect change detection, backend tests, frontend tests/build, and Docker smoke according to current workflow gating.
 
-- [ ] **Step 4: Self-review the PR diff**
+- [ ] **Step 4: Self-review the complete PR diff**
 
-Check for blocker-level correctness issues, especially detector state transitions, cancellation/flush ordering, callback compatibility, snapshot eligibility, and accidental settings/API breaking changes.
+Check detector state transitions, rolling global reference, cancellation/flush ordering, callback compatibility, snapshot eligibility, API backward compatibility, and recording isolation. Fix blocker-level findings and rerun naturally failed CI if needed.
 
-- [ ] **Step 5: Merge directly when CI is green and self-review has no blocker**
+- [ ] **Step 5: Merge directly when green and blocker-free**
 
-Do not wait for a second post-merge `main` CI unless the merge itself introduces extra code/conflict/concurrent changes or there is a concrete reason to re-verify.
+Do not wait for a second post-merge `main` CI unless the merge itself introduces extra code/conflict/concurrent changes or a concrete reason requires re-verification.
