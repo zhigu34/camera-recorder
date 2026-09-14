@@ -109,7 +109,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
-      - run: npm install
+      - name: Cache npm packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.npm
+          key: frontend-npm-${{ runner.os }}-node22-${{ hashFiles('frontend/package.json') }}
+          restore-keys: |
+            frontend-npm-${{ runner.os }}-node22-
+      - run: npm install --prefer-offline --no-audit --no-fund
       - run: npm test
       - run: npm run build
 
