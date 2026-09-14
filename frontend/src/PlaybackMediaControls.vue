@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { usePlaybackTransportStore } from './stores/playbackTransport'
-import { PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
+import { loadSkipInterval, PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
 
 const props = defineProps<{
   active: boolean
@@ -22,10 +22,18 @@ const emit = defineEmits<{
   fullscreen: []
 }>()
 
+function playbackStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
+
 const transportStore = usePlaybackTransportStore()
 const rootRef = ref<HTMLElement | null>(null)
 const controlsVisible = ref(true)
-const effectiveSkipSeconds = ref(props.skipSeconds)
+const effectiveSkipSeconds = ref(loadSkipInterval(playbackStorage()))
 let hideTimer: number | null = null
 let interactionHost: HTMLElement | null = null
 
