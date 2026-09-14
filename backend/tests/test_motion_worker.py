@@ -1,10 +1,12 @@
-import numpy as np
-
+from app.services.motion_analysis import MotionAnalysisResult
+from app.services.motion_detection import MotionConfidenceResult
 from app.services.motion_worker import (
-    MotionFrameAnalyzer,
     build_motion_command,
+    runtime_diagnostics,
+    runtime_state_for_analysis,
     scaled_dimensions,
     select_motion_path,
+    snapshot_quality_key,
 )
 
 
@@ -43,40 +45,85 @@ def test_motion_command_uses_tcp_low_rate_bgr_rawvideo() -> None:
     assert "rtsp://admin:p%40ss%20word@192.0.2.20:554/ch1/sub" in command
 
 
-def _warm(analyzer: MotionFrameAnalyzer, frame: np.ndarray, count: int = 12) -> None:
-    for _ in range(count):
-        analyzer.analyze(frame, [])
+def _analysis(
+    *,
+    raw_score: float = 0.0,
+    primary_zone_id: int | None = None,
+    global_change: bool = False,
+    warming_up: bool = False,
+    stabilizing: bool = False,
+    moving_area_ratio: float = 0.0,
+    global_change_ratio: float = 0.0,
+) -> MotionAnalysisResult:
+    return MotionAnalysisResult(
+        raw_score=raw_score,
+        primary_zone_id=primary_zone_id,
+        matched_zone_ids=[] if primary_zone_id is None else [primary_zone_id],
+        global_change=global_change,
+        warming_up=warming_up,
+        stabilizing=stabilizing,
+        moving_area_ratio=moving_area_ratio,
+        global_change_ratio=global_change_ratio,
+    )
 
 
-def test_frame_analyzer_detects_large_change_after_background_warmup() -> None:
-    frame = np.zeros((360, 640, 3), dtype=np.uint8)
-    analyzer = MotionFrameAnalyzer("medium")
-    _warm(analyzer, frame)
-
-    changed = frame.copy()
-    changed[120:300, 220:500] = 255
-    result = analyzer.analyze(changed, [])
-
-    assert result.motion is True
-    assert result.score > 0.01
-    assert result.zone_ids == [None]
+def _confidence(value: float, *, motion: bool = False) -> MotionConfidenceResult:
+    return MotionConfidenceResult(motion=motion, confidence=value, transitioned=False)
 
 
-def test_frame_analyzer_ignores_motion_outside_enabled_zone() -> None:
-    frame = np.zeros((360, 640, 3), dtype=np.uint8)
-    analyzer = MotionFrameAnalyzer("medium")
-    _warm(analyzer, frame)
+def test_runtime_state_reflects_algorithm_phase() -> None:
+    assert runtime_state_for_analysis(_analysis(warming_up=True)) == "warming_up"
+    assert runtime_state_for_analysis(_analysis(global_change=True)) == "stabilizing"
+    assert runtime_state_for_analysis(_analysis(stabilizing=True)) == "stabilizing"
+    assert runtime_state_for_analysis(_analysis(raw_score=0.4)) == "running"
 
-    changed = frame.copy()
-    changed[220:340, 420:620] = 255
-    zones = [
-        {
-            "id": 9,
-            "enabled": True,
-            "polygon": [[0.0, 0.0], [0.35, 0.0], [0.35, 0.4], [0.0, 0.4]],
-        }
-    ]
-    result = analyzer.analyze(changed, zones)
 
-    assert result.motion is False
-    assert result.zone_ids == []
+def test_runtime_diagnostics_exposes_only_v2_observability_fields() -> None:
+    diagnostics = runtime_diagnostics(
+        _analysis(
+            raw_score=0.42,
+            primary_zone_id=7,
+            moving_area_ratio=0.08,
+            global_change_ratio=0.12,
+        ),
+        _confidence(0.72, motion=True),
+    )
+
+    assert diagnostics == {
+        "confidence": 0.72,
+        "raw_score": 0.42,
+        "moving_area_ratio": 0.08,
+        "global_change_ratio": 0.12,
+        "primary_zone_id": 7,
+        "global_change": False,
+    }
+
+
+def test_snapshot_quality_rejects_suppressed_or_empty_frames() -> None:
+    confidence = _confidence(0.8, motion=True)
+
+    assert snapshot_quality_key(_analysis(warming_up=True, raw_score=0.9), confidence) is None
+    assert snapshot_quality_key(_analysis(stabilizing=True, raw_score=0.9), confidence) is None
+    assert snapshot_quality_key(_analysis(global_change=True, raw_score=0.9), confidence) is None
+    assert snapshot_quality_key(_analysis(raw_score=0.0), confidence) is None
+
+
+def test_snapshot_quality_prefers_confidence_then_raw_score() -> None:
+    lower_confidence = snapshot_quality_key(
+        _analysis(raw_score=0.95),
+        _confidence(0.60, motion=True),
+    )
+    higher_confidence = snapshot_quality_key(
+        _analysis(raw_score=0.30),
+        _confidence(0.70, motion=True),
+    )
+    same_confidence_better_raw = snapshot_quality_key(
+        _analysis(raw_score=0.80),
+        _confidence(0.70, motion=True),
+    )
+
+    assert lower_confidence is not None
+    assert higher_confidence is not None
+    assert same_confidence_better_raw is not None
+    assert higher_confidence > lower_confidence
+    assert same_confidence_better_raw > higher_confidence
