@@ -23,6 +23,14 @@ export function canvasPointToNormalized(
   ]
 }
 
+export function replaceNormalizedPoint(
+  points: NormalizedPoint[],
+  index: number,
+  point: NormalizedPoint,
+): NormalizedPoint[] {
+  return points.map((value, currentIndex) => currentIndex === index ? point : value)
+}
+
 export function polygonToSvgPoints(points: NormalizedPoint[]) {
   return points.map(([x, y]) => `${x * 100},${y * 100}`).join(' ')
 }
