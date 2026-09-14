@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { loadSkipInterval, PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
+import { PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
 
 const props = defineProps<{
   active: boolean
@@ -21,24 +21,11 @@ const emit = defineEmits<{
   fullscreen: []
 }>()
 
-function playbackStorage() {
-  try {
-    return typeof window === 'undefined' ? null : window.localStorage
-  } catch {
-    return null
-  }
-}
-
 const rootRef = ref<HTMLElement | null>(null)
 const controlsVisible = ref(true)
-const effectiveSkipSeconds = ref(loadSkipInterval(playbackStorage()))
+const effectiveSkipSeconds = ref(props.skipSeconds)
 let hideTimer: number | null = null
 let interactionHost: HTMLElement | null = null
-
-function dispatchTransport(type: 'skip' | 'rate' | 'interval', value: number) {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent(`camera-recorder:playback-${type}`, { detail: value }))
-}
 
 function clearHideTimer() {
   if (hideTimer !== null) window.clearTimeout(hideTimer)
@@ -63,14 +50,12 @@ function showControls() {
 
 function onSkip(deltaSeconds: number) {
   emit('skip', deltaSeconds)
-  dispatchTransport('skip', deltaSeconds)
   showControls()
 }
 
 function onRate(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   emit('update:playbackRate', value)
-  dispatchTransport('rate', value)
   showControls()
 }
 
@@ -78,18 +63,12 @@ function onSkipInterval(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   effectiveSkipSeconds.value = value
   emit('update:skipSeconds', value)
-  dispatchTransport('interval', value)
   showControls()
 }
 
 function onVolume(event: Event) {
   emit('update:volume', Number((event.target as HTMLInputElement).value))
   showControls()
-}
-
-function handleIntervalSync(event: Event) {
-  const value = Number((event as CustomEvent<number>).detail)
-  if (SKIP_INTERVALS.includes(value as (typeof SKIP_INTERVALS)[number])) effectiveSkipSeconds.value = value
 }
 
 watch(() => props.playing, () => {
@@ -101,14 +80,12 @@ watch(() => props.skipSeconds, (value) => {
 })
 
 onMounted(() => {
-  window.addEventListener('camera-recorder:playback-interval-sync', handleIntervalSync)
   interactionHost = rootRef.value?.parentElement || null
   interactionHost?.addEventListener('pointermove', showControls)
   interactionHost?.addEventListener('pointerenter', showControls)
 })
 onBeforeUnmount(() => {
   clearHideTimer()
-  window.removeEventListener('camera-recorder:playback-interval-sync', handleIntervalSync)
   interactionHost?.removeEventListener('pointermove', showControls)
   interactionHost?.removeEventListener('pointerenter', showControls)
   interactionHost = null
