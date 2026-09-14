@@ -29,6 +29,8 @@ _NETWORK_MARKERS = (
 )
 _STABLE_CONNECTION_SECONDS = 60.0
 _CONSECUTIVE_FAILURE_THRESHOLD = 3
+CAMERA_LOG_MAX_BYTES = 20 * 1024 * 1024
+CAMERA_LOG_BACKUPS = 5
 
 
 class CameraWorker:
@@ -54,6 +56,7 @@ class CameraWorker:
         self._recovery_task: asyncio.Task | None = None
         self._stability_task: asyncio.Task | None = None
         self._log_path = settings.logs_dir / f"camera-{camera.id}.log"
+        self._log_lock = asyncio.Lock()
 
     @property
     def running(self) -> bool:
@@ -472,10 +475,27 @@ class CameraWorker:
     async def _log(self, message: str) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
         line = f"{timestamp} {message}\n"
-        await asyncio.to_thread(self._append_log, self._log_path, line)
+        async with self._log_lock:
+            await asyncio.to_thread(self._append_log, self._log_path, line)
 
     @staticmethod
     def _append_log(path: Path, line: str) -> None:
+        encoded_size = len(line.encode("utf-8"))
+        if (
+            path.exists()
+            and path.stat().st_size > 0
+            and path.stat().st_size + encoded_size > CAMERA_LOG_MAX_BYTES
+        ):
+            for index in range(CAMERA_LOG_BACKUPS, 1, -1):
+                source = path.with_name(f"{path.name}.{index - 1}")
+                target = path.with_name(f"{path.name}.{index}")
+                if source.exists():
+                    source.replace(target)
+            if CAMERA_LOG_BACKUPS > 0:
+                path.replace(path.with_name(f"{path.name}.1"))
+            else:
+                path.unlink(missing_ok=True)
+
         with path.open("a", encoding="utf-8") as handle:
             handle.write(line)
 
