@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { VideoPlay } from '@element-plus/icons-vue'
@@ -17,9 +17,16 @@ import {
 } from './utils/playbackCompatibility'
 import { makePlaybackOpenRequest } from './utils/playbackOpenRequest'
 import { choosePlaybackSource, type PlaybackSourceReason } from './utils/playbackSourcePolicy'
+import { normalizePlaybackRate } from './utils/playbackTransport'
 
 type PlaybackMode = '' | 'original' | 'proxy' | 'proxy-live'
 type ActivePlaybackMode = Exclude<PlaybackMode, ''>
+
+const props = withDefaults(defineProps<{
+  playbackRate?: number
+}>(), {
+  playbackRate: 1,
+})
 
 const emit = defineEmits<{
   timeupdate: [seconds: number]
@@ -105,6 +112,12 @@ function beginPlaybackSource(item: RecordingItem, mode: ActivePlaybackMode, src:
     hevcHint: browserHevcHint.value,
   })
   videoSrc.value = src
+}
+
+function applyPlaybackRate() {
+  const video = videoRef.value
+  if (!video) return
+  video.playbackRate = normalizePlaybackRate(props.playbackRate)
 }
 
 function stopProgressPolling() {
@@ -277,6 +290,7 @@ function applyPendingSeek() {
 
 function handleLoadedMetadata() {
   playbackTracker.markLoadedMetadata()
+  applyPlaybackRate()
   applyPendingSeek()
 }
 
@@ -290,6 +304,7 @@ function handleVideoCanPlay() {
 }
 
 function handleVideoPlaying() {
+  applyPlaybackRate()
   playbackTracker.markPlaying(videoRef.value)
   preparing.value = false
 }
@@ -341,6 +356,8 @@ async function cancelProxy() {
 function handleEnded() {
   emit('ended')
 }
+
+watch(() => props.playbackRate, applyPlaybackRate)
 
 defineExpose<PlaybackPlayerHandle>({
   select,
