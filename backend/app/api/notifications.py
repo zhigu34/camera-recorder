@@ -9,7 +9,7 @@ from app.schemas.notification_settings import (
     EmailRecipient,
 )
 from app.services.email_notifier import email_notifier
-from app.services.event_log import add_event
+from app.services.event_log import add_audit_event, add_event
 from app.services.notification_settings import (
     get_or_create_notification_settings,
     load_email_notification_config,
@@ -94,6 +94,11 @@ async def update_email_settings(
         category="notification",
         code="notification.email_settings_updated",
         message="邮件告警配置已更新",
+    )
+    add_audit_event(
+        db,
+        code="operations.notification_settings_updated",
+        message="通知与告警设置已修改",
     )
     await db.commit()
     await db.refresh(row)
