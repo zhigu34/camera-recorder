@@ -13,15 +13,19 @@
 - Camera connectivity is separated from Recorder and Schedule state and is published through `/ws/status`.
 - Motion Detection V2, realtime activity, event-bounded playback and event export are implemented.
 - Alembic is initialized and the repository contains a real migration chain under `backend/migrations/versions`.
+- Operations provides bounded log access, 20 MiB camera-log rotation with five backups, redacted configuration backup/restore, administrative audit records and `/metrics` Prometheus output.
+- Upgrade, migration, backup and rollback guidance is documented in `docs/RELEASE.md`.
 
 ## V1.0 code-convergence work
 
-The implementation plan is `docs/superpowers/plans/2026-09-15-v1-convergence.md` and is executed as four independently mergeable batches:
+The implementation plan is `docs/superpowers/plans/2026-09-15-v1-convergence.md`. All four code-convergence batches are implemented:
 
-1. Frontend visual/quality freeze: Admin workspace convergence, reduced motion, lint gate, route/view code splitting.
-2. Frontend routing/state convergence: upload/settings deep links, shared state/types, explicit playback communication, unsaved-settings protection.
-3. Connectivity hardening: immediate first probe, persisted failure streak, manual-probe reconciliation, monitor observability and stale-recorder handling.
-4. Operations foundations: safe logs, configuration backup/restore, audit trail, Prometheus metrics and release/upgrade documentation.
+1. **Complete** — Frontend visual/quality freeze: Admin workspace convergence, reduced motion, lint gate, route/view code splitting.
+2. **Complete** — Frontend routing/state convergence: upload/settings deep links, shared state/types, explicit playback communication, unsaved-settings protection.
+3. **Complete** — Connectivity hardening: immediate first probe, persisted failure streak, manual-probe reconciliation, monitor observability and stale-recorder handling.
+4. **Complete** — Operations foundations: safe logs and visible rotation policy, configuration backup/restore, high-value administrative audit trail, Prometheus metrics and release/upgrade documentation.
+
+Code convergence being complete does **not** mean V1.0 has passed field acceptance or should automatically be tagged as a final release. The release checklist is in `docs/RELEASE.md`.
 
 ## External V1.0 acceptance gates
 
