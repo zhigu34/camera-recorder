@@ -28,3 +28,24 @@ def add_event(
     )
     session.add(event)
     return event
+
+
+def add_audit_event(
+    session: AsyncSession,
+    *,
+    code: str,
+    message: str,
+    camera_id: int | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Event:
+    """Persist a non-secret administrative audit record in the shared Event table."""
+
+    return add_event(
+        session,
+        level="info",
+        category="audit",
+        code=code,
+        message=message,
+        camera_id=camera_id,
+        metadata=metadata,
+    )
