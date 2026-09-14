@@ -1,17 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick } from 'vue'
+import { computed, defineAsyncComponent, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import CamerasWorkspace from './CamerasWorkspace.vue'
-import DashboardView from './DashboardView.vue'
-import EventCenterView from './EventCenterView.vue'
-import HealthView from './HealthView.vue'
-import PlaybackMetricsPanel from './PlaybackMetricsPanel.vue'
-import PreviewView from './PreviewView.vue'
-import RecordingsWorkspace from './RecordingsWorkspace.vue'
-import RecordingScheduleView from './RecordingScheduleView.vue'
-import SystemSettingsWorkspace from './SystemSettingsWorkspace.vue'
-import UploadManagementView from './UploadManagementView.vue'
+const CamerasWorkspace = defineAsyncComponent(() => import('./CamerasWorkspace.vue'))
+const DashboardView = defineAsyncComponent(() => import('./DashboardView.vue'))
+const EventCenterView = defineAsyncComponent(() => import('./EventCenterView.vue'))
+const HealthView = defineAsyncComponent(() => import('./HealthView.vue'))
+const PlaybackMetricsPanel = defineAsyncComponent(() => import('./PlaybackMetricsPanel.vue'))
+const PreviewView = defineAsyncComponent(() => import('./PreviewView.vue'))
+const RecordingsWorkspace = defineAsyncComponent(() => import('./RecordingsWorkspace.vue'))
+const RecordingScheduleView = defineAsyncComponent(() => import('./RecordingScheduleView.vue'))
+const SystemSettingsWorkspace = defineAsyncComponent(() => import('./SystemSettingsWorkspace.vue'))
+const UploadManagementView = defineAsyncComponent(() => import('./UploadManagementView.vue'))
 
 const route = useRoute()
 const router = useRouter()
