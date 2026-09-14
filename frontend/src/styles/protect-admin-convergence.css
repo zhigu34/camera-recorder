@@ -1,0 +1,247 @@
+/* V1 Protect convergence for the non-media administration workspaces.
+ * Ownership: this file is the final visual layer for Uploads, Health,
+ * Recording Schedule and Settings. It must not change media sizing/state.
+ */
+
+.nvr-shell {
+  --protect-admin-max: 1760px;
+  --protect-admin-gutter: 18px;
+  --protect-admin-gutter-mobile: 12px;
+  --protect-admin-control: 32px;
+  --protect-admin-radius: 10px;
+  --protect-admin-control-radius: 7px;
+  --protect-admin-border: color-mix(in srgb, var(--nvr-border) 92%, transparent);
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page, .settings-shell) {
+  width: 100%;
+  max-width: var(--protect-admin-max) !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page) {
+  padding-left: var(--protect-admin-gutter) !important;
+  padding-right: var(--protect-admin-gutter) !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page, .settings-shell, .settings-workspace, .alert-page)
+  .el-button + .el-button {
+  margin-left: 0 !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page, .settings-shell, .settings-workspace, .alert-page)
+  .el-button:not(.is-link):not(.is-text) {
+  min-height: var(--protect-admin-control);
+  height: var(--protect-admin-control);
+  padding: 0 10px;
+  border-radius: var(--protect-admin-control-radius) !important;
+  box-shadow: none !important;
+  font-size: 10px;
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page, .settings-shell, .settings-workspace, .alert-page)
+  :is(.el-input__wrapper, .el-select__wrapper, .el-date-editor.el-input__wrapper, .el-input-number) {
+  min-height: var(--protect-admin-control);
+  border-radius: var(--protect-admin-control-radius) !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page, .settings-shell, .settings-workspace, .alert-page)
+  :is(button, [role="button"]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--nvr-blue) 62%, transparent);
+  outline-offset: 2px;
+}
+
+/* Shared quiet surface language. */
+.nvr-shell .nvr-workspace-content .upload-page :is(.provider-panel, .summary-card, .panel, .table-panel),
+.nvr-shell .nvr-workspace-content .health-v2 :is(.metrics article, .panel),
+.nvr-shell .nvr-workspace-content .schedule-page :is(.toolbar, .table-shell, .policy-card, .window-card, .all-day-state),
+.nvr-shell .nvr-workspace-content .settings-workspace :is(.settings-status-strip, .settings-panel, .settings-savebar),
+.nvr-shell .nvr-workspace-content .alert-page :is(.status-card, .settings-card, .panel) {
+  border-color: var(--protect-admin-border) !important;
+  border-radius: var(--protect-admin-radius) !important;
+  box-shadow: none !important;
+}
+
+.nvr-shell .nvr-workspace-content .upload-page :is(.toolbar-panel, .table-panel),
+.nvr-shell .nvr-workspace-content .health-v2 .panel,
+.nvr-shell .nvr-workspace-content .schedule-page :is(.toolbar, .table-shell),
+.nvr-shell .nvr-workspace-content .settings-workspace :is(.settings-panel, .settings-savebar) {
+  background: var(--nvr-surface) !important;
+}
+
+/* Uploads --------------------------------------------------------------- */
+.nvr-shell .nvr-workspace-content .upload-page .toolbar-panel {
+  min-height: 46px;
+  padding: 7px 9px !important;
+}
+
+.nvr-shell .nvr-workspace-content .upload-page :is(.toolbar-left, .toolbar-actions) {
+  gap: 6px !important;
+}
+
+.nvr-shell .nvr-workspace-content .upload-page .stream-state {
+  font-size: 9px !important;
+}
+
+.nvr-shell .nvr-workspace-content .upload-page .stream-state i {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+/* Health --------------------------------------------------------------- */
+.nvr-shell .nvr-workspace-content .health-v2 {
+  padding-top: 14px !important;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 .page-head {
+  min-height: 34px;
+  margin-bottom: 10px;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 .metrics {
+  gap: 8px;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 .metrics article {
+  min-height: 88px;
+  padding: 11px 12px;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 :is(.metrics small, .snapshot-time, .timestamp-cell > span) {
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 .panel-head {
+  min-height: 50px;
+}
+
+.nvr-shell .nvr-workspace-content .health-v2 .error-box {
+  border-color: color-mix(in srgb, var(--nvr-red) 20%, var(--nvr-border)) !important;
+  background: color-mix(in srgb, var(--nvr-red) 6%, var(--nvr-surface)) !important;
+}
+
+/* Recording schedule --------------------------------------------------- */
+.nvr-shell .nvr-workspace-content .schedule-page {
+  max-width: var(--protect-admin-max) !important;
+  padding-top: 14px !important;
+}
+
+.nvr-shell .nvr-workspace-content .schedule-page .toolbar {
+  min-height: 46px;
+  padding: 7px 9px;
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-shell .nvr-workspace-content .schedule-page :is(.manager-state small, .section-title span, .window-title small) {
+  color: var(--nvr-subtle) !important;
+}
+
+.nvr-shell .nvr-workspace-content .schedule-page :is(.policy-card, .window-card) {
+  background: var(--nvr-surface) !important;
+}
+
+.nvr-shell .nvr-workspace-content .schedule-page .policy-card.active {
+  border-color: color-mix(in srgb, var(--nvr-blue) 34%, var(--nvr-border)) !important;
+  background: color-mix(in srgb, var(--nvr-blue) 7%, var(--nvr-surface)) !important;
+}
+
+.nvr-shell .nvr-workspace-content .schedule-page :is(.policy-copy strong, .editor-head strong, .window-title strong) {
+  color: var(--nvr-text) !important;
+}
+
+/* Settings ------------------------------------------------------------- */
+.nvr-shell .nvr-workspace-content .settings-shell .settings-local-nav {
+  max-width: var(--protect-admin-max) !important;
+  margin-top: 8px;
+  padding-left: var(--protect-admin-gutter) !important;
+  padding-right: var(--protect-admin-gutter) !important;
+}
+
+.nvr-shell .nvr-workspace-content .settings-shell :is(.settings-workspace, .alert-page) {
+  max-width: var(--protect-admin-max) !important;
+}
+
+.nvr-shell .nvr-workspace-content .settings-workspace .settings-savebar {
+  border-color: var(--protect-admin-border) !important;
+}
+
+/* Reduce animation noise globally while respecting explicit user preference. */
+@media (prefers-reduced-motion: reduce) {
+  .nvr-shell *,
+  .el-overlay *,
+  .el-popper * {
+    scroll-behavior: auto !important;
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}
+
+@media (max-width: 960px) {
+  .nvr-shell .nvr-workspace-content .upload-page :is(.toolbar-panel, .toolbar-left, .toolbar-actions),
+  .nvr-shell .nvr-workspace-content .schedule-page :is(.toolbar, .toolbar-actions),
+  .nvr-shell .nvr-workspace-content .health-v2 :is(.page-head, .panel-head, .panel-actions) {
+    flex-wrap: wrap;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .nvr-shell {
+    --protect-admin-gutter: var(--protect-admin-gutter-mobile);
+  }
+
+  .nvr-shell .nvr-workspace-content :is(.upload-page, .health-v2, .schedule-page) {
+    padding-top: 10px !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page :is(.toolbar-left, .toolbar-actions),
+  .nvr-shell .nvr-workspace-content .schedule-page :is(.toolbar, .toolbar-actions) {
+    width: 100%;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-panel,
+  .nvr-shell .nvr-workspace-content .schedule-page .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-left {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page :is(.search-box, .status-select) {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-actions .el-button {
+    width: 100%;
+  }
+
+  .nvr-shell .nvr-workspace-content .health-v2 .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nvr-shell .nvr-workspace-content .schedule-page .toolbar-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .nvr-shell .nvr-workspace-content .upload-page .toolbar-actions,
+  .nvr-shell .nvr-workspace-content .health-v2 .metrics {
+    grid-template-columns: 1fr;
+  }
+}
