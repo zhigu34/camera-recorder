@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.services.motion_detection import (
+    MotionConfidenceTracker,
     MotionEventStateMachine,
     point_in_polygon,
     sensitivity_profile,
@@ -15,6 +16,59 @@ def test_sensitivity_profiles_are_ordered_by_minimum_area() -> None:
 
     assert low.min_area_ratio > medium.min_area_ratio > high.min_area_ratio
     assert low.var_threshold > medium.var_threshold > high.var_threshold
+
+
+def test_sensitivity_profiles_order_false_positive_tolerance() -> None:
+    low = sensitivity_profile("low")
+    medium = sensitivity_profile("medium")
+    high = sensitivity_profile("high")
+
+    assert (low.var_threshold, medium.var_threshold, high.var_threshold) == (32, 24, 16)
+    assert low.min_area_ratio > medium.min_area_ratio > high.min_area_ratio
+    assert low.min_zone_overlap_ratio > medium.min_zone_overlap_ratio > high.min_zone_overlap_ratio
+    assert low.enter_confidence > medium.enter_confidence > high.enter_confidence
+    assert low.confidence_gain < medium.confidence_gain < high.confidence_gain
+    assert low.confidence_decay > medium.confidence_decay > high.confidence_decay
+    assert low.global_change_ratio < medium.global_change_ratio < high.global_change_ratio
+
+
+def test_confidence_tracker_accumulates_valid_motion_and_uses_hysteresis() -> None:
+    tracker = MotionConfidenceTracker(sensitivity_profile("medium"))
+
+    first = tracker.update(0.25)
+    assert first.motion is False
+    assert 0.0 < first.confidence < 0.65
+
+    result = first
+    for _ in range(8):
+        result = tracker.update(0.25)
+        if result.motion:
+            break
+    assert result.motion is True
+    assert result.transitioned is True
+
+    still_active = tracker.update(0.0)
+    assert still_active.motion is True
+    assert still_active.confidence > 0.20
+
+    result = still_active
+    for _ in range(10):
+        result = tracker.update(0.0)
+        if not result.motion:
+            break
+    assert result.motion is False
+    assert result.transitioned is True
+
+
+def test_confidence_tracker_suppression_resets_state() -> None:
+    tracker = MotionConfidenceTracker(sensitivity_profile("high"))
+    for _ in range(6):
+        tracker.update(1.0)
+
+    reset = tracker.update(1.0, suppressed=True)
+
+    assert reset.motion is False
+    assert reset.confidence == 0.0
 
 
 def test_point_in_polygon_and_no_zone_full_frame_behavior() -> None:
