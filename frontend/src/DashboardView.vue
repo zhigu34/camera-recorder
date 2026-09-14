@@ -19,6 +19,12 @@ interface MotionActivityEvent {
   created_at?: string | null
 }
 
+interface ActivitySocketMessage {
+  type?: string
+  data?: MotionActivityEvent
+}
+
+type ActivitySocketState = 'idle' | 'connecting' | 'connected' | 'disconnected'
 type PreviewStream = 'auto' | 'sub' | 'main'
 type LayoutCount = 1 | 4 | 9
 interface SavedWallSlot { cameraId: number | null; stream: PreviewStream }
@@ -26,7 +32,10 @@ interface SavedWall { layout?: LayoutCount; slots?: SavedWallSlot[] }
 
 const PLAYBACK_EVENT_AUTOSTART_KEY = 'camera-recorder:playback-event-autostart'
 const LIVE_WALL_STORAGE_KEY = 'nvr-video-wall-v1'
-const ACTIVITY_REFRESH_MS = 20_000
+const ACTIVITY_FALLBACK_REFRESH_MS = 60_000
+const ACTIVITY_RECONNECT_MS = 5_000
+const ACTIVITY_FRESH_MS = 1_800
+const ACTIVITY_MAX_ITEMS = 100
 
 const router = useRouter()
 const runtime = useRuntimeStore()
@@ -40,8 +49,15 @@ const {
 const activities = ref<MotionActivityEvent[]>([])
 const activityLoading = ref(false)
 const activityError = ref('')
+const activitySocketState = ref<ActivitySocketState>('idle')
 const brokenSnapshots = ref<Record<number, boolean>>({})
-let activityTimer: number | null = null
+const freshActivityIds = ref<Set<number>>(new Set())
+let activitySocket: WebSocket | null = null
+let activityReconnectTimer: number | null = null
+let activityFallbackTimer: number | null = null
+let activitySocketGeneration = 0
+let activityMotionCursor = 0
+const freshActivityTimers = new Map<number, number>()
 
 const loading = computed(() => runtimeLoading.value && !summary.value)
 const recentActivities = computed(() => activities.value.slice(0, 8))
@@ -60,6 +76,12 @@ const overallHealthy = computed(() => Boolean(
 const healthClass = computed(() => overallHealthy.value ? 'healthy' : 'attention')
 const healthLabel = computed(() => overallHealthy.value ? '系统运行正常' : '有项目需要关注')
 const statusFeedLabel = computed(() => socketState.value === 'connected' ? '状态实时更新' : '状态轮询更新')
+const activityFeedLabel = computed(() => {
+  if (activitySocketState.value === 'connected') return '活动实时更新'
+  if (activitySocketState.value === 'connecting') return '正在连接活动'
+  return '断线补偿中'
+})
+const activityFeedClass = computed(() => activitySocketState.value === 'connected' ? 'live' : 'fallback')
 const attentionCount = computed(() => (summary.value?.cameras.abnormal || 0) + uploadFailures.value)
 const latestActivityByCamera = computed(() => {
   const result = new Map<number, MotionActivityEvent>()
@@ -94,7 +116,13 @@ function cameraName(cameraId: number) {
 function connectivityLabel(state: CameraHealth['connectivity_status']) {
   if (state === 'online') return '在线'
   if (state === 'offline') return '离线'
-  return '未检测'
+  return '状态未知'
+}
+function connectivitySourceLabel(camera: CameraHealth) {
+  if (!camera.enabled) return '已停用'
+  if (camera.connectivity_source === 'recorder') return '录像信号'
+  if (camera.connectivity_source === 'rtsp') return 'RTSP 检测'
+  return '历史状态'
 }
 function connectivityClass(camera: CameraHealth) {
   if (!camera.enabled) return 'muted'
@@ -214,6 +242,10 @@ function openCameraSettings(cameraId: number) {
 function openAllActivity() { void router.push('/events') }
 function openHealth() { void router.push('/health-center') }
 
+function updateActivityCursor(events: MotionActivityEvent[]) {
+  for (const event of events) activityMotionCursor = Math.max(activityMotionCursor, event.id)
+}
+
 async function loadActivities() {
   activityLoading.value = true
   activityError.value = ''
@@ -223,12 +255,13 @@ async function loadActivities() {
       params: {
         start: `${date}T00:00:00`,
         end: `${date}T23:59:59.999999`,
-        limit: 100,
+        limit: ACTIVITY_MAX_ITEMS,
       },
     })
+    updateActivityCursor(data)
     activities.value = [...data]
       .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
-      .slice(0, 100)
+      .slice(0, ACTIVITY_MAX_ITEMS)
   } catch (error) {
     activityError.value = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '活动加载失败'
   } finally {
@@ -236,12 +269,134 @@ async function loadActivities() {
   }
 }
 
+function markActivityFresh(eventId: number) {
+  const next = new Set(freshActivityIds.value)
+  next.add(eventId)
+  freshActivityIds.value = next
+  const oldTimer = freshActivityTimers.get(eventId)
+  if (oldTimer !== undefined) window.clearTimeout(oldTimer)
+  freshActivityTimers.set(eventId, window.setTimeout(() => {
+    const current = new Set(freshActivityIds.value)
+    current.delete(eventId)
+    freshActivityIds.value = current
+    freshActivityTimers.delete(eventId)
+  }, ACTIVITY_FRESH_MS))
+}
+
+function mergeRealtimeActivity(event: MotionActivityEvent) {
+  activityMotionCursor = Math.max(activityMotionCursor, event.id)
+  if (event.started_at.slice(0, 10) !== todayString()) return
+  const existed = activities.value.some((item) => item.id === event.id)
+  activities.value = [event, ...activities.value.filter((item) => item.id !== event.id)]
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+    .slice(0, ACTIVITY_MAX_ITEMS)
+  if (!existed) markActivityFresh(event.id)
+}
+
+function activityEventsWsUrl() {
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const params = new URLSearchParams()
+  if (activityMotionCursor > 0) params.set('after_motion_id', String(activityMotionCursor))
+  const query = params.toString()
+  return `${scheme}//${window.location.host}/ws/events${query ? `?${query}` : ''}`
+}
+
+function clearActivityReconnect() {
+  if (activityReconnectTimer !== null) window.clearTimeout(activityReconnectTimer)
+  activityReconnectTimer = null
+}
+function stopActivityFallback() {
+  if (activityFallbackTimer !== null) window.clearInterval(activityFallbackTimer)
+  activityFallbackTimer = null
+}
+function startActivityFallback() {
+  if (activityFallbackTimer !== null || document.hidden) return
+  activityFallbackTimer = window.setInterval(() => {
+    if (document.hidden || activitySocketState.value === 'connected') return
+    void loadActivities()
+  }, ACTIVITY_FALLBACK_REFRESH_MS)
+}
+function closeActivitySocket(nextState: ActivitySocketState = 'idle') {
+  activitySocketGeneration += 1
+  const current = activitySocket
+  activitySocket = null
+  if (current) {
+    current.onopen = null
+    current.onmessage = null
+    current.onerror = null
+    current.onclose = null
+    try { current.close() } catch { /* already closed */ }
+  }
+  activitySocketState.value = nextState
+}
+function scheduleActivityReconnect() {
+  if (document.hidden || activityReconnectTimer !== null) return
+  activityReconnectTimer = window.setTimeout(() => {
+    activityReconnectTimer = null
+    connectActivitySocket()
+  }, ACTIVITY_RECONNECT_MS)
+}
+function connectActivitySocket() {
+  if (document.hidden) return
+  clearActivityReconnect()
+  closeActivitySocket('connecting')
+  const generation = activitySocketGeneration
+  const ws = new WebSocket(activityEventsWsUrl())
+  activitySocket = ws
+
+  ws.onopen = () => {
+    if (generation !== activitySocketGeneration || activitySocket !== ws) return
+    activitySocketState.value = 'connected'
+    stopActivityFallback()
+  }
+  ws.onmessage = (event: MessageEvent) => {
+    if (generation !== activitySocketGeneration || activitySocket !== ws || typeof event.data !== 'string') return
+    try {
+      const message = JSON.parse(event.data) as ActivitySocketMessage
+      if (message.type === 'motion.created' && message.data) mergeRealtimeActivity(message.data)
+    } catch {
+      // Ignore unknown event frames; the REST fallback can reconcile state if needed.
+    }
+  }
+  ws.onerror = () => {
+    if (generation !== activitySocketGeneration || activitySocket !== ws) return
+    activitySocketState.value = 'disconnected'
+    startActivityFallback()
+  }
+  ws.onclose = () => {
+    if (generation !== activitySocketGeneration || activitySocket !== ws) return
+    activitySocket = null
+    activitySocketState.value = 'disconnected'
+    startActivityFallback()
+    scheduleActivityReconnect()
+  }
+}
+
+async function syncActivityFeed() {
+  await loadActivities()
+  if (!document.hidden) connectActivitySocket()
+}
+function handleVisibilityChange() {
+  if (document.hidden) {
+    clearActivityReconnect()
+    stopActivityFallback()
+    closeActivitySocket('idle')
+    return
+  }
+  void syncActivityFeed()
+}
+
 onMounted(() => {
-  void loadActivities()
-  activityTimer = window.setInterval(() => void loadActivities(), ACTIVITY_REFRESH_MS)
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  void syncActivityFeed()
 })
 onBeforeUnmount(() => {
-  if (activityTimer !== null) window.clearInterval(activityTimer)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
+  clearActivityReconnect()
+  stopActivityFallback()
+  closeActivitySocket('idle')
+  for (const timer of freshActivityTimers.values()) window.clearTimeout(timer)
+  freshActivityTimers.clear()
 })
 </script>
 
@@ -277,17 +432,20 @@ onBeforeUnmount(() => {
             <h2>最近活动</h2>
             <p>今天的移动检测快照；点击活动直接进入对应回放。</p>
           </div>
-          <button type="button" class="quiet-link" @click="openAllActivity">查看全部 ›</button>
+          <div class="activity-head-actions">
+            <span class="activity-feed-state" :class="activityFeedClass"><i></i>{{ activityFeedLabel }}</span>
+            <button type="button" class="quiet-link" @click="openAllActivity">查看全部 ›</button>
+          </div>
         </header>
 
         <div v-if="activityError && !activities.length" class="activity-empty">
           <strong>暂时无法加载活动</strong><span>{{ activityError }}</span><button type="button" @click="loadActivities">重试</button>
         </div>
         <div v-else-if="!recentActivities.length && !activityLoading" class="activity-empty">
-          <span class="empty-motion-mark"></span><strong>今天还没有检测活动</strong><span>新的移动事件会显示在这里，不会自动打开任何视频流。</span>
+          <span class="empty-motion-mark"></span><strong>今天还没有检测活动</strong><span>新的移动事件会实时显示在这里，不会自动打开任何视频流。</span>
         </div>
         <div v-else class="activity-grid">
-          <button v-for="event in recentActivities" :key="event.id" type="button" class="activity-card" @click="playActivity(event)">
+          <button v-for="event in recentActivities" :key="event.id" type="button" :class="freshActivityIds.has(event.id) ? 'activity-card fresh' : 'activity-card'" @click="playActivity(event)">
             <span class="activity-thumb">
               <img v-if="snapshotAvailable(event)" :src="snapshotUrl(event)" :alt="`${cameraName(event.camera_id)} 活动截图`" loading="lazy" @error="markSnapshotBroken(event.id)" />
               <span v-else class="activity-placeholder"><i></i></span>
@@ -326,7 +484,7 @@ onBeforeUnmount(() => {
           <button type="button" class="camera-main" @click="primeLiveCamera(camera.camera_id)">
             <span class="camera-dot" :class="connectivityClass(camera)"></span>
             <span class="camera-identity"><strong>{{ camera.name }}</strong><small>{{ camera.ip }}</small></span>
-            <span class="camera-facts"><span :class="connectivityClass(camera)">{{ connectivityLabel(camera.connectivity_status) }}</span><span :class="recorderClass(camera.recorder_state)">{{ recorderLabel(camera.recorder_state) }}</span></span>
+            <span class="camera-facts"><span :class="connectivityClass(camera)">{{ connectivityLabel(camera.connectivity_status) }}</span><span :class="recorderClass(camera.recorder_state)">{{ recorderLabel(camera.recorder_state) }}</span><span class="source">{{ connectivitySourceLabel(camera) }}</span></span>
             <span class="camera-activity"><small>最近活动</small><strong>{{ latestActivityLabel(camera.camera_id) }}</strong></span>
             <span class="live-link">实时监控 ›</span>
           </button>
@@ -345,10 +503,13 @@ onBeforeUnmount(() => {
 .health-pill{min-width:235px;display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface);cursor:pointer}.health-pill:hover,.health-pill:focus-visible{background:var(--nvr-surface-2);outline:none}.health-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%}.health-pill.healthy .health-dot{background:var(--nvr-green);box-shadow:0 0 0 4px rgba(46,204,138,.08)}.health-pill.attention .health-dot{background:var(--nvr-yellow);box-shadow:0 0 0 4px rgba(245,184,66,.08)}.health-pill div{display:flex;flex-direction:column;gap:2px}.health-pill strong{font-size:11px;font-weight:620}.health-pill small{color:#69788b;font-size:9px}
 .status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:12px;overflow:hidden;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.status-cell{min-height:66px;padding:13px 16px;border-right:1px solid var(--nvr-border)}.status-cell:last-child{border-right:0}.status-cell>span{display:block;margin-bottom:8px;color:#69788b;font-size:9px}.status-cell strong{font-size:18px;font-weight:660;letter-spacing:-.02em}.status-cell small{color:#738196;font-size:9px;font-weight:500}.attention-cell strong{color:var(--nvr-yellow)}
 .surface{border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);overflow:hidden}.home-primary-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;margin-bottom:12px}.section-head{min-height:68px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-bottom:1px solid var(--nvr-border)}.section-head.compact{min-height:60px}.section-head h2{margin:4px 0 3px;font-size:13px;font-weight:650}.quiet-link{border:0;padding:5px 0;background:transparent;color:#8d9aab;font:inherit;font-size:10px;cursor:pointer}.quiet-link:hover{color:var(--nvr-text)}
-.activity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.activity-card{min-width:0;padding:0;border:0;background:var(--nvr-surface);color:inherit;text-align:left;cursor:pointer}.activity-card:hover,.activity-card:focus-visible{background:var(--nvr-surface-2);outline:none}.activity-thumb{position:relative;display:block;aspect-ratio:16/9;overflow:hidden;background:#090c10}.activity-thumb img{width:100%;height:100%;display:block;object-fit:cover}.activity-placeholder{position:absolute;inset:0;display:grid;place-items:center;background:#0c1015}.activity-placeholder i,.empty-motion-mark{width:24px;height:18px;border:1px solid #34404f;border-radius:6px;position:relative}.activity-placeholder i::after,.empty-motion-mark::after{content:'';position:absolute;width:5px;height:5px;left:9px;top:6px;border-radius:50%;background:#526174}.activity-thumb time,.activity-badge{position:absolute;top:8px;padding:3px 5px;border-radius:4px;background:rgba(5,8,12,.74);color:#dce4ed;font-size:8px}.activity-thumb time{left:8px}.activity-badge{right:8px}.play-mark{position:absolute;left:50%;top:50%;width:30px;height:30px;display:grid;place-items:center;opacity:0;transform:translate(-50%,-50%);border-radius:50%;background:rgba(4,7,10,.68);color:#fff;font-size:9px;transition:opacity .15s}.activity-card:hover .play-mark,.activity-card:focus-visible .play-mark{opacity:1}.activity-copy{display:block;padding:10px 11px 11px}.activity-title,.activity-meta{display:flex;align-items:center;justify-content:space-between;gap:8px}.activity-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.activity-title small,.activity-meta{color:#68778a;font-size:8px}.activity-meta{margin-top:6px}.activity-meta i{color:#8794a5;font-style:normal}.activity-empty{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px;color:#6d7b8d;text-align:center}.activity-empty strong{color:#aeb8c4;font-size:11px}.activity-empty span{max-width:340px;font-size:9px}.activity-empty button{margin-top:5px;border:1px solid var(--nvr-border);border-radius:6px;padding:5px 10px;background:transparent;color:#8997a8;font-size:9px;cursor:pointer}
+.activity-head-actions{display:flex;align-items:center;gap:12px}.activity-feed-state{display:flex;align-items:center;gap:5px;color:#718095;font-size:8px;white-space:nowrap}.activity-feed-state i{width:5px;height:5px;border-radius:50%;background:#58687b}.activity-feed-state.live i{background:var(--nvr-green);box-shadow:0 0 0 3px rgba(46,204,138,.07)}.activity-feed-state.fallback i{background:var(--nvr-yellow)}
+.activity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.activity-card{min-width:0;padding:0;border:0;background:var(--nvr-surface);color:inherit;text-align:left;cursor:pointer}.activity-card:hover,.activity-card:focus-visible{background:var(--nvr-surface-2);outline:none}.activity-card.fresh{animation:activity-arrive .9s ease-out}.activity-thumb{position:relative;display:block;aspect-ratio:16/9;overflow:hidden;background:#090c10}.activity-thumb img{width:100%;height:100%;display:block;object-fit:cover}.activity-placeholder{position:absolute;inset:0;display:grid;place-items:center;background:#0c1015}.activity-placeholder i,.empty-motion-mark{width:24px;height:18px;border:1px solid #34404f;border-radius:6px;position:relative}.activity-placeholder i::after,.empty-motion-mark::after{content:'';position:absolute;width:5px;height:5px;left:9px;top:6px;border-radius:50%;background:#526174}.activity-thumb time,.activity-badge{position:absolute;top:8px;padding:3px 5px;border-radius:4px;background:rgba(5,8,12,.74);color:#dce4ed;font-size:8px}.activity-thumb time{left:8px}.activity-badge{right:8px}.play-mark{position:absolute;left:50%;top:50%;width:30px;height:30px;display:grid;place-items:center;opacity:0;transform:translate(-50%,-50%);border-radius:50%;background:rgba(4,7,10,.68);color:#fff;font-size:9px;transition:opacity .15s}.activity-card:hover .play-mark,.activity-card:focus-visible .play-mark{opacity:1}.activity-copy{display:block;padding:10px 11px 11px}.activity-title,.activity-meta{display:flex;align-items:center;justify-content:space-between;gap:8px}.activity-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.activity-title small,.activity-meta{color:#68778a;font-size:8px}.activity-meta{margin-top:6px}.activity-meta i{color:#8794a5;font-style:normal}.activity-empty{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px;color:#6d7b8d;text-align:center}.activity-empty strong{color:#aeb8c4;font-size:11px}.activity-empty span{max-width:340px;font-size:9px}.activity-empty button{margin-top:5px;border:1px solid var(--nvr-border);border-radius:6px;padding:5px 10px;background:transparent;color:#8997a8;font-size:9px;cursor:pointer}
+@keyframes activity-arrive{0%{box-shadow:inset 0 0 0 1px rgba(46,204,138,.42);background:rgba(46,204,138,.045)}100%{box-shadow:inset 0 0 0 1px rgba(46,204,138,0);background:var(--nvr-surface)}}
 .system-body{padding:16px}.storage-line{padding-bottom:17px;border-bottom:1px solid var(--nvr-border)}.storage-title{display:flex;align-items:baseline;justify-content:space-between}.storage-line span{color:#718095;font-size:9px}.storage-line strong{font-size:20px;font-weight:660}.storage-track{height:5px;margin:11px 0 8px;overflow:hidden;border-radius:999px;background:#252d38}.storage-track i{display:block;height:100%;border-radius:inherit;background:#71849b}.storage-copy{display:flex;justify-content:space-between}.system-list>div{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:13px 0;border-bottom:1px solid var(--nvr-border)}.system-list>div:last-child{border-bottom:0;padding-bottom:0}.system-list span{color:#718095;font-size:9px}.system-list strong{font-size:10px;font-weight:600}.system-list small{grid-column:1/-1;color:#657386;font-size:8px}
-.camera-head{min-height:70px}.camera-total{color:#6d7c8f;font-size:9px}.camera-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.camera-row{position:relative;min-width:0;background:var(--nvr-surface)}.camera-row:hover{background:var(--nvr-surface-2)}.camera-main{width:100%;min-height:68px;display:grid;grid-template-columns:8px minmax(100px,1fr) auto minmax(90px,.65fr) auto;align-items:center;gap:10px;padding:11px 42px 11px 14px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.camera-main:focus-visible{outline:1px solid #506178;outline-offset:-2px}.camera-dot{width:7px;height:7px;border-radius:50%}.camera-dot.success{background:var(--nvr-green)}.camera-dot.warning{background:var(--nvr-yellow)}.camera-dot.danger{background:var(--nvr-red)}.camera-dot.muted{background:#536173}.camera-identity,.camera-activity{min-width:0;display:flex;flex-direction:column;gap:3px}.camera-identity strong,.camera-activity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.camera-identity small,.camera-activity small{color:#667589;font-size:8px}.camera-facts{display:flex;gap:5px}.camera-facts span{padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.025);color:#728196;font-size:8px}.camera-facts .success{color:var(--nvr-green)}.camera-facts .warning{color:var(--nvr-yellow)}.camera-facts .danger{color:var(--nvr-red)}.camera-facts .muted{color:#718095}.live-link{color:#8795a7;font-size:9px}.camera-settings{position:absolute;right:10px;top:19px;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:#657386;cursor:pointer}.camera-settings:hover{background:rgba(255,255,255,.045);color:#aab5c1}.camera-warning{padding:0 14px 9px 32px;overflow:hidden;color:var(--nvr-yellow);font-size:8px;white-space:nowrap;text-overflow:ellipsis}.camera-empty{grid-column:1/-1;padding:34px;background:var(--nvr-surface);color:#68778a;text-align:center;font-size:10px}
+.camera-head{min-height:70px}.camera-total{color:#6d7c8f;font-size:9px}.camera-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.camera-row{position:relative;min-width:0;background:var(--nvr-surface)}.camera-row:hover{background:var(--nvr-surface-2)}.camera-main{width:100%;min-height:68px;display:grid;grid-template-columns:8px minmax(100px,1fr) auto minmax(90px,.65fr) auto;align-items:center;gap:10px;padding:11px 42px 11px 14px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.camera-main:focus-visible{outline:1px solid #506178;outline-offset:-2px}.camera-dot{width:7px;height:7px;border-radius:50%}.camera-dot.success{background:var(--nvr-green)}.camera-dot.warning{background:var(--nvr-yellow)}.camera-dot.danger{background:var(--nvr-red)}.camera-dot.muted{background:#536173}.camera-identity,.camera-activity{min-width:0;display:flex;flex-direction:column;gap:3px}.camera-identity strong,.camera-activity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.camera-identity small,.camera-activity small{color:#667589;font-size:8px}.camera-facts{display:flex;gap:5px}.camera-facts span{padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.025);color:#728196;font-size:8px}.camera-facts .success{color:var(--nvr-green)}.camera-facts .warning{color:var(--nvr-yellow)}.camera-facts .danger{color:var(--nvr-red)}.camera-facts .muted{color:#718095}.camera-facts .source{color:#667589;background:transparent;padding-left:1px;padding-right:1px}.live-link{color:#8795a7;font-size:9px}.camera-settings{position:absolute;right:10px;top:19px;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:#657386;cursor:pointer}.camera-settings:hover{background:rgba(255,255,255,.045);color:#aab5c1}.camera-warning{padding:0 14px 9px 32px;overflow:hidden;color:var(--nvr-yellow);font-size:8px;white-space:nowrap;text-overflow:ellipsis}.camera-empty{grid-column:1/-1;padding:34px;background:var(--nvr-surface);color:#68778a;text-align:center;font-size:10px}
+@media(prefers-reduced-motion:reduce){.activity-card.fresh{animation:none}}
 @media(max-width:1320px){.activity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.home-primary-grid{grid-template-columns:minmax(0,1fr) 300px}.camera-main{grid-template-columns:8px minmax(90px,1fr) auto auto}.camera-activity{display:none}}
 @media(max-width:980px){.home-primary-grid{grid-template-columns:1fr}.system-list{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.camera-status-grid{grid-template-columns:1fr}}
-@media(max-width:720px){.protect-home{padding:15px}.home-header{align-items:flex-start;flex-direction:column}.health-pill{width:100%}.status-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.status-cell:nth-child(2){border-right:0}.status-cell:nth-child(-n+2){border-bottom:1px solid var(--nvr-border)}.activity-grid{grid-template-columns:1fr}.section-head{align-items:flex-start}.camera-main{grid-template-columns:8px minmax(90px,1fr) auto}.camera-activity,.live-link{display:none}.home-heading h1{font-size:22px}}
+@media(max-width:720px){.protect-home{padding:15px}.home-header{align-items:flex-start;flex-direction:column}.health-pill{width:100%}.status-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.status-cell:nth-child(2){border-right:0}.status-cell:nth-child(-n+2){border-bottom:1px solid var(--nvr-border)}.activity-grid{grid-template-columns:1fr}.section-head{align-items:flex-start}.activity-head-actions{align-items:flex-end;flex-direction:column;gap:5px}.camera-main{grid-template-columns:8px minmax(90px,1fr) auto}.camera-activity,.live-link{display:none}.home-heading h1{font-size:22px}}
 </style>
