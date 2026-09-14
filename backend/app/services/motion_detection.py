@@ -9,12 +9,49 @@ from typing import Any
 class SensitivityProfile:
     var_threshold: int
     min_area_ratio: float
+    min_zone_overlap_ratio: float
+    global_change_ratio: float
+    global_block_ratio: float
+    confidence_gain: float
+    confidence_decay: float
+    enter_confidence: float
+    exit_confidence: float
 
 
 _PROFILES: dict[str, SensitivityProfile] = {
-    "low": SensitivityProfile(var_threshold=32, min_area_ratio=0.012),
-    "medium": SensitivityProfile(var_threshold=24, min_area_ratio=0.006),
-    "high": SensitivityProfile(var_threshold=16, min_area_ratio=0.0025),
+    "low": SensitivityProfile(
+        var_threshold=32,
+        min_area_ratio=0.012,
+        min_zone_overlap_ratio=0.35,
+        global_change_ratio=0.50,
+        global_block_ratio=0.75,
+        confidence_gain=0.12,
+        confidence_decay=0.18,
+        enter_confidence=0.75,
+        exit_confidence=0.20,
+    ),
+    "medium": SensitivityProfile(
+        var_threshold=24,
+        min_area_ratio=0.006,
+        min_zone_overlap_ratio=0.25,
+        global_change_ratio=0.60,
+        global_block_ratio=0.75,
+        confidence_gain=0.18,
+        confidence_decay=0.14,
+        enter_confidence=0.65,
+        exit_confidence=0.20,
+    ),
+    "high": SensitivityProfile(
+        var_threshold=16,
+        min_area_ratio=0.0025,
+        min_zone_overlap_ratio=0.15,
+        global_change_ratio=0.70,
+        global_block_ratio=0.75,
+        confidence_gain=0.25,
+        confidence_decay=0.10,
+        enter_confidence=0.55,
+        exit_confidence=0.15,
+    ),
 }
 
 
@@ -23,6 +60,57 @@ def sensitivity_profile(level: str) -> SensitivityProfile:
         return _PROFILES[level]
     except KeyError as exc:
         raise ValueError(f"unsupported motion sensitivity: {level}") from exc
+
+
+@dataclass(frozen=True, slots=True)
+class MotionConfidenceResult:
+    motion: bool
+    confidence: float
+    transitioned: bool
+
+
+class MotionConfidenceTracker:
+    """Turn accepted frame evidence into a stable motion signal with hysteresis."""
+
+    def __init__(self, profile: SensitivityProfile) -> None:
+        self.profile = profile
+        self.confidence = 0.0
+        self.motion = False
+
+    def reset(self) -> MotionConfidenceResult:
+        transitioned = self.motion or self.confidence > 0.0
+        self.confidence = 0.0
+        self.motion = False
+        return MotionConfidenceResult(
+            motion=False,
+            confidence=0.0,
+            transitioned=transitioned,
+        )
+
+    def update(self, raw_score: float, *, suppressed: bool = False) -> MotionConfidenceResult:
+        if suppressed:
+            return self.reset()
+
+        previous_motion = self.motion
+        score = min(1.0, max(0.0, raw_score))
+        if score > 0.0:
+            evidence_weight = 0.6 + 0.4 * score
+            self.confidence += self.profile.confidence_gain * evidence_weight
+        else:
+            self.confidence -= self.profile.confidence_decay
+        self.confidence = min(1.0, max(0.0, self.confidence))
+
+        if self.motion:
+            if self.confidence <= self.profile.exit_confidence:
+                self.motion = False
+        elif self.confidence >= self.profile.enter_confidence:
+            self.motion = True
+
+        return MotionConfidenceResult(
+            motion=self.motion,
+            confidence=self.confidence,
+            transitioned=self.motion != previous_motion,
+        )
 
 
 def point_in_polygon(point: tuple[float, float], polygon: list[list[float]]) -> bool:
