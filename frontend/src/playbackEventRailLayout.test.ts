@@ -13,10 +13,12 @@ describe('Playback detection rail layout', () => {
     expect(eventFeedSource).not.toContain('max-height:310px')
   })
 
-  it('uses compact event cards inside the 280px detection rail', () => {
+  it('uses compact low-chrome event rows inside the detection rail', () => {
     expect(workspaceSource).toContain('grid-template-columns:160px minmax(0,1fr) 280px')
-    expect(eventFeedSource).toContain('grid-template-columns:96px minmax(0,1fr) 10px')
-    expect(eventFeedSource).not.toContain('grid-template-columns:150px minmax(0,1fr) 12px')
+    expect(eventFeedSource).toContain('class="event-row"')
+    expect(eventFeedSource).toContain('class="event-active-mark"')
+    expect(eventFeedSource).toContain('@click="openEvent(event)"')
+    expect(eventFeedSource).not.toContain('class="event-chevron"')
   })
 
   it('keeps the playback canvas strict 16:9 and uncropped', () => {
