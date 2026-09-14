@@ -17,8 +17,9 @@ describe('Playback theme contrast', () => {
     expect(timelineSource).not.toContain('var(--nvr-bg-soft)')
   })
 
-  it('keeps active controls and playhead readable in both themes', () => {
-    expect(eventFeedSource).toContain('.event-filter-row button.active{border-color:color-mix(in srgb,var(--nvr-blue) 56%,var(--nvr-border));color:var(--nvr-text)')
+  it('keeps active event controls and playhead readable in both themes', () => {
+    expect(eventFeedSource).toContain('.event-filter-row button.active{color:var(--nvr-text);background:color-mix(in srgb,var(--nvr-blue) 11%,var(--nvr-input))}')
+    expect(eventFeedSource).toContain('.event-row.active .event-active-mark{background:var(--nvr-blue)}')
     expect(timelineSource).toMatch(/\.timeline-playhead\{[^}]*background:var\(--nvr-blue\)/)
     expect(timelineSource).toMatch(/\.timeline-playhead span\{[^}]*background:var\(--nvr-blue\);color:#fff/)
   })
