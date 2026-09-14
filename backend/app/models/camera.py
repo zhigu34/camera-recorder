@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, Boolean, DateTime, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.database import Base
 
@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
 
 _CONNECTIVITY_STALE_SECONDS = 60.0
+_FAILURE_THRESHOLD = 3
 
 
 class Camera(Base):
@@ -85,6 +86,35 @@ class Camera(Base):
     def connectivity_failures(self, value: int) -> None:
         self._connectivity_failures = max(0, int(value))
 
+    @validates("status")
+    def _sync_explicit_connectivity_status(self, _key: str, value: str) -> str:
+        """Keep manual Probe writes and monitor hysteresis on one persisted streak.
+
+        The API already writes `status` for explicit Probe results. Synchronizing the
+        failure counter here keeps those results durable without making Probe a second
+        owner of connectivity state. The monitor overwrites the same counter with its
+        resolved hysteresis value during background cycles.
+        """
+
+        if value == "online":
+            self.connectivity_failures = 0
+        elif value in {"offline", "probe_failed"}:
+            self.connectivity_failures = max(self.connectivity_failures, _FAILURE_THRESHOLD)
+
+        camera_id = getattr(self, "id", None)
+        if camera_id and value in {"online", "offline", "probe_failed"}:
+            try:
+                from app.services.camera_connectivity_monitor import camera_connectivity_monitor
+
+                camera_connectivity_monitor.reconcile_manual_probe(
+                    int(camera_id),
+                    success=value == "online",
+                )
+            except (ImportError, AttributeError):
+                # Model writes can occur while modules are still importing during startup/tests.
+                pass
+        return value
+
     @staticmethod
     def _utc(value: datetime | None) -> datetime | None:
         if value is None:
@@ -108,8 +138,6 @@ class Camera(Base):
         if self.status in {"offline", "probe_failed"}:
             return "offline"
 
-        # Recover a correct value for rows whose legacy status was overwritten by
-        # recorder/scheduler values such as recording, stopped or scheduled.
         if probed_at is None:
             return "unknown"
         online_at = self._utc(self.last_online_at)
