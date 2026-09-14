@@ -4,6 +4,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { VideoPlay } from '@element-plus/icons-vue'
 
+import PlaybackMediaControls from './PlaybackMediaControls.vue'
 import type {
   PlaybackPlayerHandle,
   PlaybackState,
@@ -24,8 +25,10 @@ type ActivePlaybackMode = Exclude<PlaybackMode, ''>
 
 const props = withDefaults(defineProps<{
   playbackRate?: number
+  skipSeconds?: number
 }>(), {
   playbackRate: 1,
+  skipSeconds: 10,
 })
 
 const emit = defineEmits<{
@@ -34,6 +37,9 @@ const emit = defineEmits<{
   'playing-change': [playing: boolean]
   'muted-change': [muted: boolean]
   'volume-change': [volume: number]
+  'update:playbackRate': [value: number]
+  'update:skipSeconds': [value: number]
+  skip: [deltaSeconds: number]
   ended: []
   error: [message: string]
 }>()
@@ -54,6 +60,7 @@ const cancellingProxy = ref(false)
 const pendingSeekSeconds = ref<number | null>(null)
 const desiredVolume = ref(1)
 const desiredMuted = ref(false)
+const playing = ref(false)
 let progressTimer: number | null = null
 
 const effectiveProgressPercent = computed(() => {
@@ -232,6 +239,7 @@ function reset() {
   proxyProgress.value = null
   fallbackInProgress.value = false
   pendingSeekSeconds.value = null
+  playing.value = false
   playbackTracker.reset()
   emit('playing-change', false)
 }
@@ -296,6 +304,14 @@ function pause() {
   videoRef.value?.pause()
 }
 
+async function togglePlay() {
+  if (playing.value) {
+    pause()
+    return
+  }
+  await playVideo().catch(() => undefined)
+}
+
 function setVolume(volume: number) {
   desiredVolume.value = Math.max(0, Math.min(1, Number(volume)))
   if (videoRef.value) videoRef.value.volume = desiredVolume.value
@@ -346,10 +362,12 @@ function handleVideoPlaying() {
   applyAudioState()
   playbackTracker.markPlaying(videoRef.value)
   preparing.value = false
+  playing.value = true
   emit('playing-change', true)
 }
 
 function handleVideoPause() {
+  playing.value = false
   emit('playing-change', false)
 }
 
@@ -407,6 +425,7 @@ async function cancelProxy() {
 }
 
 function handleEnded() {
+  playing.value = false
   emit('playing-change', false)
   emit('ended')
 }
@@ -475,6 +494,23 @@ onBeforeUnmount(() => {
         <strong>{{ activeRecording ? '当前片段不可播放' : '尚未选择录像' }}</strong>
         <span>选择录像或时间后开始播放。</span>
       </div>
+
+      <PlaybackMediaControls
+        v-if="activeRecording && isPlayable(activeRecording)"
+        :active="Boolean(activeRecording)"
+        :playing="playing"
+        :playback-rate="playbackRate"
+        :skip-seconds="skipSeconds"
+        :muted="desiredMuted"
+        :volume="desiredVolume"
+        @toggle-play="togglePlay"
+        @skip="emit('skip', $event)"
+        @update:playback-rate="emit('update:playbackRate', $event)"
+        @update:skip-seconds="emit('update:skipSeconds', $event)"
+        @update:muted="setMuted"
+        @update:volume="setVolume"
+        @fullscreen="toggleFullscreen"
+      />
     </div>
 
     <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
