@@ -30,6 +30,7 @@ Camera Recorder 智能增量部署脚本
 默认行为:
   自动比较“上次成功部署 -> 当前代码”的文件变化，只重建/更新受影响服务。
   纯 frontend 变化只重建 frontend，并使用 --no-deps，backend 录像不会中断。
+  纯文档/仓库说明变化不会重建或重启任何容器。
 
 选项:
   --check-only          只做检查并显示部署计划，不构建和启动
@@ -216,7 +217,7 @@ classify_path() {
     .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1 ;;
     docker-compose.yml) mark_full ;;
     .env.example) CONFIG_ALL=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1 ;;
-    deploy.sh|README.md|docs/*|.github/*|.gitignore|Makefile|scripts/*) ;;
+    deploy.sh|*.md|docs/*|.github/*|.gitignore|Makefile|scripts/*) ;;
     '') ;;
     *) warn "无法精确归类变更: $path，按完整部署处理"; mark_full ;;
   esac
