@@ -26,6 +26,16 @@ ConfigLoader = Callable[[int], Awaitable[MotionWorkerConfig | None]]
 EventSink = Callable[[int, ClosedMotionEvent, np.ndarray | None], Awaitable[None]]
 WorkerFactory = Callable[..., Any]
 
+_DIAGNOSTIC_DEFAULTS: dict[str, Any] = {
+    "confidence": None,
+    "raw_score": None,
+    "moving_area_ratio": None,
+    "global_change_ratio": None,
+    "primary_zone_id": None,
+    "global_change": False,
+}
+_DIAGNOSTIC_KEYS = frozenset(_DIAGNOSTIC_DEFAULTS)
+
 
 async def _default_enabled_camera_loader() -> list[int]:
     async with SessionLocal() as db:
@@ -107,13 +117,18 @@ async def _default_event_sink(
             started_at=event.started_at,
             ended_at=event.ended_at,
             peak_score=event.peak_score,
-            metadata_json=json.dumps({"detector": "motion-v1"}, ensure_ascii=False),
+            metadata_json=json.dumps({"detector": "motion-v2"}, ensure_ascii=False),
         )
         db.add(row)
         await db.flush()
 
         if frame is not None:
-            relative = Path("motion") / event.started_at.strftime("%Y/%m/%d") / f"camera-{camera_id}" / f"event-{row.id}.jpg"
+            relative = (
+                Path("motion")
+                / event.started_at.strftime("%Y/%m/%d")
+                / f"camera-{camera_id}"
+                / f"event-{row.id}.jpg"
+            )
             absolute = settings.data_dir / relative
             try:
                 await asyncio.to_thread(_write_snapshot, absolute, frame)
@@ -143,6 +158,16 @@ class MotionDetectionManager:
         self._status: dict[int, dict[str, Any]] = {}
         self._running = False
 
+    @staticmethod
+    def _default_status() -> dict[str, Any]:
+        return {
+            "state": "disabled",
+            "stream": None,
+            "last_frame_at": None,
+            "last_error": None,
+            **_DIAGNOSTIC_DEFAULTS,
+        }
+
     def _set_status(
         self,
         camera_id: int,
@@ -150,24 +175,37 @@ class MotionDetectionManager:
         stream: str | None = None,
         last_frame_at: datetime | None = None,
         last_error: str | None = None,
+        diagnostics: dict[str, Any] | None = None,
     ) -> None:
-        previous = self._status.get(camera_id, {})
+        previous = self._status.get(camera_id, self._default_status())
+        if state in {"disabled", "stopped"} and diagnostics is None:
+            diagnostic_values = dict(_DIAGNOSTIC_DEFAULTS)
+        else:
+            diagnostic_values = {
+                key: previous.get(key, default)
+                for key, default in _DIAGNOSTIC_DEFAULTS.items()
+            }
+            if diagnostics is not None:
+                for key in _DIAGNOSTIC_KEYS:
+                    if key in diagnostics:
+                        diagnostic_values[key] = diagnostics[key]
+
+        resolved_stream = stream if stream is not None else previous.get("stream")
+        if state in {"disabled", "stopped"} and stream is None:
+            resolved_stream = None
+
         self._status[camera_id] = {
             "state": state,
-            "stream": stream if stream is not None else previous.get("stream"),
+            "stream": resolved_stream,
             "last_frame_at": (
                 last_frame_at if last_frame_at is not None else previous.get("last_frame_at")
             ),
             "last_error": last_error,
+            **diagnostic_values,
         }
 
     def status(self, camera_id: int) -> dict[str, Any]:
-        return dict(
-            self._status.get(
-                camera_id,
-                {"state": "disabled", "stream": None, "last_frame_at": None, "last_error": None},
-            )
-        )
+        return dict(self._status.get(camera_id, self._default_status()))
 
     def active_camera_ids(self) -> list[int]:
         return sorted(camera_id for camera_id, task in self._tasks.items() if not task.done())
@@ -233,8 +271,16 @@ class MotionDetectionManager:
                 stream: str | None,
                 last_frame_at: datetime | None,
                 last_error: str | None,
+                diagnostics: dict[str, Any] | None,
             ) -> None:
-                self._set_status(camera_id, state, stream, last_frame_at, last_error)
+                self._set_status(
+                    camera_id,
+                    state,
+                    stream,
+                    last_frame_at,
+                    last_error,
+                    diagnostics,
+                )
 
             async def on_event(event: ClosedMotionEvent, frame: np.ndarray | None) -> None:
                 await self.event_sink(camera_id, event, frame)

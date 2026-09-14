@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.api import motion_detection as motion_api
 from app.main import app
 
 
@@ -113,3 +114,40 @@ def test_motion_zone_rejects_foreign_camera_scope() -> None:
 
         response = client.delete(f"/api/cameras/{other_camera_id}/motion-zones/{zone_id}")
         assert response.status_code == 404
+
+
+def test_motion_runtime_exposes_v2_diagnostics(monkeypatch) -> None:
+    async def no_restart(camera_id: int) -> None:
+        return None
+
+    diagnostics = {
+        "state": "stabilizing",
+        "stream": "sub",
+        "last_frame_at": None,
+        "last_error": None,
+        "confidence": 0.0,
+        "raw_score": 0.0,
+        "moving_area_ratio": 0.0,
+        "global_change_ratio": 0.82,
+        "primary_zone_id": None,
+        "global_change": True,
+    }
+    monkeypatch.setattr(motion_api.motion_detection_manager, "restart_camera", no_restart)
+    monkeypatch.setattr(
+        motion_api.motion_detection_manager,
+        "status",
+        lambda camera_id: dict(diagnostics),
+    )
+
+    with TestClient(app) as client:
+        camera_id = _create_camera(client, "motion-api-runtime-v2")
+        response = client.put(
+            f"/api/cameras/{camera_id}/motion-detection",
+            json={"enabled": True},
+        )
+        assert response.status_code == 200, response.text
+
+        response = client.get(f"/api/cameras/{camera_id}/motion-detection")
+        assert response.status_code == 200, response.text
+        runtime = response.json()["runtime"]
+        assert runtime == diagnostics
