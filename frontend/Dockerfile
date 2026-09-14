@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 FROM node:22-alpine AS build
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
@@ -8,7 +9,8 @@ RUN npm config set registry "${NPM_REGISTRY}" \
     && npm config set fund false
 
 COPY frontend/package.json ./package.json
-RUN npm install --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm install --prefer-offline --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
