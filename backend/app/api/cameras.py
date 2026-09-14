@@ -28,7 +28,7 @@ from app.services.camera_preview import (
     resolve_preview_path,
 )
 from app.services.camera_probe import CameraProbeError, probe_camera
-from app.services.event_log import add_event
+from app.services.event_log import add_audit_event, add_event
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.system_settings import load_runtime_settings
@@ -112,6 +112,12 @@ async def create_camera(payload: CameraCreate, db: AsyncSession = Depends(get_db
             message=f"摄像头 {camera.name} 已创建",
             camera_id=camera.id,
         )
+        add_audit_event(
+            db,
+            code="operations.camera_created",
+            message=f"摄像头 {camera.name} 已创建",
+            camera_id=camera.id,
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -162,6 +168,16 @@ async def create_cameras_batch(payload: CameraBatchCreate, db: AsyncSession = De
                 message=f"摄像头 {camera.name} 已批量创建",
                 camera_id=camera.id,
             )
+        if created_ids:
+            add_audit_event(
+                db,
+                code="operations.camera_batch_created",
+                message=f"已批量创建 {len(created_ids)} 台摄像头",
+                metadata={
+                    "created_camera_ids": created_ids,
+                    "skipped_count": len(skipped_names),
+                },
+            )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -209,6 +225,15 @@ async def apply_recording_schedule_batch(
             metadata={"camera_count": len(cameras)},
         )
 
+    add_audit_event(
+        db,
+        code="operations.recording_schedule_batch_updated",
+        message=f"已批量更新 {len(cameras)} 台摄像头录像计划",
+        metadata={
+            "camera_ids": [camera.id for camera in cameras],
+            "schedule_enabled": payload.recording_schedule_enabled,
+        },
+    )
     await db.commit()
     for camera in cameras:
         recording_schedule_manager.reset_for_schedule_change(camera.id)
@@ -336,6 +361,12 @@ async def update_camera(
         message=f"摄像头 {camera.name} 配置已更新",
         camera_id=camera.id,
     )
+    add_audit_event(
+        db,
+        code="operations.camera_updated",
+        message=f"摄像头 {camera.name} 配置已修改",
+        camera_id=camera.id,
+    )
     try:
         await db.commit()
     except IntegrityError as exc:
@@ -354,6 +385,13 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     if recorder_manager.is_running(camera_id):
         await recorder_manager.stop(camera_id)
     recording_schedule_manager.forget(camera_id)
+    camera_name = camera.name
+    add_audit_event(
+        db,
+        code="operations.camera_deleted",
+        message=f"摄像头 {camera_name} 已删除",
+        metadata={"camera_id": camera_id, "camera_name": camera_name},
+    )
     await db.delete(camera)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -374,7 +412,7 @@ async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
             rtsp_timeout_us=runtime.rtsp_timeout_us,
         )
     except CameraProbeError as exc:
-        # Probe is the sole owner of persisted connectivity state.
+        # Persist the explicit probe observation; the background monitor reconciles the same state.
         camera.status = "offline"
         camera.last_probe_at = datetime.now(timezone.utc)
         add_event(
