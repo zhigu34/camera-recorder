@@ -3,71 +3,104 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
-import {
-  Bell,
-  CircleCheckFilled,
-  Cloudy,
-  DataLine,
-  VideoCamera,
-  WarningFilled,
-} from '@element-plus/icons-vue'
 
 import { type CameraHealth, useRuntimeStore } from './stores/runtime'
+import { wallClockSeconds } from './utils/playbackTimelineV3'
 
-interface EventItem {
+interface MotionActivityEvent {
   id: number
-  level: string
-  category: string
-  code: string
-  message: string
-  camera_id?: number | null
-  created_at: string
+  camera_id: number
+  zone_id?: number | null
+  recording_id?: number | null
+  started_at: string
+  ended_at: string
+  peak_score?: number | null
+  snapshot_path?: string | null
+  created_at?: string | null
 }
+
+type PreviewStream = 'auto' | 'sub' | 'main'
+type LayoutCount = 1 | 4 | 9
+interface SavedWallSlot { cameraId: number | null; stream: PreviewStream }
+interface SavedWall { layout?: LayoutCount; slots?: SavedWallSlot[] }
+
+const PLAYBACK_EVENT_AUTOSTART_KEY = 'camera-recorder:playback-event-autostart'
+const LIVE_WALL_STORAGE_KEY = 'nvr-video-wall-v1'
+const ACTIVITY_REFRESH_MS = 20_000
 
 const router = useRouter()
 const runtime = useRuntimeStore()
-const { healthSnapshot: summary, systemStatus: system, socketState, loading: runtimeLoading } = storeToRefs(runtime)
-const events = ref<EventItem[]>([])
-let eventTimer: number | null = null
+const {
+  healthSnapshot: summary,
+  systemStatus: system,
+  socketState,
+  loading: runtimeLoading,
+} = storeToRefs(runtime)
+
+const activities = ref<MotionActivityEvent[]>([])
+const activityLoading = ref(false)
+const activityError = ref('')
+const brokenSnapshots = ref<Record<number, boolean>>({})
+let activityTimer: number | null = null
 
 const loading = computed(() => runtimeLoading.value && !summary.value)
+const recentActivities = computed(() => activities.value.slice(0, 8))
 const pendingUploads = computed(() => {
   const rows = summary.value?.uploads || {}
   return (rows.pending || 0) + (rows.uploading || 0) + (rows.retry_wait || 0)
 })
 const uploadFailures = computed(() => summary.value?.uploads?.failed || 0)
-const overallHealthy = computed(() =>
-  Boolean(
-    summary.value &&
-    summary.value.cameras.abnormal === 0 &&
-    summary.value.storage.state !== 'critical' &&
-    uploadFailures.value === 0 &&
-    system.value?.ffmpeg?.setts_available !== false,
-  ),
-)
-const storageProgressStatus = computed(() => {
-  if (summary.value?.storage.state === 'critical') return 'exception'
-  if (summary.value?.storage.state === 'warning') return 'warning'
-  return 'success'
+const overallHealthy = computed(() => Boolean(
+  summary.value &&
+  summary.value.cameras.abnormal === 0 &&
+  summary.value.storage.state !== 'critical' &&
+  uploadFailures.value === 0 &&
+  system.value?.ffmpeg?.setts_available !== false,
+))
+const healthClass = computed(() => overallHealthy.value ? 'healthy' : 'attention')
+const healthLabel = computed(() => overallHealthy.value ? '系统运行正常' : '有项目需要关注')
+const statusFeedLabel = computed(() => socketState.value === 'connected' ? '状态实时更新' : '状态轮询更新')
+const attentionCount = computed(() => (summary.value?.cameras.abnormal || 0) + uploadFailures.value)
+const latestActivityByCamera = computed(() => {
+  const result = new Map<number, MotionActivityEvent>()
+  for (const event of activities.value) {
+    if (!result.has(event.camera_id)) result.set(event.camera_id, event)
+  }
+  return result
 })
-const refreshLabel = computed(() => socketState.value === 'connected' ? 'WebSocket 实时更新' : 'HTTP 断线兜底')
 
+function todayString() {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
 function bytes(value?: number) {
   const amount = value || 0
   if (amount >= 1024 ** 4) return `${(amount / 1024 ** 4).toFixed(2)} TB`
   if (amount >= 1024 ** 3) return `${(amount / 1024 ** 3).toFixed(1)} GB`
-  return `${(amount / 1024 ** 2).toFixed(0)} MB`
+  if (amount >= 1024 ** 2) return `${(amount / 1024 ** 2).toFixed(0)} MB`
+  return `${Math.round(amount / 1024)} KB`
 }
 function uptime(value?: number) {
   const seconds = value || 0
   const days = Math.floor(seconds / 86400)
   const hours = Math.floor((seconds % 86400) / 3600)
-  return days ? `${days}天 ${hours}小时` : `${hours}小时`
+  if (days) return `${days}天 ${hours}小时`
+  if (hours) return `${hours}小时`
+  return `${Math.max(0, Math.floor(seconds / 60))}分钟`
 }
-function eventTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+function cameraName(cameraId: number) {
+  return summary.value?.camera_health.find((camera) => camera.camera_id === cameraId)?.name || `摄像头 #${cameraId}`
+}
+function connectivityLabel(state: CameraHealth['connectivity_status']) {
+  if (state === 'online') return '在线'
+  if (state === 'offline') return '离线'
+  return '未检测'
+}
+function connectivityClass(camera: CameraHealth) {
+  if (!camera.enabled) return 'muted'
+  if (camera.connectivity_status === 'online') return 'success'
+  if (camera.connectivity_status === 'offline') return 'danger'
+  return 'warning'
 }
 function recorderLabel(state: string) {
   if (state === 'RECORDING') return '录像中'
@@ -81,195 +114,241 @@ function recorderClass(state: string) {
   if (state === 'RECONNECTING' || state === 'STARTING' || state === 'STOPPING') return 'warning'
   return 'muted'
 }
-function connectivityLabel(state: string) {
-  if (state === 'online') return '在线'
-  if (state === 'offline') return '离线'
-  return '未检测'
+function activityClock(value: string) {
+  const seconds = wallClockSeconds(value)
+  if (seconds === null) return '--:--'
+  const safe = Math.max(0, Math.min(86399, Math.floor(seconds)))
+  return `${String(Math.floor(safe / 3600)).padStart(2, '0')}:${String(Math.floor((safe % 3600) / 60)).padStart(2, '0')}`
 }
-function connectivityClass(camera: CameraHealth) {
-  if (!camera.enabled) return 'muted'
-  if (camera.connectivity_status === 'online') return 'success'
-  if (camera.connectivity_status === 'offline') return 'danger'
-  return 'warning'
+function activityRelative(value: string) {
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) return activityClock(value)
+  const minutes = Math.floor(Math.max(0, Date.now() - timestamp) / 60_000)
+  if (minutes < 1) return '刚刚'
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  return value.slice(0, 10)
 }
-function scheduleLabel(state: string) {
-  if (state === 'automatic') return '自动录像'
-  if (state === 'in_window') return '计划时段内'
-  if (state === 'scheduled') return '等待计划时段'
-  if (state === 'manual_override') return '手动运行'
-  if (state === 'manual_paused') return '手动暂停'
-  if (state === 'probe_required') return '需要检测参数'
-  if (state === 'error') return '计划启动失败'
-  if (state === 'global_disabled') return '全局自动启动关闭'
-  return '未启用自动录像'
+function activityDuration(event: MotionActivityEvent) {
+  const start = Date.parse(event.started_at)
+  const end = Date.parse(event.ended_at)
+  const seconds = Number.isFinite(start) && Number.isFinite(end) ? Math.max(1, Math.round((end - start) / 1000)) : 1
+  return seconds >= 60 ? `${Math.floor(seconds / 60)}m ${seconds % 60}s` : `${seconds}s`
 }
-function eventClass(level: string) {
-  if (level === 'critical' || level === 'error') return 'danger'
-  if (level === 'warning') return 'warning'
-  return 'info'
+function snapshotUrl(event: MotionActivityEvent) {
+  return `/api/motion-events/${event.id}/snapshot`
 }
-function openCamera(cameraId: number) {
+function snapshotAvailable(event: MotionActivityEvent) {
+  return Boolean(event.snapshot_path) && !brokenSnapshots.value[event.id]
+}
+function markSnapshotBroken(eventId: number) {
+  brokenSnapshots.value = { ...brokenSnapshots.value, [eventId]: true }
+}
+function latestActivityLabel(cameraId: number) {
+  const event = latestActivityByCamera.value.get(cameraId)
+  return event ? activityRelative(event.started_at) : '今天暂无活动'
+}
+function writePlaybackAutostart(eventId: number) {
+  try {
+    window.sessionStorage.setItem(PLAYBACK_EVENT_AUTOSTART_KEY, String(eventId))
+  } catch {
+    // Playback remains reachable even if session storage is disabled.
+  }
+}
+function playActivity(event: MotionActivityEvent) {
+  const seconds = wallClockSeconds(event.started_at)
+  if (seconds === null) return
+  writePlaybackAutostart(event.id)
+  const query: Record<string, string> = {
+    camera_id: String(event.camera_id),
+    date: event.started_at.slice(0, 10) || todayString(),
+    event_id: String(event.id),
+    wall_seconds: String(seconds),
+  }
+  if (event.recording_id) query.recording_id = String(event.recording_id)
+  void router.push({ path: '/recordings/playback', query })
+}
+function safePreviewStream(value: unknown): PreviewStream {
+  return value === 'main' || value === 'sub' ? value : 'auto'
+}
+function readSavedWall(): SavedWall {
+  try {
+    const raw = window.localStorage.getItem(LIVE_WALL_STORAGE_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as SavedWall
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+function primeLiveCamera(cameraId: number) {
+  try {
+    const saved = readSavedWall()
+    const layout: LayoutCount = saved.layout === 1 || saved.layout === 4 || saved.layout === 9 ? saved.layout : 4
+    const slots: SavedWallSlot[] = Array.from({ length: 9 }, (_, index) => {
+      const source = Array.isArray(saved.slots) ? saved.slots[index] : undefined
+      return {
+        cameraId: typeof source?.cameraId === 'number' ? source.cameraId : null,
+        stream: safePreviewStream(source?.stream),
+      }
+    })
+    let target = slots.slice(0, layout).findIndex((slot) => slot.cameraId === cameraId)
+    if (target < 0) {
+      target = slots.slice(0, layout).findIndex((slot) => slot.cameraId === null)
+      if (target < 0) target = 0
+      slots.forEach((slot, index) => {
+        if (index !== target && slot.cameraId === cameraId) slot.cameraId = null
+      })
+      slots[target] = { cameraId, stream: safePreviewStream(slots[target]?.stream) }
+    }
+    window.localStorage.setItem(LIVE_WALL_STORAGE_KEY, JSON.stringify({ layout, slots }))
+  } catch {
+    // Live falls back to its own saved/default wall.
+  }
+  void router.push({ path: '/preview' })
+}
+function openCameraSettings(cameraId: number) {
   void router.push({ path: '/cameras', query: { camera_id: String(cameraId) } })
 }
-function openEvent(event: EventItem) {
-  if (event.camera_id) {
-    openCamera(event.camera_id)
-    return
-  }
-  void router.push({ path: '/events', query: { event_id: String(event.id) } })
-}
-async function refreshEvents() {
+function openAllActivity() { void router.push('/events') }
+function openHealth() { void router.push('/health-center') }
+
+async function loadActivities() {
+  activityLoading.value = true
+  activityError.value = ''
+  const date = todayString()
   try {
-    events.value = (await axios.get<EventItem[]>('/api/events?limit=8')).data
-  } catch {
-    // Keep the last valid event list; runtime health remains live through the shared store.
+    const { data } = await axios.get<MotionActivityEvent[]>('/api/motion-events', {
+      params: {
+        start: `${date}T00:00:00`,
+        end: `${date}T23:59:59.999999`,
+        limit: 100,
+      },
+    })
+    activities.value = [...data]
+      .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+      .slice(0, 100)
+  } catch (error) {
+    activityError.value = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '活动加载失败'
+  } finally {
+    activityLoading.value = false
   }
 }
 
 onMounted(() => {
-  void refreshEvents()
-  eventTimer = window.setInterval(() => void refreshEvents(), 30_000)
+  void loadActivities()
+  activityTimer = window.setInterval(() => void loadActivities(), ACTIVITY_REFRESH_MS)
 })
 onBeforeUnmount(() => {
-  if (eventTimer !== null) window.clearInterval(eventTimer)
+  if (activityTimer !== null) window.clearInterval(activityTimer)
 })
 </script>
 
 <template>
-  <div class="dashboard-page" v-loading="loading">
-    <section class="dashboard-head">
-      <div>
-        <div class="eyebrow">OPERATIONS OVERVIEW</div>
-        <h1>监控系统总览</h1>
-        <p>录像链路、存储、上传和摄像头状态集中视图</p>
+  <div class="protect-home" v-loading="loading">
+    <header class="home-header">
+      <div class="home-heading">
+        <span class="eyebrow">HOME</span>
+        <h1>监控概览</h1>
+        <p>先看值得关注的活动与设备状态，需要时再进入实时监控或回放。</p>
       </div>
-      <div class="health-badge" :class="overallHealthy ? 'healthy' : 'warning'">
-        <CircleCheckFilled v-if="overallHealthy" />
-        <WarningFilled v-else />
+      <div class="health-pill" :class="healthClass" role="button" tabindex="0" @click="openHealth" @keydown.enter="openHealth">
+        <span class="health-dot"></span>
         <div>
-          <strong>{{ overallHealthy ? '全部系统正常' : '存在需要关注的项目' }}</strong>
-          <span>已运行 {{ uptime(summary?.uptime_seconds) }}</span>
+          <strong>{{ healthLabel }}</strong>
+          <small>{{ statusFeedLabel }} · 已运行 {{ uptime(summary?.uptime_seconds) }}</small>
         </div>
       </div>
+    </header>
+
+    <section class="status-strip" aria-label="系统状态摘要">
+      <div class="status-cell"><span>摄像头</span><strong>{{ summary?.cameras.online ?? '-' }}<small> / {{ summary?.cameras.enabled ?? '-' }} 在线</small></strong></div>
+      <div class="status-cell"><span>录像</span><strong>{{ summary?.cameras.recording ?? '-' }}<small> 路运行中</small></strong></div>
+      <div class="status-cell"><span>存储</span><strong>{{ summary?.storage.used_percent ?? '-' }}<small>% 已使用</small></strong></div>
+      <div class="status-cell attention-cell"><span>需要关注</span><strong>{{ attentionCount }}<small> 项</small></strong></div>
     </section>
 
-    <section class="metric-grid">
-      <article class="metric-card primary">
-        <div class="metric-icon"><VideoCamera /></div>
-        <div class="metric-copy"><span>正在录像</span><strong>{{ summary?.cameras.recording ?? '-' }}<small>/ {{ summary?.cameras.enabled ?? '-' }}</small></strong></div>
-        <div class="metric-foot">在线 {{ summary?.cameras.online ?? '-' }} · 离线 {{ summary?.cameras.offline ?? '-' }}</div>
-      </article>
-      <article class="metric-card">
-        <div class="metric-icon"><DataLine /></div>
-        <div class="metric-copy"><span>24h 录像片段</span><strong>{{ summary?.recordings_24h.segments ?? '-' }}</strong></div>
-        <div class="metric-foot"><b :class="{ danger: (summary?.recordings_24h.unhealthy_segments || 0) > 0 }">{{ summary?.recordings_24h.unhealthy_segments ?? 0 }}</b> 个异常片段</div>
-      </article>
-      <article class="metric-card">
-        <div class="metric-icon"><Cloudy /></div>
-        <div class="metric-copy"><span>上传队列</span><strong>{{ pendingUploads }}</strong></div>
-        <div class="metric-foot"><b :class="{ danger: uploadFailures > 0 }">{{ uploadFailures }}</b> 个最终失败</div>
-      </article>
-      <article class="metric-card">
-        <div class="metric-icon"><Bell /></div>
-        <div class="metric-copy"><span>当前异常</span><strong :class="{ danger: (summary?.cameras.abnormal || 0) > 0 }">{{ summary?.cameras.abnormal ?? '-' }}</strong></div>
-        <div class="metric-foot">{{ summary?.cameras.reconnecting ?? 0 }} 路正在重连 · {{ summary?.cameras.unknown ?? 0 }} 路未检测</div>
-      </article>
-    </section>
-
-    <section class="dashboard-grid">
-      <article class="panel camera-panel">
-        <div class="panel-head">
-          <div><span class="panel-kicker">CAMERAS</span><h2>摄像头运行状态</h2></div>
-          <span class="panel-meta">{{ refreshLabel }}</span>
-        </div>
-        <div class="camera-grid">
-          <div v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-tile" role="button" tabindex="0" @click="openCamera(camera.camera_id)" @keydown.enter="openCamera(camera.camera_id)">
-            <div class="camera-title">
-              <span class="camera-dot" :class="connectivityClass(camera)"></span>
-              <div><strong>{{ camera.name }}</strong><span>{{ camera.ip }}</span></div>
-              <span class="camera-state" :class="connectivityClass(camera)">{{ connectivityLabel(camera.connectivity_status) }}</span>
-              <span class="camera-state" :class="recorderClass(camera.recorder_state)">{{ recorderLabel(camera.recorder_state) }}</span>
-            </div>
-            <div class="camera-detail">
-              <span>{{ scheduleLabel(camera.schedule_state) }}</span>
-              <span>重连 {{ camera.restart_count }}</span>
-              <span v-if="camera.abnormal" class="danger">需要关注</span>
-            </div>
-            <div v-if="camera.last_error && camera.abnormal" class="camera-error">{{ camera.last_error }}</div>
+    <section class="home-primary-grid">
+      <article class="surface activity-surface">
+        <header class="section-head">
+          <div>
+            <span class="section-kicker">ACTIVITY</span>
+            <h2>最近活动</h2>
+            <p>今天的移动检测快照；点击活动直接进入对应回放。</p>
           </div>
-          <div v-if="!summary?.camera_health?.length" class="empty-state">暂无摄像头</div>
+          <button type="button" class="quiet-link" @click="openAllActivity">查看全部 ›</button>
+        </header>
+
+        <div v-if="activityError && !activities.length" class="activity-empty">
+          <strong>暂时无法加载活动</strong><span>{{ activityError }}</span><button type="button" @click="loadActivities">重试</button>
+        </div>
+        <div v-else-if="!recentActivities.length && !activityLoading" class="activity-empty">
+          <span class="empty-motion-mark"></span><strong>今天还没有检测活动</strong><span>新的移动事件会显示在这里，不会自动打开任何视频流。</span>
+        </div>
+        <div v-else class="activity-grid">
+          <button v-for="event in recentActivities" :key="event.id" type="button" class="activity-card" @click="playActivity(event)">
+            <span class="activity-thumb">
+              <img v-if="snapshotAvailable(event)" :src="snapshotUrl(event)" :alt="`${cameraName(event.camera_id)} 活动截图`" loading="lazy" @error="markSnapshotBroken(event.id)" />
+              <span v-else class="activity-placeholder"><i></i></span>
+              <time>{{ activityClock(event.started_at) }}</time><span class="activity-badge">移动</span><span class="play-mark">▶</span>
+            </span>
+            <span class="activity-copy">
+              <span class="activity-title"><strong>{{ cameraName(event.camera_id) }}</strong><small>{{ activityDuration(event) }}</small></span>
+              <span class="activity-meta"><span>{{ activityRelative(event.started_at) }}</span><i>播放事件 ›</i></span>
+            </span>
+          </button>
         </div>
       </article>
 
-      <aside class="right-column">
-        <article class="panel storage-panel">
-          <div class="panel-head compact">
-            <div><span class="panel-kicker">STORAGE</span><h2>录像存储</h2></div>
-            <span class="storage-value">{{ summary?.storage.used_percent ?? '-' }}%</span>
+      <aside class="surface system-surface">
+        <header class="section-head compact"><div><span class="section-kicker">SYSTEM</span><h2>系统状态</h2></div><button type="button" class="quiet-link" @click="openHealth">详情 ›</button></header>
+        <div class="system-body">
+          <div class="storage-line">
+            <div class="storage-title"><span>录像存储</span><strong>{{ summary?.storage.used_percent ?? '-' }}%</strong></div>
+            <div class="storage-track"><i :style="{ width: `${Math.min(100, summary?.storage.used_percent || 0)}%` }"></i></div>
+            <div class="storage-copy"><span>{{ bytes(summary?.storage.used_bytes) }} 已使用</span><span>{{ bytes(summary?.storage.free_bytes) }} 可用</span></div>
           </div>
-          <el-progress
-            :percentage="summary?.storage.used_percent || 0"
-            :status="storageProgressStatus"
-            :stroke-width="8"
-            :show-text="false"
-          />
-          <div class="storage-stats">
-            <div><span>已使用</span><strong>{{ bytes(summary?.storage.used_bytes) }}</strong></div>
-            <div><span>剩余</span><strong>{{ bytes(summary?.storage.free_bytes) }}</strong></div>
+          <div class="system-list">
+            <div><span>24 小时录像</span><strong>{{ summary?.recordings_24h.segments ?? '-' }} 片段</strong><small>{{ summary?.recordings_24h.unhealthy_segments ?? 0 }} 异常</small></div>
+            <div><span>上传队列</span><strong>{{ pendingUploads }} 待处理</strong><small>{{ uploadFailures }} 失败</small></div>
+            <div><span>FFmpeg / setts</span><strong>{{ system?.ffmpeg?.setts_available === false ? '异常' : system?.ffmpeg ? '正常' : '检测中' }}</strong><small>{{ system?.ffmpeg?.ffmpeg_version || '运行环境' }}</small></div>
+            <div><span>OpenList 上传</span><strong>{{ system?.upload?.enabled ? (system?.upload?.configured ? '已连接' : '未配置') : '未启用' }}</strong><small>{{ system?.upload?.active ? '正在上传' : '当前空闲' }}</small></div>
           </div>
-          <div class="service-row"><span>FFmpeg / setts</span><b :class="system?.ffmpeg?.setts_available ? 'ok' : 'bad'">{{ system?.ffmpeg?.setts_available ? '正常' : '异常' }}</b></div>
-          <div class="service-row"><span>OpenList 上传</span><b :class="system?.upload?.enabled && system?.upload?.configured ? 'ok' : 'neutral'">{{ system?.upload?.enabled ? system?.upload?.configured ? '已连接' : '未配置' : '未启用' }}</b></div>
-        </article>
-
-        <article class="panel event-panel">
-          <div class="panel-head compact"><div><span class="panel-kicker">ACTIVITY</span><h2>最近事件</h2></div></div>
-          <div class="event-list">
-            <div v-for="event in events" :key="event.id" class="event-row" role="button" tabindex="0" @click="openEvent(event)" @keydown.enter="openEvent(event)">
-              <span class="event-marker" :class="eventClass(event.level)"></span>
-              <div class="event-content"><strong>{{ event.message }}</strong><span>{{ eventTime(event.created_at) }} · {{ event.category }}</span></div>
-            </div>
-            <div v-if="!events.length" class="empty-state compact">暂无事件</div>
-          </div>
-        </article>
+        </div>
       </aside>
+    </section>
+
+    <section class="surface camera-surface">
+      <header class="section-head camera-head"><div><span class="section-kicker">CAMERAS</span><h2>摄像头状态</h2><p>这里只显示运行状态和最近活动；进入 Live 后仍需手动开始画面。</p></div><span class="camera-total">{{ summary?.cameras.enabled ?? 0 }} 台已启用</span></header>
+      <div class="camera-status-grid">
+        <article v-for="camera in summary?.camera_health || []" :key="camera.camera_id" class="camera-row">
+          <button type="button" class="camera-main" @click="primeLiveCamera(camera.camera_id)">
+            <span class="camera-dot" :class="connectivityClass(camera)"></span>
+            <span class="camera-identity"><strong>{{ camera.name }}</strong><small>{{ camera.ip }}</small></span>
+            <span class="camera-facts"><span :class="connectivityClass(camera)">{{ connectivityLabel(camera.connectivity_status) }}</span><span :class="recorderClass(camera.recorder_state)">{{ recorderLabel(camera.recorder_state) }}</span></span>
+            <span class="camera-activity"><small>最近活动</small><strong>{{ latestActivityLabel(camera.camera_id) }}</strong></span>
+            <span class="live-link">实时监控 ›</span>
+          </button>
+          <button type="button" class="camera-settings" aria-label="打开摄像头设置" @click="openCameraSettings(camera.camera_id)">•••</button>
+          <div v-if="camera.abnormal && camera.last_error" class="camera-warning">{{ camera.last_error }}</div>
+        </article>
+        <div v-if="!summary?.camera_health?.length" class="camera-empty">暂无摄像头</div>
+      </div>
     </section>
   </div>
 </template>
 
 <style scoped>
-.dashboard-page { padding: 26px; max-width: 1760px; margin: 0 auto; }
-.dashboard-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
-.eyebrow, .panel-kicker { color: #586a80; font-size: 9px; font-weight: 800; letter-spacing: .17em; }
-.dashboard-head h1 { margin: 5px 0 5px; font-size: 25px; font-weight: 680; letter-spacing: -.025em; }
-.dashboard-head p { margin: 0; color: var(--nvr-muted); font-size: 12px; }
-.health-badge { min-width: 225px; display: flex; align-items: center; gap: 11px; padding: 11px 14px; border: 1px solid var(--nvr-border); border-radius: 10px; background: var(--nvr-surface); }
-.health-badge > svg { width: 20px; }
-.health-badge > div { display: flex; flex-direction: column; gap: 3px; }
-.health-badge strong { font-size: 12px; }
-.health-badge span { color: var(--nvr-muted); font-size: 10px; }
-.health-badge.healthy > svg { color: var(--nvr-green); }.health-badge.warning > svg { color: var(--nvr-yellow); }
-.metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
-.metric-card { position: relative; min-height: 126px; padding: 17px; overflow: hidden; border: 1px solid var(--nvr-border); border-radius: 10px; background: var(--nvr-surface); }
-.metric-card.primary { background: linear-gradient(145deg, rgba(76,141,255,.15), rgba(20,26,34,.95) 58%); border-color: rgba(76,141,255,.2); }
-.metric-icon { position: absolute; right: 16px; top: 16px; width: 28px; height: 28px; display: grid; place-items: center; color: #61728a; border: 1px solid var(--nvr-border); border-radius: 8px; background: rgba(255,255,255,.02); }
-.metric-card.primary .metric-icon { color: var(--nvr-blue); }.metric-icon :deep(svg) { width: 15px; }
-.metric-copy { display: flex; flex-direction: column; gap: 8px; }.metric-copy span { color: var(--nvr-muted); font-size: 11px; }.metric-copy strong { font-size: 30px; line-height: 1; letter-spacing: -.04em; font-weight: 670; }.metric-copy small { margin-left: 5px; color: #647287; font-size: 13px; font-weight: 500; }
-.metric-foot { position: absolute; left: 17px; bottom: 15px; color: #69788b; font-size: 10px; }.metric-foot b { color: #9aa7b7; }.danger { color: var(--nvr-red) !important; }
-.dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(310px, .65fr); gap: 12px; }
-.panel { border: 1px solid var(--nvr-border); border-radius: 10px; background: var(--nvr-surface); }
-.panel-head { min-height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; border-bottom: 1px solid var(--nvr-border); }.panel-head.compact { min-height: 60px; }
-.panel-head h2 { margin: 4px 0 0; font-size: 13px; font-weight: 640; }.panel-meta { color: #657488; font-size: 10px; }
-.camera-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--nvr-border); }
-.camera-tile { min-height: 92px; padding: 14px 16px; background: var(--nvr-surface); cursor:pointer; }.camera-tile:hover,.camera-tile:focus-visible { background: var(--nvr-surface-2); outline:none; }
-.camera-title { display: flex; align-items: center; gap: 7px; }.camera-title > div { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }.camera-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }.camera-title span { color: #647287; font-size: 10px; }
-.camera-dot { flex: 0 0 7px; width: 7px; height: 7px; border-radius: 50%; }.camera-dot.success { background: var(--nvr-green); box-shadow: 0 0 0 3px rgba(46,204,138,.08); }.camera-dot.warning { background: var(--nvr-yellow); }.camera-dot.danger { background: var(--nvr-red); }.camera-dot.muted { background: #526071; }
-.camera-state { flex: 0 0 auto; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,.035); }.camera-state.success { color: var(--nvr-green); }.camera-state.warning { color: var(--nvr-yellow); }.camera-state.danger { color: var(--nvr-red); }.camera-state.muted { color: #718095; }
-.camera-detail { display: flex; gap: 15px; margin: 11px 0 0 16px; color: #637084; font-size: 9px; }.camera-error { margin: 8px 0 0 16px; overflow: hidden; color: var(--nvr-red); font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
-.right-column { display: flex; flex-direction: column; gap: 12px; }.storage-panel { padding-bottom: 15px; }.storage-panel :deep(.el-progress) { margin: 18px 18px 14px; }.storage-value { font-size: 20px; font-weight: 670; }
-.storage-stats { display: grid; grid-template-columns: 1fr 1fr; padding: 0 18px 14px; gap: 10px; }.storage-stats div { display: flex; flex-direction: column; gap: 3px; }.storage-stats span { color: #647287; font-size: 9px; }.storage-stats strong { font-size: 12px; }
-.service-row { display: flex; justify-content: space-between; padding: 9px 18px 0; border-top: 1px solid rgba(255,255,255,.035); color: #788699; font-size: 10px; }.service-row b.ok { color: var(--nvr-green); }.service-row b.bad { color: var(--nvr-red); }.service-row b.neutral { color: #788699; }
-.event-list { padding: 5px 0; }.event-row { display: flex; gap: 10px; padding: 10px 16px; cursor:pointer; }.event-row:hover,.event-row:focus-visible{background:var(--nvr-surface-2);outline:none}.event-row + .event-row { border-top: 1px solid rgba(255,255,255,.035); }.event-marker { flex: 0 0 6px; width: 6px; height: 6px; margin-top: 4px; border-radius: 50%; }.event-marker.danger { background: var(--nvr-red); }.event-marker.warning { background: var(--nvr-yellow); }.event-marker.info { background: #577291; }.event-content { min-width: 0; display: flex; flex-direction: column; gap: 4px; }.event-content strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 560; }.event-content span { color: #5f6e81; font-size: 9px; }
-.empty-state { grid-column: 1/-1; padding: 34px; text-align: center; color: #657488; font-size: 11px; background: var(--nvr-surface); }.empty-state.compact { padding: 20px; }
-@media(max-width:1200px){.metric-grid{grid-template-columns:repeat(2,1fr)}.dashboard-grid{grid-template-columns:1fr}.right-column{display:grid;grid-template-columns:1fr 1fr}}
-@media(max-width:760px){.dashboard-page{padding:14px}.dashboard-head{align-items:flex-start;flex-direction:column}.health-badge{width:100%}.metric-grid,.camera-grid,.right-column{grid-template-columns:1fr}.dashboard-head h1{font-size:21px}.camera-state:nth-last-child(1){display:none}}
+.protect-home{max-width:1760px;margin:0 auto;padding:24px 26px 34px;color:var(--nvr-text)}
+.home-header{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.home-heading{min-width:0}.eyebrow,.section-kicker{display:block;color:#647387;font-size:9px;font-weight:800;letter-spacing:.18em}.home-heading h1{margin:5px 0 4px;font-size:25px;line-height:1.2;font-weight:680;letter-spacing:-.025em}.home-heading p,.section-head p{margin:0;color:var(--nvr-muted);font-size:11px}
+.health-pill{min-width:235px;display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface);cursor:pointer}.health-pill:hover,.health-pill:focus-visible{background:var(--nvr-surface-2);outline:none}.health-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%}.health-pill.healthy .health-dot{background:var(--nvr-green);box-shadow:0 0 0 4px rgba(46,204,138,.08)}.health-pill.attention .health-dot{background:var(--nvr-yellow);box-shadow:0 0 0 4px rgba(245,184,66,.08)}.health-pill div{display:flex;flex-direction:column;gap:2px}.health-pill strong{font-size:11px;font-weight:620}.health-pill small{color:#69788b;font-size:9px}
+.status-strip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:12px;overflow:hidden;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.status-cell{min-height:66px;padding:13px 16px;border-right:1px solid var(--nvr-border)}.status-cell:last-child{border-right:0}.status-cell>span{display:block;margin-bottom:8px;color:#69788b;font-size:9px}.status-cell strong{font-size:18px;font-weight:660;letter-spacing:-.02em}.status-cell small{color:#738196;font-size:9px;font-weight:500}.attention-cell strong{color:var(--nvr-yellow)}
+.surface{border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);overflow:hidden}.home-primary-grid{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;margin-bottom:12px}.section-head{min-height:68px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 16px;border-bottom:1px solid var(--nvr-border)}.section-head.compact{min-height:60px}.section-head h2{margin:4px 0 3px;font-size:13px;font-weight:650}.quiet-link{border:0;padding:5px 0;background:transparent;color:#8d9aab;font:inherit;font-size:10px;cursor:pointer}.quiet-link:hover{color:var(--nvr-text)}
+.activity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.activity-card{min-width:0;padding:0;border:0;background:var(--nvr-surface);color:inherit;text-align:left;cursor:pointer}.activity-card:hover,.activity-card:focus-visible{background:var(--nvr-surface-2);outline:none}.activity-thumb{position:relative;display:block;aspect-ratio:16/9;overflow:hidden;background:#090c10}.activity-thumb img{width:100%;height:100%;display:block;object-fit:cover}.activity-placeholder{position:absolute;inset:0;display:grid;place-items:center;background:#0c1015}.activity-placeholder i,.empty-motion-mark{width:24px;height:18px;border:1px solid #34404f;border-radius:6px;position:relative}.activity-placeholder i::after,.empty-motion-mark::after{content:'';position:absolute;width:5px;height:5px;left:9px;top:6px;border-radius:50%;background:#526174}.activity-thumb time,.activity-badge{position:absolute;top:8px;padding:3px 5px;border-radius:4px;background:rgba(5,8,12,.74);color:#dce4ed;font-size:8px}.activity-thumb time{left:8px}.activity-badge{right:8px}.play-mark{position:absolute;left:50%;top:50%;width:30px;height:30px;display:grid;place-items:center;opacity:0;transform:translate(-50%,-50%);border-radius:50%;background:rgba(4,7,10,.68);color:#fff;font-size:9px;transition:opacity .15s}.activity-card:hover .play-mark,.activity-card:focus-visible .play-mark{opacity:1}.activity-copy{display:block;padding:10px 11px 11px}.activity-title,.activity-meta{display:flex;align-items:center;justify-content:space-between;gap:8px}.activity-title strong{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.activity-title small,.activity-meta{color:#68778a;font-size:8px}.activity-meta{margin-top:6px}.activity-meta i{color:#8794a5;font-style:normal}.activity-empty{min-height:280px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:24px;color:#6d7b8d;text-align:center}.activity-empty strong{color:#aeb8c4;font-size:11px}.activity-empty span{max-width:340px;font-size:9px}.activity-empty button{margin-top:5px;border:1px solid var(--nvr-border);border-radius:6px;padding:5px 10px;background:transparent;color:#8997a8;font-size:9px;cursor:pointer}
+.system-body{padding:16px}.storage-line{padding-bottom:17px;border-bottom:1px solid var(--nvr-border)}.storage-title{display:flex;align-items:baseline;justify-content:space-between}.storage-line span{color:#718095;font-size:9px}.storage-line strong{font-size:20px;font-weight:660}.storage-track{height:5px;margin:11px 0 8px;overflow:hidden;border-radius:999px;background:#252d38}.storage-track i{display:block;height:100%;border-radius:inherit;background:#71849b}.storage-copy{display:flex;justify-content:space-between}.system-list>div{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:13px 0;border-bottom:1px solid var(--nvr-border)}.system-list>div:last-child{border-bottom:0;padding-bottom:0}.system-list span{color:#718095;font-size:9px}.system-list strong{font-size:10px;font-weight:600}.system-list small{grid-column:1/-1;color:#657386;font-size:8px}
+.camera-head{min-height:70px}.camera-total{color:#6d7c8f;font-size:9px}.camera-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--nvr-border)}.camera-row{position:relative;min-width:0;background:var(--nvr-surface)}.camera-row:hover{background:var(--nvr-surface-2)}.camera-main{width:100%;min-height:68px;display:grid;grid-template-columns:8px minmax(100px,1fr) auto minmax(90px,.65fr) auto;align-items:center;gap:10px;padding:11px 42px 11px 14px;border:0;background:transparent;color:inherit;text-align:left;cursor:pointer}.camera-main:focus-visible{outline:1px solid #506178;outline-offset:-2px}.camera-dot{width:7px;height:7px;border-radius:50%}.camera-dot.success{background:var(--nvr-green)}.camera-dot.warning{background:var(--nvr-yellow)}.camera-dot.danger{background:var(--nvr-red)}.camera-dot.muted{background:#536173}.camera-identity,.camera-activity{min-width:0;display:flex;flex-direction:column;gap:3px}.camera-identity strong,.camera-activity strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;font-weight:620}.camera-identity small,.camera-activity small{color:#667589;font-size:8px}.camera-facts{display:flex;gap:5px}.camera-facts span{padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.025);color:#728196;font-size:8px}.camera-facts .success{color:var(--nvr-green)}.camera-facts .warning{color:var(--nvr-yellow)}.camera-facts .danger{color:var(--nvr-red)}.camera-facts .muted{color:#718095}.live-link{color:#8795a7;font-size:9px}.camera-settings{position:absolute;right:10px;top:19px;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:#657386;cursor:pointer}.camera-settings:hover{background:rgba(255,255,255,.045);color:#aab5c1}.camera-warning{padding:0 14px 9px 32px;overflow:hidden;color:var(--nvr-yellow);font-size:8px;white-space:nowrap;text-overflow:ellipsis}.camera-empty{grid-column:1/-1;padding:34px;background:var(--nvr-surface);color:#68778a;text-align:center;font-size:10px}
+@media(max-width:1320px){.activity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.home-primary-grid{grid-template-columns:minmax(0,1fr) 300px}.camera-main{grid-template-columns:8px minmax(90px,1fr) auto auto}.camera-activity{display:none}}
+@media(max-width:980px){.home-primary-grid{grid-template-columns:1fr}.system-list{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}.camera-status-grid{grid-template-columns:1fr}}
+@media(max-width:720px){.protect-home{padding:15px}.home-header{align-items:flex-start;flex-direction:column}.health-pill{width:100%}.status-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.status-cell:nth-child(2){border-right:0}.status-cell:nth-child(-n+2){border-bottom:1px solid var(--nvr-border)}.activity-grid{grid-template-columns:1fr}.section-head{align-items:flex-start}.camera-main{grid-template-columns:8px minmax(90px,1fr) auto}.camera-activity,.live-link{display:none}.home-heading h1{font-size:22px}}
 </style>
