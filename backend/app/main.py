@@ -10,6 +10,7 @@ from app.api.exports import router as exports_router
 from app.api.health import router as health_router
 from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
+from app.api.operations import router as operations_router
 from app.api.playback_control import router as playback_control_router
 from app.api.playback_metrics import router as playback_metrics_router
 from app.api.preview_wall import router as preview_wall_router
@@ -136,6 +137,7 @@ app.include_router(health_router)
 app.include_router(preview_wall_router)
 app.include_router(motion_detection_router)
 app.include_router(exports_router)
+app.include_router(operations_router)
 
 
 @app.get("/health")
