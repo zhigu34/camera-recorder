@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import SessionLocal, get_db
 from app.models.event import Event
+from app.models.motion import MotionEvent
 from app.schemas.event import EventRead
+from app.schemas.motion import MotionEventRead
 
 router = APIRouter(tags=["events"])
 
@@ -30,41 +32,65 @@ async def list_events(
     return list(result)
 
 
+def _cursor_value(raw: str | None) -> int | None:
+    if raw is None:
+        return None
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 0
+
+
 @router.websocket("/ws/events")
 async def events_websocket(websocket: WebSocket) -> None:
-    """Stream newly persisted events without replaying the full event history.
+    """Stream newly persisted system and motion events from independent cursors.
 
-    Clients that already loaded events through REST should pass their highest
-    event id as ``after_id``. Clients without a cursor start from the current
-    database tail and receive only events created after the connection opens.
+    Clients that already loaded data through REST should pass ``after_id`` for
+    system events and ``after_motion_id`` for motion activities. Missing cursors
+    start at the current database tail so a new connection does not replay
+    historical rows.
     """
 
-    await websocket.accept()
-    raw_after_id = websocket.query_params.get("after_id")
-    if raw_after_id is None:
+    last_id = _cursor_value(websocket.query_params.get("after_id"))
+    last_motion_id = _cursor_value(websocket.query_params.get("after_motion_id"))
+    if last_id is None or last_motion_id is None:
         async with SessionLocal() as session:
-            last_id = int((await session.scalar(select(func.max(Event.id)))) or 0)
-    else:
-        try:
-            last_id = max(0, int(raw_after_id))
-        except ValueError:
-            last_id = 0
+            if last_id is None:
+                last_id = int((await session.scalar(select(func.max(Event.id)))) or 0)
+            if last_motion_id is None:
+                last_motion_id = int((await session.scalar(select(func.max(MotionEvent.id)))) or 0)
+
+    await websocket.accept()
 
     try:
         while True:
             async with SessionLocal() as session:
-                result = await session.scalars(
-                    select(Event)
-                    .where(Event.id > last_id)
-                    .order_by(Event.id.asc())
-                    .limit(100)
+                event_rows = list(
+                    await session.scalars(
+                        select(Event)
+                        .where(Event.id > last_id)
+                        .order_by(Event.id.asc())
+                        .limit(100)
+                    )
                 )
-                rows = list(result)
+                motion_rows = list(
+                    await session.scalars(
+                        select(MotionEvent)
+                        .where(MotionEvent.id > last_motion_id)
+                        .order_by(MotionEvent.id.asc())
+                        .limit(100)
+                    )
+                )
 
-            for event in rows:
+            for event in event_rows:
                 payload = EventRead.model_validate(event).model_dump(mode="json")
                 await websocket.send_json({"type": "event.created", "data": payload})
                 last_id = event.id
+
+            for event in motion_rows:
+                payload = MotionEventRead.model_validate(event).model_dump(mode="json")
+                await websocket.send_json({"type": "motion.created", "data": payload})
+                last_motion_id = event.id
 
             try:
                 message = await asyncio.wait_for(websocket.receive(), timeout=1.0)

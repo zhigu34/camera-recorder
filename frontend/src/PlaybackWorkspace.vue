@@ -58,6 +58,7 @@ const activeRecordingId = ref<number | null>(null)
 const activeWallSeconds = ref<number | null>(null)
 const routeEventId = ref<number | null>(null)
 const routeEventWallSeconds = ref<number | null>(null)
+const routeEventPlayUntilSeconds = ref<number | null>(null)
 const playbackRate = ref(1)
 const skipSeconds = ref(loadSkipInterval(playbackStorage()))
 const loading = ref(false)
@@ -135,9 +136,17 @@ function positiveQueryInt(value: unknown) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
-function routeWallSeconds() {
-  const parsed = Number(queryValue(route.query.wall_seconds))
+function boundedRouteSeconds(value: unknown) {
+  const parsed = Number(queryValue(value))
   return Number.isFinite(parsed) && parsed >= 0 && parsed <= 86400 ? parsed : null
+}
+
+function routeWallSeconds() {
+  return boundedRouteSeconds(route.query.wall_seconds)
+}
+
+function routePlayUntilWallSeconds() {
+  return boundedRouteSeconds(route.query.play_until_wall_seconds)
 }
 
 function routeDate() {
@@ -164,6 +173,7 @@ function consumePlaybackEventAutostart(eventId: number | null) {
 function clearEventRouteContext() {
   routeEventId.value = null
   routeEventWallSeconds.value = null
+  routeEventPlayUntilSeconds.value = null
 }
 
 function cameraStatusClass(camera: SharedCamera) {
@@ -206,6 +216,7 @@ function syncPlaybackRoute(recordingId: number | null = activeRecordingId.value)
   if (recordingId) query.recording_id = String(recordingId)
   if (routeEventId.value) query.event_id = String(routeEventId.value)
   if (routeEventWallSeconds.value !== null) query.wall_seconds = String(routeEventWallSeconds.value)
+  if (routeEventPlayUntilSeconds.value !== null) query.play_until_wall_seconds = String(routeEventPlayUntilSeconds.value)
   routeSyncing = true
   void router.replace({ path: '/recordings/playback', query }).finally(() => {
     routeSyncing = false
@@ -278,11 +289,13 @@ async function initialize() {
     const deepRecording = positiveQueryInt(route.query.recording_id)
     const deepEventId = positiveQueryInt(route.query.event_id)
     const deepWallSeconds = routeWallSeconds()
+    const deepPlayUntilSeconds = routePlayUntilWallSeconds()
     const deepDate = routeDate()
     const validDeepCamera = deepCamera && cameras.value.some((item) => item.id === deepCamera) ? deepCamera : null
     const explicitEventAutostart = consumePlaybackEventAutostart(deepEventId)
     routeEventId.value = deepEventId
     routeEventWallSeconds.value = deepWallSeconds
+    routeEventPlayUntilSeconds.value = deepPlayUntilSeconds
 
     if (validDeepCamera) {
       selectedCamera.value = validDeepCamera
@@ -309,7 +322,8 @@ async function initialize() {
           else await selectSelection(recording, action.seekSeconds)
         } else {
           const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
-          await selectSelection(selected)
+          if (explicitEventAutostart) await openSelection(selected)
+          else await selectSelection(selected)
         }
       } else {
         const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
@@ -388,7 +402,13 @@ function handlePlayerTime(seconds: number) {
   const recording = activeRecording.value
   const start = recording ? wallClockSeconds(recording.started_at) : null
   if (start === null) return
-  activeWallSeconds.value = Math.max(0, Math.min(86400, start + Math.max(0, seconds)))
+  const wallSeconds = Math.max(0, Math.min(86400, start + Math.max(0, seconds)))
+  activeWallSeconds.value = wallSeconds
+  if (routeEventPlayUntilSeconds.value !== null && wallSeconds >= routeEventPlayUntilSeconds.value) {
+    routeEventPlayUntilSeconds.value = null
+    playerRef.value?.pause()
+    syncPlaybackRoute(activeRecordingId.value)
+  }
 }
 
 async function handlePlayerEnded() {

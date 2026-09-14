@@ -6,6 +6,8 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
+import type { ExportJob, ExportRangeAnalysis } from './types/exports'
+import { buildExportRequest } from './utils/playbackExport'
 import { wallClockSeconds } from './utils/playbackTimelineV3'
 
 interface EventItem {
@@ -30,6 +32,7 @@ interface MotionActivityEvent {
   peak_score?: number | null
   snapshot_path?: string | null
   metadata_json?: string | null
+  created_at?: string | null
 }
 
 type SocketState = 'connecting' | 'connected' | 'disconnected'
@@ -53,6 +56,7 @@ const activityDetailVisible = ref(false)
 const selectedActivity = ref<MotionActivityEvent | null>(null)
 const brokenActivitySnapshots = ref<Record<number, boolean>>({})
 const zoneNames = ref<Record<number, Record<number, string>>>({})
+const exportingActivityId = ref<number | null>(null)
 
 const events = ref<EventItem[]>([])
 const loading = ref(false)
@@ -60,10 +64,13 @@ const keyword = ref('')
 const levelFilter = ref('all')
 const categoryFilter = ref('all')
 const cameraFilter = ref<CameraFilter>('all')
+const systemPage = ref(1)
+const systemPageSize = ref(50)
 const detailVisible = ref(false)
 const selectedEvent = ref<EventItem | null>(null)
 const socketState = ref<SocketState>('disconnected')
 let eventCursor: number | null = null
+let motionCursor: number | null = null
 let reconnectTimer: number | null = null
 let socket: WebSocket | null = null
 let mounted = false
@@ -79,6 +86,13 @@ const activityGroups = computed(() => {
   return Array.from(grouped.entries()).map(([date, items]) => ({ date, label: activityDayLabel(date), items }))
 })
 const activityCameraCount = computed(() => new Set(activityEvents.value.map((item) => item.camera_id)).size)
+const activityIsLiveDate = computed(() => activityDate.value === todayString())
+const activityLiveLabel = computed(() => {
+  if (!activityIsLiveDate.value) return '历史活动'
+  if (socketState.value === 'connected') return '实时活动已连接'
+  if (socketState.value === 'connecting') return '实时活动连接中'
+  return '实时活动重连中'
+})
 const categories = computed(() => Array.from(new Set(events.value.map((item) => item.category).filter(Boolean))).sort())
 const levelOptions = computed(() => Array.from(new Set(events.value.map((item) => item.level).filter(Boolean))).sort())
 const recent24h = computed(() => {
@@ -107,6 +121,10 @@ const filteredEvents = computed(() => {
     const camera = cameraName(item.camera_id)
     return [item.message, item.code, item.category, item.level, camera, item.metadata_json || ''].join(' ').toLowerCase().includes(needle)
   })
+})
+const paginatedEvents = computed(() => {
+  const start = (systemPage.value - 1) * systemPageSize.value
+  return filteredEvents.value.slice(start, start + systemPageSize.value)
 })
 
 function todayString() {
@@ -170,22 +188,53 @@ function markActivitySnapshotBroken(eventId: number) {
 function activityDateFor(event: MotionActivityEvent) {
   return event.started_at?.slice(0, 10) || activityDate.value
 }
+function activityMatchesCurrentView(event: MotionActivityEvent) {
+  if (activityDateFor(event) !== activityDate.value) return false
+  return activityCamera.value === 'all' || activityCamera.value === event.camera_id
+}
+function activityPaddedRange(event: MotionActivityEvent, paddingSeconds = 10) {
+  const start = wallClockSeconds(event.started_at)
+  if (start === null) return null
+  const sameDay = event.ended_at?.slice(0, 10) === activityDateFor(event)
+  const rawEnd = sameDay ? wallClockSeconds(event.ended_at) : 86400
+  const end = rawEnd === null ? start : Math.max(start, rawEnd)
+  return {
+    start: Math.max(0, start - paddingSeconds),
+    end: Math.min(86400, end + paddingSeconds),
+  }
+}
+async function loadActivityZoneName(cameraId: number) {
+  if (zoneNames.value[cameraId]) return
+  try {
+    const response = await axios.get<{ zones?: Array<{ id: number; name: string }> }>(`/api/cameras/${cameraId}/motion-detection`)
+    zoneNames.value = {
+      ...zoneNames.value,
+      [cameraId]: Object.fromEntries((response.data.zones || []).map((zone) => [zone.id, zone.name])),
+    }
+  } catch {
+    // A missing zone name should not block the activity stream.
+  }
+}
 async function loadActivityZoneNames(items: MotionActivityEvent[]) {
   const cameraIds = Array.from(new Set(items.map((item) => item.camera_id)))
-  const results = await Promise.allSettled(cameraIds.map(async (cameraId) => {
-    const response = await axios.get<{ zones?: Array<{ id: number; name: string }> }>(`/api/cameras/${cameraId}/motion-detection`)
-    return [cameraId, Object.fromEntries((response.data.zones || []).map((zone) => [zone.id, zone.name]))] as const
-  }))
-  const next: Record<number, Record<number, string>> = {}
-  for (const result of results) {
-    if (result.status === 'fulfilled') next[result.value[0]] = result.value[1]
-  }
-  zoneNames.value = next
+  await Promise.allSettled(cameraIds.map((cameraId) => loadActivityZoneName(cameraId)))
+}
+function mergeActivityEvent(item: MotionActivityEvent) {
+  motionCursor = motionCursor === null ? item.id : Math.max(motionCursor, item.id)
+  if (mode.value !== 'activity' || !activityMatchesCurrentView(item)) return
+  if (activityEvents.value.some((existing) => existing.id === item.id)) return
+  activityEvents.value = [item, ...activityEvents.value]
+    .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+    .slice(0, 1000)
+  void loadActivityZoneName(item.camera_id)
 }
 async function loadActivity() {
   activityLoading.value = true
   activityError.value = ''
   brokenActivitySnapshots.value = {}
+  activityEvents.value = []
+  if (activityIsLiveDate.value) connectEventsSocket()
+  else closeSocket()
   try {
     await cameraStore.load()
     const params: Record<string, string | number> = {
@@ -195,11 +244,17 @@ async function loadActivity() {
     }
     if (typeof activityCamera.value === 'number') params.camera_id = activityCamera.value
     const { data } = await axios.get<MotionActivityEvent[]>('/api/motion-events', { params })
-    activityEvents.value = data
-    await loadActivityZoneNames(data)
+    const combined = new Map<number, MotionActivityEvent>()
+    for (const event of data) combined.set(event.id, event)
+    for (const event of activityEvents.value) combined.set(event.id, event)
+    activityEvents.value = Array.from(combined.values())
+      .filter(activityMatchesCurrentView)
+      .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
+      .slice(0, 1000)
+    for (const event of data) motionCursor = motionCursor === null ? event.id : Math.max(motionCursor, event.id)
+    await loadActivityZoneNames(activityEvents.value)
   } catch (error) {
     activityEvents.value = []
-    zoneNames.value = {}
     activityError.value = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '活动加载失败'
   } finally {
     activityLoading.value = false
@@ -226,6 +281,56 @@ function playActivity(event: MotionActivityEvent) {
   if (event.recording_id) query.recording_id = String(event.recording_id)
   void router.push({ path: '/recordings/playback', query })
 }
+function playActivityWithPadding(event: MotionActivityEvent) {
+  const range = activityPaddedRange(event)
+  if (!range) {
+    ElMessage.warning('该活动缺少可用的回放时间')
+    return
+  }
+  writePlaybackAutostart(event.id)
+  const query: Record<string, string> = {
+    camera_id: String(event.camera_id),
+    date: activityDateFor(event),
+    event_id: String(event.id),
+    wall_seconds: String(range.start),
+    play_until_wall_seconds: String(range.end),
+  }
+  if (event.recording_id) query.recording_id = String(event.recording_id)
+  void router.push({ path: '/recordings/playback', query })
+}
+async function exportActivityClip(event: MotionActivityEvent) {
+  const range = activityPaddedRange(event)
+  if (!range) {
+    ElMessage.warning('该活动缺少可用的导出时间')
+    return
+  }
+  exportingActivityId.value = event.id
+  try {
+    const request = buildExportRequest({
+      cameraId: event.camera_id,
+      date: activityDateFor(event),
+      range,
+      exportMode: 'fast',
+      gapPolicy: 'merge',
+      packageMode: 'individual',
+    })
+    const { data: analysis } = await axios.post<ExportRangeAnalysis>('/api/exports/analyze', {
+      camera_id: request.camera_id,
+      start_at: request.start_at,
+      end_at: request.end_at,
+    })
+    if (!analysis.exportable) {
+      ElMessage.warning('该事件范围没有可导出的本地录像')
+      return
+    }
+    const { data: job } = await axios.post<ExportJob>('/api/exports', request)
+    ElMessage.success(`导出任务 #${job.id} 已创建`)
+  } catch (error) {
+    ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '事件片段导出失败')
+  } finally {
+    exportingActivityId.value = null
+  }
+}
 function openActivityDetail(event: MotionActivityEvent) {
   selectedActivity.value = event
   activityDetailVisible.value = true
@@ -241,10 +346,8 @@ async function setMode(value: EventMode) {
   if (value === 'system') query.view = 'system'
   else delete query.view
   void router.replace({ query })
-  if (value === 'activity') {
-    closeSocket()
-    await loadActivity()
-  } else {
+  if (value === 'activity') await loadActivity()
+  else {
     await load()
     connectEventsSocket()
   }
@@ -317,14 +420,20 @@ function relatedAction(item: EventItem) {
   }
   return { label: '查看系统健康', action: () => router.push('/health-center') }
 }
+function shouldConnectSocket() {
+  return mode.value === 'system' || (mode.value === 'activity' && activityIsLiveDate.value)
+}
 function wsUrl() {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const cursor = eventCursor === null ? '' : `?after_id=${eventCursor}`
-  return `${scheme}//${window.location.host}/ws/events${cursor}`
+  const params = new URLSearchParams()
+  if (eventCursor !== null) params.set('after_id', String(eventCursor))
+  if (motionCursor !== null) params.set('after_motion_id', String(motionCursor))
+  const suffix = params.toString()
+  return `${scheme}//${window.location.host}/ws/events${suffix ? `?${suffix}` : ''}`
 }
 function mergeEvent(item: EventItem) {
-  if (events.value.some((existing) => existing.id === item.id)) return
   eventCursor = eventCursor === null ? item.id : Math.max(eventCursor, item.id)
+  if (events.value.some((existing) => existing.id === item.id)) return
   events.value = [item, ...events.value].sort((a, b) => b.id - a.id).slice(0, 500)
   syncDeepLinkedEvent()
 }
@@ -336,12 +445,12 @@ function closeSocket() {
   try { current.close() } catch { /* already closed */ }
 }
 function scheduleReconnect() {
-  if (!mounted || mode.value !== 'system' || reconnectTimer !== null) return
+  if (!mounted || !shouldConnectSocket() || reconnectTimer !== null) return
   reconnectTimer = window.setTimeout(() => { reconnectTimer = null; connectEventsSocket() }, 2000)
 }
 function connectEventsSocket() {
   closeSocket()
-  if (!mounted || mode.value !== 'system') return
+  if (!mounted || !shouldConnectSocket()) return
   socketState.value = 'connecting'
   const ws = new WebSocket(wsUrl())
   socket = ws
@@ -349,8 +458,9 @@ function connectEventsSocket() {
   ws.onmessage = (event: MessageEvent) => {
     if (socket !== ws || typeof event.data !== 'string') return
     try {
-      const message = JSON.parse(event.data) as { type?: string; data?: EventItem }
-      if (message.type === 'event.created' && message.data) mergeEvent(message.data)
+      const message = JSON.parse(event.data) as { type?: string; data?: EventItem | MotionActivityEvent }
+      if (message.type === 'event.created' && message.data) mergeEvent(message.data as EventItem)
+      if (message.type === 'motion.created' && message.data) mergeActivityEvent(message.data as MotionActivityEvent)
     } catch { /* ignore unknown frames */ }
   }
   ws.onerror = () => { if (socket === ws) socketState.value = 'disconnected' }
@@ -374,6 +484,11 @@ async function reload() { await Promise.all([load(), cameraStore.load(true)]); c
 
 watch(() => [activityDate.value, activityCamera.value] as const, () => {
   if (mode.value === 'activity') void loadActivity()
+})
+watch([keyword, levelFilter, categoryFilter, cameraFilter, systemPageSize], () => { systemPage.value = 1 })
+watch(() => filteredEvents.value.length, (length) => {
+  const maxPage = Math.max(1, Math.ceil(length / systemPageSize.value))
+  if (systemPage.value > maxPage) systemPage.value = maxPage
 })
 watch(() => route.query.event_id, syncDeepLinkedEvent)
 onMounted(() => {
@@ -417,6 +532,7 @@ onBeforeUnmount(() => {
           <el-option v-for="camera in cameras" :key="camera.id" :label="camera.name" :value="camera.id" />
         </el-select>
         <span class="activity-summary">{{ activityEvents.length }} 个活动 · {{ activityCameraCount }} 台摄像头</span>
+        <span class="activity-live-note"><span class="live-dot" :class="{ offline: activityIsLiveDate && socketState !== 'connected', history: !activityIsLiveDate }"></span>{{ activityLiveLabel }}</span>
         <el-button text :loading="activityLoading" @click="loadActivity">刷新</el-button>
       </div>
 
@@ -497,6 +613,8 @@ onBeforeUnmount(() => {
           </dl>
           <div class="drawer-actions">
             <el-button type="primary" @click="playActivity(selectedActivity)">播放事件</el-button>
+            <el-button @click="playActivityWithPadding(selectedActivity)">播放前后 10 秒</el-button>
+            <el-button :loading="exportingActivityId === selectedActivity.id" @click="exportActivityClip(selectedActivity)">导出事件片段</el-button>
             <el-button @click="openActivityCamera(selectedActivity)">打开摄像头</el-button>
           </div>
         </template>
@@ -540,7 +658,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="table-panel">
-        <el-table :data="filteredEvents" height="calc(100vh - 360px)" empty-text="暂无匹配事件" @row-click="openDetail">
+        <el-table :data="paginatedEvents" height="calc(100vh - 408px)" empty-text="暂无匹配事件" @row-click="openDetail">
           <el-table-column prop="created_at" label="时间" width="170" />
           <el-table-column label="级别" width="88"><template #default="{ row }"><el-tag size="small" :type="levelType(row.level)">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
           <el-table-column label="分类" width="108"><template #default="{ row }">{{ categoryLabel(row.category) }}</template></el-table-column>
@@ -550,6 +668,18 @@ onBeforeUnmount(() => {
           <el-table-column label="关联" width="110"><template #default="{ row }"><span v-if="row.recording_id" class="relation">录像 #{{ row.recording_id }}</span><span v-else-if="row.camera_id" class="relation">摄像头 #{{ row.camera_id }}</span><span v-else class="muted">系统</span></template></el-table-column>
           <el-table-column label="" width="52" fixed="right"><template #default><span class="open-arrow">›</span></template></el-table-column>
         </el-table>
+        <div class="system-pagination">
+          <span>共 {{ filteredEvents.length }} 条</span>
+          <el-pagination
+            v-model:current-page="systemPage"
+            v-model:page-size="systemPageSize"
+            :page-sizes="[20, 50, 100]"
+            :total="filteredEvents.length"
+            layout="prev, pager, next, sizes"
+            small
+            background
+          />
+        </div>
       </div>
 
       <el-drawer v-model="detailVisible" title="事件详情" size="460px" @closed="closeDetail">
@@ -569,12 +699,12 @@ onBeforeUnmount(() => {
 <style scoped>
 .events-page{padding:14px 18px 28px;color:var(--nvr-text)}
 .event-mode-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:12px}.event-mode-copy{display:grid;gap:3px}.event-mode-copy strong{font-size:15px;font-weight:650}.event-mode-copy span{color:var(--nvr-subtle);font-size:10px}.event-mode-tabs{display:flex;padding:3px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-input)}.event-mode-tabs button{height:28px;padding:0 12px;border:0;border-radius:6px;color:var(--nvr-muted);background:transparent;font:inherit;font-size:10px;cursor:pointer}.event-mode-tabs button.active{color:var(--nvr-text);background:var(--nvr-surface);box-shadow:0 1px 2px rgba(0,0,0,.12)}
-.activity-center-view{min-height:360px}.activity-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.activity-date{width:145px!important}.activity-camera{width:190px}.activity-summary{margin-left:auto;color:var(--nvr-muted);font-size:10px;font-variant-numeric:tabular-nums}.activity-stream{display:grid;gap:18px}.activity-day-group{display:grid;gap:8px}.activity-day-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 2px}.activity-day-head strong{font-size:11px}.activity-day-head span{color:var(--nvr-subtle);font-size:9px}.activity-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:9px}.activity-card{min-width:0;overflow:hidden;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface);cursor:pointer;transition:transform .12s ease,border-color .12s ease,background .12s ease}.activity-card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--nvr-blue) 42%,var(--nvr-border));background:var(--nvr-surface-2)}.activity-card:focus-visible{outline:2px solid color-mix(in srgb,var(--nvr-blue) 62%,transparent);outline-offset:2px}.activity-thumb{position:relative;aspect-ratio:16/9;overflow:hidden;background:#05090d}.activity-thumb img,.activity-detail-image img{display:block;width:100%;height:100%;object-fit:cover}.activity-thumb::after{content:'';position:absolute;inset:48% 0 0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.7))}.activity-thumb time{position:absolute;z-index:1;left:8px;bottom:7px;color:#fff;font-size:9px;font-variant-numeric:tabular-nums}.activity-kind{position:absolute;z-index:1;top:7px;left:7px;padding:3px 6px;border-radius:999px;color:#fff;background:rgba(13,20,30,.62);backdrop-filter:blur(5px);font-size:8px}.activity-thumb-placeholder{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,color-mix(in srgb,var(--nvr-blue) 15%,transparent),transparent 42%),#070c12}.activity-motion-glyph{width:22px;height:22px;border:1.5px solid color-mix(in srgb,var(--nvr-blue) 72%,#fff);border-radius:50%;box-shadow:0 0 0 6px color-mix(in srgb,var(--nvr-blue) 9%,transparent)}.activity-card-body{display:grid;gap:7px;padding:9px 10px 8px}.activity-card-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.activity-card-title strong{min-width:0;overflow:hidden;font-size:10.5px;text-overflow:ellipsis;white-space:nowrap}.activity-card-title span{flex:none;color:var(--nvr-subtle);font-size:8.5px}.activity-card-meta{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:8.5px}.activity-card-meta span+span::before{content:'·';margin-right:8px;color:var(--nvr-subtle)}.activity-card-actions{display:flex;align-items:center;justify-content:space-between;padding-top:4px;border-top:1px solid color-mix(in srgb,var(--nvr-border) 58%,transparent)}.activity-card-actions button{padding:0;border:0;color:var(--nvr-muted);background:transparent;font:inherit;font-size:8.5px;cursor:pointer}.activity-card-actions button:hover{color:var(--nvr-text)}.activity-card-actions>span{color:var(--nvr-blue);font-size:8.5px}.activity-empty{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--nvr-border);border-radius:10px;color:var(--nvr-subtle);font-size:10px;text-align:center}.activity-empty strong{color:var(--nvr-muted);font-size:11px}.activity-empty-glyph{width:24px;height:24px;border:1px solid var(--nvr-border);border-radius:50%;box-shadow:0 0 0 7px var(--nvr-input)}.activity-error{color:var(--nvr-red)}.activity-detail-image{aspect-ratio:16/9;overflow:hidden;border-radius:9px;background:#060b10}.activity-detail-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.activity-detail-title>div{display:flex;align-items:center;gap:7px}.activity-detail-title strong{font-size:13px}.activity-detail-title>span{color:var(--nvr-muted);font-size:10px;font-variant-numeric:tabular-nums}.activity-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-blue);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-blue) 10%,transparent)}
-.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.live-note{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:12px}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-green);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-green) 8%,transparent)}.live-dot.offline{background:var(--nvr-yellow);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-yellow) 8%,transparent)}
+.activity-center-view{min-height:360px}.activity-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;padding:8px 10px;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.activity-date{width:145px!important}.activity-camera{width:190px}.activity-summary{margin-left:auto;color:var(--nvr-muted);font-size:10px;font-variant-numeric:tabular-nums}.activity-live-note{display:flex;align-items:center;gap:6px;color:var(--nvr-muted);font-size:9px;white-space:nowrap}.activity-stream{display:grid;gap:18px}.activity-day-group{display:grid;gap:8px}.activity-day-head{display:flex;align-items:baseline;justify-content:space-between;padding:0 2px}.activity-day-head strong{font-size:11px}.activity-day-head span{color:var(--nvr-subtle);font-size:9px}.activity-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:9px}.activity-card{min-width:0;overflow:hidden;border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface);cursor:pointer;transition:transform .12s ease,border-color .12s ease,background .12s ease}.activity-card:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--nvr-blue) 42%,var(--nvr-border));background:var(--nvr-surface-2)}.activity-card:focus-visible{outline:2px solid color-mix(in srgb,var(--nvr-blue) 62%,transparent);outline-offset:2px}.activity-thumb{position:relative;aspect-ratio:16/9;overflow:hidden;background:#05090d}.activity-thumb img,.activity-detail-image img{display:block;width:100%;height:100%;object-fit:cover}.activity-thumb::after{content:'';position:absolute;inset:48% 0 0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.7))}.activity-thumb time{position:absolute;z-index:1;left:8px;bottom:7px;color:#fff;font-size:9px;font-variant-numeric:tabular-nums}.activity-kind{position:absolute;z-index:1;top:7px;left:7px;padding:3px 6px;border-radius:999px;color:#fff;background:rgba(13,20,30,.62);backdrop-filter:blur(5px);font-size:8px}.activity-thumb-placeholder{width:100%;height:100%;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,color-mix(in srgb,var(--nvr-blue) 15%,transparent),transparent 42%),#070c12}.activity-motion-glyph{width:22px;height:22px;border:1.5px solid color-mix(in srgb,var(--nvr-blue) 72%,#fff);border-radius:50%;box-shadow:0 0 0 6px color-mix(in srgb,var(--nvr-blue) 9%,transparent)}.activity-card-body{display:grid;gap:7px;padding:9px 10px 8px}.activity-card-title{display:flex;align-items:center;justify-content:space-between;gap:8px}.activity-card-title strong{min-width:0;overflow:hidden;font-size:10.5px;text-overflow:ellipsis;white-space:nowrap}.activity-card-title span{flex:none;color:var(--nvr-subtle);font-size:8.5px}.activity-card-meta{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:8.5px}.activity-card-meta span+span::before{content:'·';margin-right:8px;color:var(--nvr-subtle)}.activity-card-actions{display:flex;align-items:center;justify-content:space-between;padding-top:4px;border-top:1px solid color-mix(in srgb,var(--nvr-border) 58%,transparent)}.activity-card-actions button{padding:0;border:0;color:var(--nvr-muted);background:transparent;font:inherit;font-size:8.5px;cursor:pointer}.activity-card-actions button:hover{color:var(--nvr-text)}.activity-card-actions>span{color:var(--nvr-blue);font-size:8.5px}.activity-empty{min-height:320px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px dashed var(--nvr-border);border-radius:10px;color:var(--nvr-subtle);font-size:10px;text-align:center}.activity-empty strong{color:var(--nvr-muted);font-size:11px}.activity-empty-glyph{width:24px;height:24px;border:1px solid var(--nvr-border);border-radius:50%;box-shadow:0 0 0 7px var(--nvr-input)}.activity-error{color:var(--nvr-red)}.activity-detail-image{aspect-ratio:16/9;overflow:hidden;border-radius:9px;background:#060b10}.activity-detail-title{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}.activity-detail-title>div{display:flex;align-items:center;gap:7px}.activity-detail-title strong{font-size:13px}.activity-detail-title>span{color:var(--nvr-muted);font-size:10px;font-variant-numeric:tabular-nums}.activity-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-blue);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-blue) 10%,transparent)}
+.actions-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.live-note{display:flex;align-items:center;gap:8px;color:var(--nvr-muted);font-size:12px}.live-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-green);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-green) 8%,transparent)}.live-dot.offline{background:var(--nvr-yellow);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-yellow) 8%,transparent)}.live-dot.history{background:var(--nvr-subtle);box-shadow:none}
 .metrics-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:12px}.metric-card{appearance:none;display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:14px 16px;color:var(--nvr-text);background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px;cursor:pointer;text-align:left}.metric-card:hover,.metric-card.active{border-color:color-mix(in srgb,var(--nvr-blue) 45%,var(--nvr-border));background:var(--nvr-surface-2)}.metric-card span{font-size:11px;color:var(--nvr-muted)}.metric-card strong{font-size:24px;font-weight:650;line-height:1}.metric-card small{font-size:10px;color:var(--nvr-subtle)}.metric-card.warning strong{color:var(--nvr-yellow)}.metric-card.danger strong{color:var(--nvr-red)}
 .filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:10px;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.search-input{min-width:280px;flex:1}.filter-select{width:126px}.camera-select{width:170px}.result-count{margin-left:auto;color:var(--nvr-muted);font-size:11px;white-space:nowrap}
-.table-panel{overflow:hidden;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.relation{color:color-mix(in srgb,var(--nvr-blue) 58%,var(--nvr-text));font-size:11px}.muted{color:var(--nvr-muted)}.open-arrow{color:var(--nvr-subtle);font-size:20px}.table-panel :deep(.el-table__row){cursor:pointer}
-.detail-hero{display:flex;gap:12px;padding:14px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface-2)}.detail-icon{flex:0 0 22px;width:22px;margin-top:2px;color:var(--nvr-muted)}.detail-hero.warning .detail-icon{color:var(--nvr-yellow)}.detail-hero.danger .detail-icon{color:var(--nvr-red)}.detail-hero>div{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:7px}.detail-hero strong{font-size:14px;line-height:1.55}.detail-hero span{color:var(--nvr-muted);font-size:11px}.detail-list{margin:16px 0}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);padding:9px 0;border-bottom:1px solid var(--nvr-border)}.detail-list dt{color:var(--nvr-muted);font-size:11px}.detail-list dd{margin:0;font-size:12px;word-break:break-all}.detail-list code{font-size:11px;color:color-mix(in srgb,var(--nvr-blue) 62%,var(--nvr-text))}.section-label{margin-bottom:7px;color:var(--nvr-muted);font-size:10px;font-weight:700;letter-spacing:.08em}.metadata-block pre{max-height:280px;overflow:auto;margin:0;padding:12px;color:var(--nvr-text-soft);background:var(--nvr-surface-2);border:1px solid var(--nvr-border);border-radius:8px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all}.drawer-actions{display:flex;gap:8px;margin-top:18px}
+.table-panel{overflow:hidden;background:var(--nvr-surface);border:1px solid var(--nvr-border);border-radius:10px}.relation{color:color-mix(in srgb,var(--nvr-blue) 58%,var(--nvr-text));font-size:11px}.muted{color:var(--nvr-muted)}.open-arrow{color:var(--nvr-subtle);font-size:20px}.table-panel :deep(.el-table__row){cursor:pointer}.system-pagination{min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 10px;border-top:1px solid var(--nvr-border)}.system-pagination>span{color:var(--nvr-muted);font-size:9px;white-space:nowrap}
+.detail-hero{display:flex;gap:12px;padding:14px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface-2)}.detail-icon{flex:0 0 22px;width:22px;margin-top:2px;color:var(--nvr-muted)}.detail-hero.warning .detail-icon{color:var(--nvr-yellow)}.detail-hero.danger .detail-icon{color:var(--nvr-red)}.detail-hero>div{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:7px}.detail-hero strong{font-size:14px;line-height:1.55}.detail-hero span{color:var(--nvr-muted);font-size:11px}.detail-list{margin:16px 0}.detail-list>div{display:grid;grid-template-columns:90px minmax(0,1fr);padding:9px 0;border-bottom:1px solid var(--nvr-border)}.detail-list dt{color:var(--nvr-muted);font-size:11px}.detail-list dd{margin:0;font-size:12px;word-break:break-all}.detail-list code{font-size:11px;color:color-mix(in srgb,var(--nvr-blue) 62%,var(--nvr-text))}.section-label{margin-bottom:7px;color:var(--nvr-muted);font-size:10px;font-weight:700;letter-spacing:.08em}.metadata-block pre{max-height:280px;overflow:auto;margin:0;padding:12px;color:var(--nvr-text-soft);background:var(--nvr-surface-2);border:1px solid var(--nvr-border);border-radius:8px;font-size:11px;line-height:1.55;white-space:pre-wrap;word-break:break-all}.drawer-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
 @media(max-width:1000px){.event-mode-bar{align-items:stretch;flex-direction:column}.event-mode-tabs{align-self:flex-start}.activity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.filter-bar,.activity-toolbar{flex-wrap:wrap}.search-input{flex-basis:100%}.activity-summary,.result-count{margin-left:0}}
-@media(max-width:640px){.events-page{padding:10px}.activity-grid{grid-template-columns:1fr}.activity-toolbar{align-items:stretch}.activity-date,.activity-camera{width:100%!important}.metrics-grid{grid-template-columns:1fr 1fr}.filter-select,.camera-select{width:calc(50% - 4px)}}
+@media(max-width:640px){.events-page{padding:10px}.activity-grid{grid-template-columns:1fr}.activity-toolbar{align-items:stretch}.activity-date,.activity-camera{width:100%!important}.metrics-grid{grid-template-columns:1fr 1fr}.filter-select,.camera-select{width:calc(50% - 4px)}.system-pagination{align-items:flex-start;flex-direction:column}}
 </style>
