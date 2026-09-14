@@ -198,6 +198,7 @@ class MotionWorker:
         state: MotionEventStateMachine | None = None
         best_frame: np.ndarray | None = None
         best_quality: tuple[float, float] | None = None
+        last_stable_motion_at: datetime | None = None
         self.on_status("starting", stream, None, None, None)
         try:
             probe = await probe_camera(
@@ -265,11 +266,14 @@ class MotionWorker:
                     analysis.raw_score,
                     suppressed=suppressed,
                 )
+                if not suppressed and confidence.motion:
+                    last_stable_motion_at = timestamp
                 closed = state.update(
                     timestamp,
                     motion=confidence.motion,
                     score=confidence.confidence,
                     zone_id=analysis.primary_zone_id,
+                    end_boundary_at=last_stable_motion_at if suppressed else None,
                 )
                 for event in closed:
                     await self.on_event(event, best_frame)
