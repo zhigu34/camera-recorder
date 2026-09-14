@@ -24,6 +24,11 @@ const emit = defineEmits<{
 const controlsVisible = ref(true)
 let hideTimer: number | null = null
 
+function dispatchTransport(type: 'skip' | 'rate' | 'interval', value: number) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(`camera-recorder:playback-${type}`, { detail: value }))
+}
+
 function clearHideTimer() {
   if (hideTimer !== null) window.clearTimeout(hideTimer)
   hideTimer = null
@@ -45,13 +50,23 @@ function showControls() {
   scheduleHide()
 }
 
+function onSkip(deltaSeconds: number) {
+  emit('skip', deltaSeconds)
+  dispatchTransport('skip', deltaSeconds)
+  showControls()
+}
+
 function onRate(event: Event) {
-  emit('update:playbackRate', Number((event.target as HTMLSelectElement).value))
+  const value = Number((event.target as HTMLSelectElement).value)
+  emit('update:playbackRate', value)
+  dispatchTransport('rate', value)
   showControls()
 }
 
 function onSkipInterval(event: Event) {
-  emit('update:skipSeconds', Number((event.target as HTMLSelectElement).value))
+  const value = Number((event.target as HTMLSelectElement).value)
+  emit('update:skipSeconds', value)
+  dispatchTransport('interval', value)
   showControls()
 }
 
@@ -102,7 +117,7 @@ onBeforeUnmount(clearHideTimer)
         :disabled="!active"
         :aria-label="`倒退 ${skipSeconds} 秒`"
         :title="`倒退 ${skipSeconds} 秒`"
-        @click="emit('skip', -skipSeconds); showControls()"
+        @click="onSkip(-skipSeconds)"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4.5 5v4h4" />
@@ -117,7 +132,7 @@ onBeforeUnmount(clearHideTimer)
         :disabled="!active"
         :aria-label="`快进 ${skipSeconds} 秒`"
         :title="`快进 ${skipSeconds} 秒`"
-        @click="emit('skip', skipSeconds); showControls()"
+        @click="onSkip(skipSeconds)"
       >
         <svg class="media-forward-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4.5 5v4h4" />
