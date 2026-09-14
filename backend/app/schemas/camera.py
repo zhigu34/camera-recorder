@@ -74,6 +74,9 @@ class CameraCreate(CameraBase):
     def validate_schedule(self):
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
+        # A weekly recording schedule is an automatic-recording policy. Treating
+        # schedule_enabled=true together with auto_record=false as valid creates a
+        # contradictory state where configured windows can never start recording.
         if self.recording_schedule_enabled:
             self.auto_record = True
         return self
@@ -195,6 +198,8 @@ class CameraRead(CameraBase):
     @field_validator("recording_schedule", mode="before")
     @classmethod
     def normalize_legacy_schedule(cls, value: Any):
+        # Historical rows may contain NULL or malformed schedule JSON. Reading the
+        # camera list must never become a 500 because one old row is incomplete.
         if not isinstance(value, list):
             return []
         normalized: list[dict[str, Any]] = []
@@ -216,6 +221,7 @@ class CameraRead(CameraBase):
 
 
 class CameraProbeResult(BaseModel):
+    ok: bool = True
     video_codec: str | None = None
     video_profile: str | None = None
     width: int | None = None
@@ -226,8 +232,20 @@ class CameraProbeResult(BaseModel):
     pixel_format: str | None = None
     has_b_frames: int | None = None
     video_time_base: str | None = None
+
     audio_codec: str | None = None
     audio_profile: str | None = None
     sample_rate: int | None = None
     channels: int | None = None
     audio_frame_samples: int | None = None
+
+
+class CameraRuntimeStatus(BaseModel):
+    camera_id: int
+    state: str
+    pid: int | None = None
+    restart_count: int = 0
+    warning_count: int = 0
+    timestamp_warning_count: int = 0
+    network_warning_count: int = 0
+    last_error: str | None = None
