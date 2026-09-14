@@ -172,22 +172,24 @@ async def delete_motion_zone(
 
 @router.get("/api/motion-events", response_model=list[MotionEventRead])
 async def list_motion_events(
-    camera_id: int = Query(..., gt=0),
     start: datetime = Query(...),
     end: datetime = Query(...),
+    camera_id: int | None = Query(default=None, gt=0),
     zone_id: int | None = Query(default=None, gt=0),
     limit: int = Query(default=500, ge=1, le=2000),
     db: AsyncSession = Depends(get_db),
 ):
-    await _camera_or_404(camera_id, db)
+    if camera_id is not None:
+        await _camera_or_404(camera_id, db)
     if start > end:
         raise HTTPException(status_code=422, detail="start must not be after end")
 
     statement = select(MotionEvent).where(
-        MotionEvent.camera_id == camera_id,
         MotionEvent.started_at <= end,
         MotionEvent.ended_at >= start,
     )
+    if camera_id is not None:
+        statement = statement.where(MotionEvent.camera_id == camera_id)
     if zone_id is not None:
         statement = statement.where(MotionEvent.zone_id == zone_id)
     statement = statement.order_by(MotionEvent.started_at, MotionEvent.id).limit(limit)

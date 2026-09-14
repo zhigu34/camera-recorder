@@ -44,6 +44,7 @@ interface RecentRecording {
   started_at?: string | null
 }
 
+const PLAYBACK_EVENT_AUTOSTART_KEY = 'camera-recorder:playback-event-autostart'
 const route = useRoute()
 const router = useRouter()
 const cameraStore = useCameraStore()
@@ -55,6 +56,8 @@ const selectedCamera = ref<number | null>(null)
 const selectedDate = ref(todayString())
 const activeRecordingId = ref<number | null>(null)
 const activeWallSeconds = ref<number | null>(null)
+const routeEventId = ref<number | null>(null)
+const routeEventWallSeconds = ref<number | null>(null)
 const playbackRate = ref(1)
 const skipSeconds = ref(loadSkipInterval(playbackStorage()))
 const loading = ref(false)
@@ -132,6 +135,11 @@ function positiveQueryInt(value: unknown) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null
 }
 
+function routeWallSeconds() {
+  const parsed = Number(queryValue(route.query.wall_seconds))
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 86400 ? parsed : null
+}
+
 function routeDate() {
   const value = queryValue(route.query.date)
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null
@@ -139,6 +147,23 @@ function routeDate() {
 
 function recordingDate(value?: string | null) {
   return value && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null
+}
+
+function consumePlaybackEventAutostart(eventId: number | null) {
+  if (!eventId || typeof window === 'undefined') return false
+  try {
+    const stored = window.sessionStorage.getItem(PLAYBACK_EVENT_AUTOSTART_KEY)
+    if (stored !== String(eventId)) return false
+    window.sessionStorage.removeItem(PLAYBACK_EVENT_AUTOSTART_KEY)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function clearEventRouteContext() {
+  routeEventId.value = null
+  routeEventWallSeconds.value = null
 }
 
 function cameraStatusClass(camera: SharedCamera) {
@@ -179,6 +204,8 @@ function syncPlaybackRoute(recordingId: number | null = activeRecordingId.value)
   if (selectedCamera.value) query.camera_id = String(selectedCamera.value)
   if (selectedDate.value) query.date = selectedDate.value
   if (recordingId) query.recording_id = String(recordingId)
+  if (routeEventId.value) query.event_id = String(routeEventId.value)
+  if (routeEventWallSeconds.value !== null) query.wall_seconds = String(routeEventWallSeconds.value)
   routeSyncing = true
   void router.replace({ path: '/recordings/playback', query }).finally(() => {
     routeSyncing = false
@@ -249,8 +276,13 @@ async function initialize() {
     await cameraStore.load()
     const deepCamera = positiveQueryInt(route.query.camera_id)
     const deepRecording = positiveQueryInt(route.query.recording_id)
+    const deepEventId = positiveQueryInt(route.query.event_id)
+    const deepWallSeconds = routeWallSeconds()
     const deepDate = routeDate()
     const validDeepCamera = deepCamera && cameras.value.some((item) => item.id === deepCamera) ? deepCamera : null
+    const explicitEventAutostart = consumePlaybackEventAutostart(deepEventId)
+    routeEventId.value = deepEventId
+    routeEventWallSeconds.value = deepWallSeconds
 
     if (validDeepCamera) {
       selectedCamera.value = validDeepCamera
@@ -269,8 +301,20 @@ async function initialize() {
 
     if (selectedCamera.value) {
       await fetchDay()
-      const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
-      await selectSelection(selected)
+      if (deepWallSeconds !== null) {
+        const action = playbackWallClockAction(deepRecording, recordings.value, deepWallSeconds)
+        if (action.kind === 'seek') {
+          const recording = recordings.value.find((item) => item.id === action.recordingId) || null
+          if (explicitEventAutostart) await openSelection(recording, action.seekSeconds)
+          else await selectSelection(recording, action.seekSeconds)
+        } else {
+          const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
+          await selectSelection(selected)
+        }
+      } else {
+        const selected = resolvePlaybackSelection(recordings.value, deepRecording) as RecordingItem | null
+        await selectSelection(selected)
+      }
     }
     initialized.value = true
   } catch (error) {
@@ -282,6 +326,7 @@ async function initialize() {
 
 async function handleCameraChange() {
   resetExportContext()
+  clearEventRouteContext()
   activeRecordingId.value = null
   activeWallSeconds.value = null
   await loadContext(null)
@@ -296,12 +341,14 @@ async function selectCamera(cameraId: number) {
 async function handleDateChange() {
   if (!selectedDate.value) return
   resetExportContext()
+  clearEventRouteContext()
   activeRecordingId.value = null
   activeWallSeconds.value = null
   await loadContext(null)
 }
 
 async function seekWallClock(wallSeconds: number) {
+  clearEventRouteContext()
   const action = playbackWallClockAction(activeRecordingId.value, recordings.value, wallSeconds)
   if (action.kind === 'gap') {
     ElMessage.info('该时间没有可播放录像')
@@ -316,6 +363,7 @@ async function seekWallClock(wallSeconds: number) {
     syncPlaybackRoute(recording.id)
     await playerRef.value?.open(recording, { seekSeconds: action.seekSeconds })
   } else {
+    syncPlaybackRoute(recording.id)
     playerRef.value?.seek(action.seekSeconds)
     await playerRef.value?.play().catch(() => undefined)
   }
@@ -497,6 +545,7 @@ watch(
     const changedContext = cameraId !== selectedCamera.value || (date && date !== selectedDate.value)
     if (!changedContext && recordingId === activeRecordingId.value) return
     if (changedContext) resetExportContext()
+    clearEventRouteContext()
     if (cameraId && cameras.value.some((item) => item.id === cameraId)) selectedCamera.value = cameraId
     if (date) selectedDate.value = date
     await loadContext(recordingId)
