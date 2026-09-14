@@ -5,7 +5,10 @@ from sqlalchemy import select
 
 from app.core.database import SessionLocal
 from app.models.camera import Camera
-from app.services.camera_connectivity_monitor import camera_connectivity_monitor
+from app.services.camera_connectivity_monitor import (
+    camera_connectivity_monitor,
+    recorder_runtime_is_healthy,
+)
 from app.services.health_monitor import health_snapshot, health_trends
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule import schedule_label
@@ -68,8 +71,7 @@ async def _schedule_aware_snapshot() -> dict:
 
         runtime = runtime_by_camera.get(camera.id, {})
         recorder_state = str(runtime.get("state") or camera.recorder_state or "STOPPED")
-        recorder_pid = runtime.get("pid")
-        if recorder_state == "RECORDING" and recorder_pid is not None:
+        if recorder_runtime_is_healthy(runtime):
             connectivity_status = "online"
             connectivity_source = "recorder"
         else:
@@ -99,10 +101,9 @@ async def _schedule_aware_snapshot() -> dict:
 
         row["connectivity_status"] = connectivity_status
         row["connectivity_source"] = connectivity_source
-        row["connectivity_failures"] = camera_connectivity_monitor.failures_for(camera.id)
+        row["connectivity_failures"] = camera.connectivity_failures
         row["recorder_state"] = recorder_state
         row["schedule_state"] = schedule_state
-        # Compatibility aliases for existing health clients.
         row["state"] = recorder_state
         row["expected_recording"] = expected
         row["schedule_enabled"] = camera.recording_schedule_enabled
@@ -164,5 +165,4 @@ async def status_websocket(websocket: WebSocket) -> None:
             if message.get("type") == "websocket.disconnect":
                 return
     except RuntimeError:
-        # A disconnect can race with snapshot generation/send_json().
         return
