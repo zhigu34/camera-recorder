@@ -4,6 +4,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { VideoPlay } from '@element-plus/icons-vue'
 
+import PlaybackMediaControls from './PlaybackMediaControls.vue'
 import type {
   PlaybackPlayerHandle,
   PlaybackState,
@@ -24,13 +25,21 @@ type ActivePlaybackMode = Exclude<PlaybackMode, ''>
 
 const props = withDefaults(defineProps<{
   playbackRate?: number
+  skipSeconds?: number
 }>(), {
   playbackRate: 1,
+  skipSeconds: 10,
 })
 
 const emit = defineEmits<{
   timeupdate: [seconds: number]
   'recording-change': [recording: RecordingItem | null]
+  'playing-change': [playing: boolean]
+  'muted-change': [muted: boolean]
+  'volume-change': [volume: number]
+  'update:playbackRate': [value: number]
+  'update:skipSeconds': [value: number]
+  skip: [deltaSeconds: number]
   ended: []
   error: [message: string]
 }>()
@@ -38,6 +47,7 @@ const emit = defineEmits<{
 const playbackTracker = new PlaybackAttemptTracker()
 const browserHevcHint = ref(hevcSupportHint())
 const activeRecording = ref<RecordingItem | null>(null)
+const playerBoxRef = ref<HTMLElement | null>(null)
 const videoRef = ref<HTMLVideoElement | null>(null)
 const videoSrc = ref('')
 const preparing = ref(false)
@@ -48,6 +58,9 @@ const proxyProgress = ref<ProxyProgress | null>(null)
 const fallbackInProgress = ref(false)
 const cancellingProxy = ref(false)
 const pendingSeekSeconds = ref<number | null>(null)
+const desiredVolume = ref(1)
+const desiredMuted = ref(false)
+const playing = ref(false)
 let progressTimer: number | null = null
 
 const effectiveProgressPercent = computed(() => {
@@ -118,6 +131,13 @@ function applyPlaybackRate() {
   const video = videoRef.value
   if (!video) return
   video.playbackRate = normalizePlaybackRate(props.playbackRate)
+}
+
+function applyAudioState() {
+  const video = videoRef.value
+  if (!video) return
+  video.volume = desiredVolume.value
+  video.muted = desiredMuted.value
 }
 
 function stopProgressPolling() {
@@ -219,7 +239,9 @@ function reset() {
   proxyProgress.value = null
   fallbackInProgress.value = false
   pendingSeekSeconds.value = null
+  playing.value = false
   playbackTracker.reset()
+  emit('playing-change', false)
 }
 
 function select(recording: RecordingItem | null, options: { seekSeconds?: number } = {}) {
@@ -282,6 +304,37 @@ function pause() {
   videoRef.value?.pause()
 }
 
+async function togglePlay() {
+  if (playing.value) {
+    pause()
+    return
+  }
+  await playVideo().catch(() => undefined)
+}
+
+function setVolume(volume: number) {
+  desiredVolume.value = Math.max(0, Math.min(1, Number(volume)))
+  if (videoRef.value) videoRef.value.volume = desiredVolume.value
+  emit('volume-change', desiredVolume.value)
+}
+
+function setMuted(muted: boolean) {
+  desiredMuted.value = Boolean(muted)
+  if (videoRef.value) videoRef.value.muted = desiredMuted.value
+  emit('muted-change', desiredMuted.value)
+}
+
+async function toggleFullscreen() {
+  const box = playerBoxRef.value
+  if (!box) return
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await box.requestFullscreen()
+  } catch {
+    ElMessage.warning('浏览器未允许全屏显示')
+  }
+}
+
 function applyPendingSeek() {
   if (pendingSeekSeconds.value === null) return
   seek(pendingSeekSeconds.value)
@@ -291,6 +344,7 @@ function applyPendingSeek() {
 function handleLoadedMetadata() {
   playbackTracker.markLoadedMetadata()
   applyPlaybackRate()
+  applyAudioState()
   applyPendingSeek()
 }
 
@@ -305,8 +359,25 @@ function handleVideoCanPlay() {
 
 function handleVideoPlaying() {
   applyPlaybackRate()
+  applyAudioState()
   playbackTracker.markPlaying(videoRef.value)
   preparing.value = false
+  playing.value = true
+  emit('playing-change', true)
+}
+
+function handleVideoPause() {
+  playing.value = false
+  emit('playing-change', false)
+}
+
+function handleVolumeChange() {
+  const video = videoRef.value
+  if (!video) return
+  desiredVolume.value = video.volume
+  desiredMuted.value = video.muted
+  emit('volume-change', video.volume)
+  emit('muted-change', video.muted)
 }
 
 function handleTimeUpdate() {
@@ -354,6 +425,8 @@ async function cancelProxy() {
 }
 
 function handleEnded() {
+  playing.value = false
+  emit('playing-change', false)
   emit('ended')
 }
 
@@ -365,6 +438,9 @@ defineExpose<PlaybackPlayerHandle>({
   seek,
   play: playVideo,
   pause,
+  setVolume,
+  setMuted,
+  toggleFullscreen,
 })
 
 onBeforeUnmount(() => {
@@ -381,6 +457,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="playback-player">
     <div
+      ref="playerBoxRef"
       class="player-box"
       v-loading="preparing"
       :element-loading-text="playbackMode === 'proxy-live' ? '正在准备兼容流…' : '正在加载录像…'"
@@ -389,7 +466,6 @@ onBeforeUnmount(() => {
         v-if="videoSrc"
         ref="videoRef"
         :src="videoSrc"
-        controls
         autoplay
         playsinline
         preload="auto"
@@ -397,6 +473,8 @@ onBeforeUnmount(() => {
         @loadeddata="handleLoadedData"
         @canplay="handleVideoCanPlay"
         @playing="handleVideoPlaying"
+        @pause="handleVideoPause"
+        @volumechange="handleVolumeChange"
         @timeupdate="handleTimeUpdate"
         @ended="handleEnded"
         @error="handleVideoError"
@@ -416,6 +494,23 @@ onBeforeUnmount(() => {
         <strong>{{ activeRecording ? '当前片段不可播放' : '尚未选择录像' }}</strong>
         <span>选择录像或时间后开始播放。</span>
       </div>
+
+      <PlaybackMediaControls
+        v-if="activeRecording && isPlayable(activeRecording)"
+        :active="Boolean(activeRecording)"
+        :playing="playing"
+        :playback-rate="playbackRate"
+        :skip-seconds="skipSeconds"
+        :muted="desiredMuted"
+        :volume="desiredVolume"
+        @toggle-play="togglePlay"
+        @skip="emit('skip', $event)"
+        @update:playback-rate="emit('update:playbackRate', $event)"
+        @update:skip-seconds="emit('update:skipSeconds', $event)"
+        @update:muted="setMuted"
+        @update:volume="setVolume"
+        @fullscreen="toggleFullscreen"
+      />
     </div>
 
     <div v-if="playbackNotice" class="playback-notice">{{ playbackNotice }}</div>
@@ -429,5 +524,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.playback-player{min-width:0}.player-box{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-box video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.playback-notice,.playback-error{margin-top:8px;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin-top:8px;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}
+.playback-player{min-width:0}.player-box{position:relative;aspect-ratio:16/9;border:1px solid var(--nvr-border);border-radius:8px;background:#03070b;overflow:hidden}.player-box:fullscreen{border:0;border-radius:0;background:#000}.player-box:fullscreen video{width:100vw;height:100vh}.player-box video{display:block;width:100%;height:100%;object-fit:contain;background:#000}.play-placeholder{position:absolute;inset:0;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:0;color:#d8e4ef;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#05090d;cursor:pointer}.play-placeholder>span{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:var(--nvr-blue)}.play-placeholder :deep(svg){width:19px}.play-placeholder strong{font-size:12px}.play-placeholder small{max-width:82%;overflow:hidden;color:#718095;font-size:8px;text-overflow:ellipsis;white-space:nowrap}.player-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#59687b}.player-empty :deep(svg){width:28px;margin-bottom:8px}.player-empty strong{color:#8e9cac;font-size:11px}.player-empty span{margin-top:4px;font-size:8px}.playback-notice,.playback-error{margin-top:8px;padding:7px 8px;border-radius:6px;font-size:8px;line-height:1.45}.playback-notice{color:var(--nvr-muted);background:var(--nvr-bg-soft)}.playback-error{color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 8%,transparent)}.proxy-progress{margin-top:8px;padding:8px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 25%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,transparent)}.proxy-progress>div{display:flex;justify-content:space-between;margin-bottom:6px;color:var(--nvr-muted);font-size:8px}.proxy-progress :deep(.el-button){margin-top:7px}
 </style>

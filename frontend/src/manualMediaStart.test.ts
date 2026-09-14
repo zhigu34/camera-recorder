@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
-import previewSource from './PreviewView.vue?raw'
+import previewSource from './PreviewViewV2.vue?raw'
 import playerSource from './PlaybackPlayer.vue?raw'
 import playbackWorkspaceSource from './PlaybackWorkspace.vue?raw'
 import managementSource from './RecordingManagementView.vue?raw'
 import recordingsTypesSource from './types/recordings.ts?raw'
 
 describe('manual media start', () => {
-  it('keeps live monitoring disconnected until the user starts it', () => {
-    expect(previewSource).toContain('const wallPaused = ref(true)')
-    expect(previewSource).toContain('const wallStarted = ref(false)')
-    expect(previewSource).toContain("'开始监控'")
+  it('keeps live monitoring disconnected until a tile is explicitly started', () => {
+    expect(previewSource).toContain('function startSlot(index: number)')
+    expect(previewSource).toContain('function toggleSlotPlayback(index: number)')
+    expect(previewSource).toContain("state: 'idle'")
+    expect(previewSource).toContain('autoFill()')
+
+    const mountedStart = previewSource.indexOf('onMounted(() => {')
+    const mountedEnd = previewSource.indexOf('onBeforeUnmount(', mountedStart)
+    const mountedBlock = previewSource.slice(mountedStart, mountedEnd)
+    expect(mountedBlock).not.toContain('connectSlot(')
   })
 
   it('stages playback selection without opening a media source on page entry', () => {
@@ -23,6 +29,7 @@ describe('manual media start', () => {
   it('starts a staged playback only after an explicit play or seek action', () => {
     expect(playerSource).toContain('pendingSeekSeconds.value = requested')
     expect(playerSource).toContain('await open(activeRecording.value, { seekSeconds: pendingSeekSeconds.value || 0 })')
+    expect(playerSource).toContain('@click="open(activeRecording)"')
   })
 
   it('selects recording-management deep links without playing them', () => {

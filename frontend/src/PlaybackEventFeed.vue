@@ -124,7 +124,7 @@ onMounted(() => void loadFeed())
     <div class="event-feed-head">
       <div>
         <strong>检测事件</strong>
-        <span>{{ feedEvents.length }} 个移动事件</span>
+        <span>{{ feedEvents.length }}</span>
       </div>
       <button type="button" class="event-refresh" :disabled="loading" @click="loadFeed">
         {{ loading ? '加载中' : '刷新' }}
@@ -134,8 +134,6 @@ onMounted(() => void loadFeed())
     <div class="event-filter-row" aria-label="检测事件筛选">
       <button type="button" :class="{ active: filter === 'all' }" @click="filter = 'all'">全部</button>
       <button type="button" :class="{ active: filter === 'motion' }" @click="filter = 'motion'">移动</button>
-      <button type="button" disabled title="人员识别尚未启用">人员</button>
-      <button type="button" disabled title="车辆识别尚未启用">车辆</button>
     </div>
 
     <div class="event-feed-body">
@@ -146,14 +144,14 @@ onMounted(() => void loadFeed())
       <div v-else-if="error" class="event-feed-state event-feed-error">{{ error }}</div>
       <div v-else-if="!visibleEvents.length" class="event-feed-state">
         <strong>暂无检测事件</strong>
-        <span>只有落在实际录像范围内的移动事件会显示在这里</span>
+        <span>当前录像范围内没有移动检测</span>
       </div>
 
       <button
         v-for="event in visibleEvents"
         :key="event.id"
         type="button"
-        class="event-card"
+        class="event-row"
         :class="{ active: isActive(event) }"
         @click="openEvent(event)"
       >
@@ -167,21 +165,20 @@ onMounted(() => void loadFeed())
           />
           <div v-else class="event-thumb-placeholder">
             <span class="motion-glyph"></span>
-            <small>移动</small>
           </div>
           <span class="event-time">{{ clockLabel(event.started_at) }}</span>
-          <span class="event-kind">移动</span>
         </div>
 
-        <div class="event-copy">
-          <div class="event-copy-title">
-            <strong>检测到移动</strong>
-            <span>{{ durationLabel(event) }}</span>
+        <div class="event-meta">
+          <div class="event-primary">
+            <strong><span class="motion-dot"></span>移动</strong>
+            <time>{{ durationLabel(event) }}</time>
           </div>
-          <p>{{ motionEventZoneLabel(event, zones) }}</p>
-          <small>点击从事件前 2 秒播放</small>
+          <div class="event-secondary">
+            <span>{{ motionEventZoneLabel(event, zones) }}</span>
+          </div>
         </div>
-        <span class="event-chevron">›</span>
+        <span class="event-active-mark" aria-hidden="true"></span>
       </button>
     </div>
   </section>
@@ -189,17 +186,11 @@ onMounted(() => void loadFeed())
 
 <style scoped>
 .playback-event-feed{min-height:0;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface);color:var(--nvr-text)}
-.event-feed-head{flex:none;min-height:46px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 11px;border-bottom:1px solid var(--nvr-border)}
-.event-feed-head>div{min-width:0;display:flex;align-items:baseline;gap:8px}.event-feed-head strong{font-size:12px}.event-feed-head span{color:var(--nvr-muted);font-size:9px}
-.event-refresh{border:0;color:var(--nvr-blue);background:transparent;font:inherit;font-size:9px;cursor:pointer}.event-refresh:disabled{cursor:default;opacity:.55}
-.event-filter-row{flex:none;display:flex;gap:5px;padding:8px 10px;border-bottom:1px solid var(--nvr-border);background:color-mix(in srgb,var(--nvr-hover) 48%,transparent)}
-.event-filter-row button{min-width:48px;padding:5px 10px;border:1px solid var(--nvr-border);border-radius:999px;color:var(--nvr-muted);background:var(--nvr-input);font:inherit;font-size:9px;cursor:pointer;transition:border-color .12s ease,background .12s ease,color .12s ease}
-.event-filter-row button.active{border-color:color-mix(in srgb,var(--nvr-blue) 56%,var(--nvr-border));color:var(--nvr-text);background:color-mix(in srgb,var(--nvr-blue) 18%,var(--nvr-input))}.event-filter-row button:disabled{cursor:not-allowed;opacity:.42}
-.event-feed-body{min-height:0;flex:1;overflow:auto;padding:7px;scrollbar-gutter:stable;overscroll-behavior:contain}.event-feed-state{min-height:118px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px;text-align:center;color:var(--nvr-subtle);font-size:9px}.event-feed-state strong{color:var(--nvr-muted);font-size:10px}.event-feed-error{color:var(--nvr-red)}
-.event-state-dot{width:7px;height:7px;border-radius:50%;background:var(--nvr-blue);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-blue) 15%,transparent)}
-.event-card{position:relative;width:100%;display:grid;grid-template-columns:96px minmax(0,1fr) 10px;align-items:center;gap:8px;padding:6px;border:1px solid transparent;border-radius:8px;color:inherit;background:transparent;font:inherit;text-align:left;cursor:pointer;transition:background .12s ease,border-color .12s ease,transform .12s ease}.event-card+.event-card{margin-top:3px}.event-card:hover{border-color:var(--nvr-border);background:var(--nvr-hover);transform:translateY(-1px)}.event-card.active{border-color:color-mix(in srgb,var(--nvr-blue) 62%,var(--nvr-border));background:color-mix(in srgb,var(--nvr-blue) 9%,var(--nvr-hover))}
-.event-thumb{position:relative;aspect-ratio:16/9;overflow:hidden;border:1px solid var(--nvr-border);border-radius:6px;background:#05090d}.event-thumb img{display:block;width:100%;height:100%;object-fit:cover}.event-thumb::after{content:'';position:absolute;inset:0;background:linear-gradient(180deg,transparent 50%,rgba(0,0,0,.64))}.event-thumb-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#6f8298;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.14),transparent 45%),#070c12}.event-thumb-placeholder small{font-size:8px}.motion-glyph{width:17px;height:17px;border:2px solid color-mix(in srgb,var(--nvr-blue) 72%,#fff);border-radius:50%;box-shadow:0 0 0 5px color-mix(in srgb,var(--nvr-blue) 10%,transparent)}
-.event-time,.event-kind{position:absolute;z-index:1;bottom:5px;font-size:8px}.event-time{left:6px;color:#fff;font-variant-numeric:tabular-nums}.event-kind{right:5px;padding:2px 5px;border-radius:999px;color:#dceaff;background:rgba(33,91,174,.78)}
-.event-copy{min-width:0}.event-copy-title{display:flex;align-items:center;justify-content:space-between;gap:6px}.event-copy-title strong{overflow:hidden;color:var(--nvr-text-soft);font-size:10px;text-overflow:ellipsis;white-space:nowrap}.event-copy-title span{flex:none;color:var(--nvr-muted);font-size:8px;font-variant-numeric:tabular-nums}.event-copy p{margin:4px 0 2px;overflow:hidden;color:var(--nvr-muted);font-size:9px;text-overflow:ellipsis;white-space:nowrap}.event-copy small{color:var(--nvr-subtle);font-size:7px}.event-chevron{color:var(--nvr-subtle);font-size:16px;line-height:1}.event-card.active .event-chevron{color:var(--nvr-blue)}
-@media (max-width:760px){.event-card{grid-template-columns:112px minmax(0,1fr) 8px}}
+.event-feed-head{flex:none;min-height:42px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 10px;border-bottom:1px solid color-mix(in srgb,var(--nvr-border) 70%,transparent)}.event-feed-head>div{display:flex;align-items:center;gap:7px}.event-feed-head strong{font-size:11px}.event-feed-head span{min-width:18px;padding:2px 5px;border-radius:999px;color:var(--nvr-subtle);background:var(--nvr-input);font-size:8px;text-align:center}.event-refresh{border:0;color:var(--nvr-blue);background:transparent;font:inherit;font-size:9px;cursor:pointer}.event-refresh:disabled{opacity:.5;cursor:default}
+.event-filter-row{flex:none;display:flex;gap:3px;padding:6px 8px;border-bottom:1px solid color-mix(in srgb,var(--nvr-border) 58%,transparent)}.event-filter-row button{height:24px;padding:0 9px;border:0;border-radius:6px;color:var(--nvr-subtle);background:transparent;font:inherit;font-size:9px;cursor:pointer}.event-filter-row button:hover{color:var(--nvr-text-soft);background:var(--nvr-hover)}.event-filter-row button.active{color:var(--nvr-text);background:color-mix(in srgb,var(--nvr-blue) 11%,var(--nvr-input))}
+.event-feed-body{min-height:0;flex:1;overflow:auto;padding:4px 5px 7px;scrollbar-gutter:stable;overscroll-behavior:contain}.event-feed-state{min-height:118px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:14px;text-align:center;color:var(--nvr-subtle);font-size:9px}.event-feed-state strong{color:var(--nvr-muted);font-size:10px}.event-feed-error{color:var(--nvr-red)}.event-state-dot{width:6px;height:6px;border-radius:50%;background:var(--nvr-blue);box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-blue) 13%,transparent)}
+.event-row{position:relative;width:100%;display:grid;grid-template-columns:94px minmax(0,1fr) 2px;align-items:center;gap:8px;padding:5px;border:0;border-radius:7px;color:inherit;background:transparent;font:inherit;text-align:left;cursor:pointer;transition:background .12s ease}.event-row+.event-row{margin-top:2px}.event-row:hover{background:var(--nvr-hover)}.event-row.active{background:color-mix(in srgb,var(--nvr-blue) 8%,var(--nvr-hover))}.event-active-mark{align-self:stretch;width:2px;border-radius:2px;background:transparent}.event-row.active .event-active-mark{background:var(--nvr-blue)}
+.event-thumb{position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:5px;background:#05090d}.event-thumb img{display:block;width:100%;height:100%;object-fit:cover}.event-thumb::after{content:'';position:absolute;inset:46% 0 0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.64))}.event-thumb-placeholder{position:absolute;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 45%,rgba(76,141,255,.12),transparent 42%),#070c12}.motion-glyph{width:15px;height:15px;border:1.5px solid color-mix(in srgb,var(--nvr-blue) 72%,#fff);border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--nvr-blue) 9%,transparent)}.event-time{position:absolute;z-index:1;left:5px;bottom:4px;color:#f5f8fb;font-size:7.5px;font-variant-numeric:tabular-nums}
+.event-meta{min-width:0;display:grid;gap:5px}.event-primary{display:flex;align-items:center;justify-content:space-between;gap:7px}.event-primary strong{min-width:0;display:flex;align-items:center;gap:5px;color:var(--nvr-text-soft);font-size:9.5px;font-weight:650}.motion-dot{width:5px;height:5px;flex:none;border-radius:50%;background:var(--nvr-blue)}.event-primary time{flex:none;color:var(--nvr-subtle);font-size:8px;font-variant-numeric:tabular-nums}.event-secondary{min-width:0;color:var(--nvr-muted);font-size:8.5px}.event-secondary span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.event-row:focus-visible{outline:2px solid color-mix(in srgb,var(--nvr-blue) 58%,transparent);outline-offset:-2px}@media(max-width:760px){.event-row{grid-template-columns:108px minmax(0,1fr) 2px}}
 </style>

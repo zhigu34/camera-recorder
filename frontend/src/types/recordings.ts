@@ -61,4 +61,7 @@ export interface PlaybackPlayerHandle {
   seek(seconds: number): void
   play(): Promise<void>
   pause(): void
+  setVolume(volume: number): void
+  setMuted(muted: boolean): void
+  toggleFullscreen(): Promise<void>
 }

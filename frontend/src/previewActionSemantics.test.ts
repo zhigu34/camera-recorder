@@ -1,15 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import previewSource from './PreviewView.vue?raw'
+import previewSource from './PreviewViewV2.vue?raw'
 
 describe('Live preview action semantics', () => {
-  it('uses the play icon to start live monitoring instead of navigating to playback', () => {
-    expect(previewSource).toContain('function startMonitoring()')
-    expect(previewSource).toContain('title="播放实时画面" @click="startMonitoring"><VideoPlay /></button>')
-    expect(previewSource).not.toContain('title="录像回放" @click="openPlayback"><VideoPlay /></button>')
+  it('uses a single central primary action for only the current tile', () => {
+    expect(previewSource).toContain('class="tile-primary-overlay"')
+    expect(previewSource).toContain('@click.stop="toggleSlotPlayback(index)"')
+    expect(previewSource).toContain('function startSlot(index: number)')
+    expect(previewSource).toContain('function pauseSlot(index: number)')
+    expect(previewSource).toContain('slots: [{ index, camera_id: slot.cameraId, stream: slot.stream }]')
   })
 
-  it('keeps recording playback as a separate clock action', () => {
-    expect(previewSource).toContain('Clock,')
-    expect(previewSource).toContain('title="录像回放" @click="openPlayback"><Clock /></button>')
+  it('keeps secondary actions outside the central overlay', () => {
+    const primaryStart = previewSource.indexOf('class="tile-primary-overlay"')
+    const primaryEnd = previewSource.indexOf('class="tile-error-copy"', primaryStart)
+    const primaryBlock = previewSource.slice(primaryStart, primaryEnd)
+    expect(primaryBlock).not.toContain('enterFullscreen')
+    expect(primaryBlock).not.toContain('openCameraConfig')
+    expect(primaryBlock).not.toContain('setStream')
+    expect(primaryBlock).not.toContain('clearSlot')
+
+    expect(previewSource).toContain('class="tile-edge-tools desktop-tools"')
+    expect(previewSource).toContain('@click="openCameraConfig(slot.cameraId)"')
+    expect(previewSource).toContain('@click="enterFullscreen(index)"')
+    expect(previewSource).toContain('@click="clearSlot(index)"')
+  })
+
+  it('keeps recording playback as a separate peripheral action', () => {
+    expect(previewSource).toContain('title="录像回放" @click="openPlayback"')
+    expect(previewSource).toContain('<Clock />')
   })
 })

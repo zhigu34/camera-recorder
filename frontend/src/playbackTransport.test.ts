@@ -12,7 +12,8 @@ import {
   saveSkipInterval,
 } from './utils/playbackTransport'
 
-import controlsSource from './PlaybackTransportControls.vue?raw'
+import controlsSource from './PlaybackMediaControls.vue?raw'
+import bridgeSource from './PlaybackTransportControls.vue?raw'
 import playerSource from './PlaybackPlayer.vue?raw'
 import workspaceSource from './PlaybackWorkspace.vue?raw'
 
@@ -48,13 +49,14 @@ describe('playback transport helpers', () => {
 })
 
 describe('playback transport integration', () => {
-  it('keeps skip, rate, and interval controls in the playback workspace', () => {
-    expect(controlsSource).toContain('回放控制')
-    expect(controlsSource).toContain('播放倍速')
-    expect(controlsSource).toContain('快进倒退秒数')
-    expect(workspaceSource).toContain('<PlaybackTransportControls')
+  it('uses one custom overlay while retaining workspace wall-clock skip semantics', () => {
+    expect(playerSource).toContain('import PlaybackMediaControls')
+    expect(playerSource).toContain('<PlaybackMediaControls')
+    expect(playerSource).not.toContain('\n        controls\n')
+    expect(controlsSource).toContain('aria-label="回放媒体控制"')
+    expect(controlsSource).toContain("dispatchTransport('skip', deltaSeconds)")
+    expect(bridgeSource).toContain("window.addEventListener('camera-recorder:playback-skip', handleSkip)")
     expect(workspaceSource).toContain('@skip="skipPlayback"')
-    expect(workspaceSource).toContain(':playback-rate="playbackRate"')
     expect(workspaceSource).toContain('saveSkipInterval(value, playbackStorage())')
   })
 
@@ -63,5 +65,13 @@ describe('playback transport integration', () => {
     expect(playerSource).toContain('watch(() => props.playbackRate, applyPlaybackRate)')
     expect(playerSource).toContain('v-else-if="activeRecording && isPlayable(activeRecording)"')
     expect(playerSource).toContain('@click="open(activeRecording)"')
+  })
+
+  it('provides custom play, audio, and fullscreen controls', () => {
+    expect(controlsSource).toContain("emit('toggle-play')")
+    expect(controlsSource).toContain("emit('update:muted', !muted)")
+    expect(controlsSource).toContain('aria-label="音量"')
+    expect(controlsSource).toContain('aria-label="全屏"')
+    expect(playerSource).toContain('function toggleFullscreen()')
   })
 })
