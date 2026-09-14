@@ -29,9 +29,11 @@ function playbackStorage() {
   }
 }
 
+const rootRef = ref<HTMLElement | null>(null)
 const controlsVisible = ref(true)
 const effectiveSkipSeconds = ref(loadSkipInterval(playbackStorage()))
 let hideTimer: number | null = null
+let interactionHost: HTMLElement | null = null
 
 function dispatchTransport(type: 'skip' | 'rate' | 'interval', value: number) {
   if (typeof window === 'undefined') return
@@ -98,20 +100,27 @@ watch(() => props.skipSeconds, (value) => {
   if (SKIP_INTERVALS.includes(value as (typeof SKIP_INTERVALS)[number])) effectiveSkipSeconds.value = value
 })
 
-onMounted(() => window.addEventListener('camera-recorder:playback-interval-sync', handleIntervalSync))
+onMounted(() => {
+  window.addEventListener('camera-recorder:playback-interval-sync', handleIntervalSync)
+  interactionHost = rootRef.value?.parentElement || null
+  interactionHost?.addEventListener('pointermove', showControls)
+  interactionHost?.addEventListener('pointerenter', showControls)
+})
 onBeforeUnmount(() => {
   clearHideTimer()
   window.removeEventListener('camera-recorder:playback-interval-sync', handleIntervalSync)
+  interactionHost?.removeEventListener('pointermove', showControls)
+  interactionHost?.removeEventListener('pointerenter', showControls)
+  interactionHost = null
 })
 </script>
 
 <template>
   <div
+    ref="rootRef"
     class="playback-media-controls"
     :class="{ visible: controlsVisible || !playing }"
     aria-label="回放媒体控制"
-    @pointermove="showControls"
-    @pointerenter="showControls"
     @focusin="showControls"
   >
     <div class="media-controls-scrim"></div>
@@ -224,5 +233,5 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.playback-media-controls{position:absolute;inset:0;z-index:8;pointer-events:none;opacity:0;transition:opacity .16s ease}.playback-media-controls.visible{opacity:1}.media-controls-scrim{position:absolute;inset:45% 0 0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.58) 74%,rgba(0,0,0,.76))}.media-controls-row{position:absolute;left:12px;right:12px;bottom:10px;display:flex;align-items:center;gap:3px;pointer-events:auto}.media-controls-spacer{flex:1}.media-icon-button{position:relative;width:32px;height:32px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:rgba(241,247,252,.78);cursor:pointer;transition:background .12s ease,color .12s ease,opacity .12s ease}.media-icon-button:hover:not(:disabled),.media-icon-button:focus-visible{color:#fff;background:rgba(255,255,255,.11)}.media-icon-button:disabled{opacity:.32;cursor:default}.media-icon-button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.media-primary-button svg{fill:currentColor;stroke:none}.media-skip-button svg{width:24px;height:24px}.media-skip-button span{position:absolute;inset:0;display:grid;place-items:center;padding-top:1px;font-size:7px;font-weight:700;font-variant-numeric:tabular-nums}.media-forward-icon{transform:scaleX(-1)}.media-volume{width:72px;height:20px;accent-color:#fff;cursor:pointer}.media-select-pill{position:relative;display:inline-flex;align-items:center}.media-select-pill::after{content:'';position:absolute;right:8px;top:50%;width:4px;height:4px;border-right:1px solid rgba(255,255,255,.6);border-bottom:1px solid rgba(255,255,255,.6);transform:translateY(-65%) rotate(45deg);pointer-events:none}.media-select-pill select{height:28px;min-width:55px;appearance:none;padding:0 20px 0 9px;border:0;border-radius:7px;background:rgba(8,13,19,.7);color:rgba(241,247,252,.84);font:inherit;font-size:9px;font-weight:650;cursor:pointer;backdrop-filter:blur(8px)}.media-skip-select select{min-width:57px}.media-select-pill select:hover,.media-select-pill select:focus-visible{background:rgba(255,255,255,.12);color:#fff}.media-icon-button:focus-visible,.media-select-pill select:focus-visible,.media-volume:focus-visible{outline:2px solid rgba(76,141,255,.88);outline-offset:1px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:700px){.media-controls-row{left:7px;right:7px;bottom:7px;gap:1px}.media-volume{display:none}.media-icon-button{width:30px;height:30px}.media-select-pill select{height:27px;min-width:50px;padding-left:7px;padding-right:18px;font-size:8px}.media-skip-select{display:none}}
+.playback-media-controls{position:absolute;inset:0;z-index:8;pointer-events:none;opacity:0;transition:opacity .16s ease}.playback-media-controls.visible{opacity:1}.media-controls-scrim{position:absolute;inset:45% 0 0;background:linear-gradient(180deg,transparent,rgba(0,0,0,.58) 74%,rgba(0,0,0,.76))}.media-controls-row{position:absolute;left:12px;right:12px;bottom:10px;display:flex;align-items:center;gap:3px;pointer-events:auto}.playback-media-controls:not(.visible) .media-controls-row{pointer-events:none}.media-controls-spacer{flex:1}.media-icon-button{position:relative;width:32px;height:32px;display:grid;place-items:center;padding:0;border:0;border-radius:7px;background:transparent;color:rgba(241,247,252,.78);cursor:pointer;transition:background .12s ease,color .12s ease,opacity .12s ease}.media-icon-button:hover:not(:disabled),.media-icon-button:focus-visible{color:#fff;background:rgba(255,255,255,.11)}.media-icon-button:disabled{opacity:.32;cursor:default}.media-icon-button svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}.media-primary-button svg{fill:currentColor;stroke:none}.media-skip-button svg{width:24px;height:24px}.media-skip-button span{position:absolute;inset:0;display:grid;place-items:center;padding-top:1px;font-size:7px;font-weight:700;font-variant-numeric:tabular-nums}.media-forward-icon{transform:scaleX(-1)}.media-volume{width:72px;height:20px;accent-color:#fff;cursor:pointer}.media-select-pill{position:relative;display:inline-flex;align-items:center}.media-select-pill::after{content:'';position:absolute;right:8px;top:50%;width:4px;height:4px;border-right:1px solid rgba(255,255,255,.6);border-bottom:1px solid rgba(255,255,255,.6);transform:translateY(-65%) rotate(45deg);pointer-events:none}.media-select-pill select{height:28px;min-width:55px;appearance:none;padding:0 20px 0 9px;border:0;border-radius:7px;background:rgba(8,13,19,.7);color:rgba(241,247,252,.84);font:inherit;font-size:9px;font-weight:650;cursor:pointer;backdrop-filter:blur(8px)}.media-skip-select select{min-width:57px}.media-select-pill select:hover,.media-select-pill select:focus-visible{background:rgba(255,255,255,.12);color:#fff}.media-icon-button:focus-visible,.media-select-pill select:focus-visible,.media-volume:focus-visible{outline:2px solid rgba(76,141,255,.88);outline-offset:1px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(max-width:700px){.media-controls-row{left:7px;right:7px;bottom:7px;gap:1px}.media-volume{display:none}.media-icon-button{width:30px;height:30px}.media-select-pill select{height:27px;min-width:50px;padding-left:7px;padding-right:18px;font-size:8px}.media-skip-select{display:none}}
 </style>
