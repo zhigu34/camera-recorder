@@ -78,7 +78,7 @@ class MotionConfidenceTracker:
         self.motion = False
 
     def reset(self) -> MotionConfidenceResult:
-        transitioned = self.motion or self.confidence > 0.0
+        transitioned = self.motion
         self.confidence = 0.0
         self.motion = False
         return MotionConfidenceResult(
