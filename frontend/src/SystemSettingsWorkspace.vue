@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Bell, Setting } from '@element-plus/icons-vue'
+import { Bell, Setting, Tools } from '@element-plus/icons-vue'
 import AlertSettingsView from './AlertSettingsView.vue'
+import OperationsView from './OperationsView.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
 
 const emit = defineEmits<{
@@ -11,21 +12,24 @@ const emit = defineEmits<{
 
 const route = useRoute()
 const router = useRouter()
-const activeSection = ref<'system' | 'alerts'>('system')
+const activeSection = ref<'system' | 'alerts' | 'operations'>('system')
 
 async function syncFromRoute() {
   const raw = Array.isArray(route.query.section) ? route.query.section[0] : route.query.section
   const section = raw || 'system'
-  activeSection.value = section === 'alerts' ? 'alerts' : 'system'
+  activeSection.value = section === 'alerts' ? 'alerts' : section === 'operations' ? 'operations' : 'system'
   if (section === 'archive') {
     await nextTick()
     document.getElementById('archive-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 }
 
-function setSection(section: 'system' | 'alerts') {
-  activeSection.value = section
-  const query = section === 'alerts' ? { section: 'alerts' } : {}
+function setSection(section: 'system' | 'alerts' | 'operations') {
+  const query = section === 'alerts'
+    ? { section: 'alerts' }
+    : section === 'operations'
+      ? { section: 'operations' }
+      : {}
   void router.replace({ path: '/settings', query })
 }
 
@@ -44,10 +48,15 @@ onMounted(() => { void syncFromRoute() })
         <Bell />
         <span><strong>通知与告警</strong><small>告警策略与邮件服务器</small></span>
       </button>
+      <button role="tab" :aria-selected="activeSection === 'operations'" :class="{ active: activeSection === 'operations' }" @click="setSection('operations')">
+        <Tools />
+        <span><strong>运维工具</strong><small>日志、备份与监控指标</small></span>
+      </button>
     </div>
 
     <SystemSettingsView v-if="activeSection === 'system'" />
-    <AlertSettingsView v-else @open-events="emit('open-events')" />
+    <AlertSettingsView v-else-if="activeSection === 'alerts'" @open-events="emit('open-events')" />
+    <OperationsView v-else />
   </section>
 </template>
 
