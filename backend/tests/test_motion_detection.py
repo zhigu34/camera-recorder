@@ -69,6 +69,20 @@ def test_confidence_tracker_suppression_resets_state() -> None:
 
     assert reset.motion is False
     assert reset.confidence == 0.0
+    assert reset.transitioned is True
+
+
+def test_confidence_tracker_reset_does_not_report_transition_before_motion_entry() -> None:
+    tracker = MotionConfidenceTracker(sensitivity_profile("medium"))
+    weak = tracker.update(0.1)
+    assert weak.motion is False
+    assert weak.confidence > 0.0
+
+    reset = tracker.update(0.0, suppressed=True)
+
+    assert reset.motion is False
+    assert reset.confidence == 0.0
+    assert reset.transitioned is False
 
 
 def test_point_in_polygon_and_no_zone_full_frame_behavior() -> None:
