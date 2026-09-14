@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { TopRight } from '@element-plus/icons-vue'
@@ -27,6 +28,7 @@ interface SystemSettings {
 const loading = ref(false)
 const saving = ref(false)
 const openListManagementPort = ref(5244)
+const savedSnapshot = ref('')
 const form = reactive({
   app_name: 'Camera Recorder',
   segment_duration_seconds: 600,
@@ -66,6 +68,29 @@ function segmentDurationText(seconds: number) {
   return `${seconds} 秒`
 }
 
+function currentSettingsSnapshot() {
+  return JSON.stringify({
+    app_name: form.app_name,
+    segment_duration_seconds: form.segment_duration_seconds,
+    remux_concurrency: form.remux_concurrency,
+    rtsp_timeout_us: form.rtsp_timeout_us,
+    auto_start_enabled: form.auto_start_enabled,
+    align_segments_to_clock: form.align_segments_to_clock,
+    storage_warning_percent: form.storage_warning_percent,
+    storage_critical_percent: form.storage_critical_percent,
+    upload_enabled: form.upload_enabled,
+    upload_concurrency: form.upload_concurrency,
+    upload_retry_max: form.upload_retry_max,
+    webdav_url: form.webdav_url,
+    webdav_root: form.webdav_root,
+    webdav_username: form.webdav_username,
+    webdav_password: form.webdav_password,
+    clear_webdav_password: form.clear_webdav_password,
+    local_retention_hours: form.local_retention_hours,
+  })
+}
+
+const settingsDirty = computed(() => Boolean(savedSnapshot.value) && currentSettingsSnapshot() !== savedSnapshot.value)
 const segmentDurationOptions = computed(() => {
   if (segmentDurationPresets.some((option) => option.value === form.segment_duration_seconds)) {
     return segmentDurationPresets
@@ -109,10 +134,22 @@ function apply(data: SystemSettings) {
     webdav_password: '',
     clear_webdav_password: false,
   })
+  savedSnapshot.value = currentSettingsSnapshot()
 }
 
 function openOpenList() {
   window.open(openListManagementUrl.value, '_blank', 'noopener,noreferrer')
+}
+
+function confirmDiscardChanges() {
+  if (!settingsDirty.value) return true
+  return window.confirm('系统设置还有未保存的修改，确定放弃并离开吗？')
+}
+
+function handleBeforeUnload(event: BeforeUnloadEvent) {
+  if (!settingsDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 async function load() {
@@ -159,7 +196,16 @@ async function save() {
   }
 }
 
-onMounted(load)
+onBeforeRouteLeave(() => confirmDiscardChanges())
+onBeforeRouteUpdate(() => confirmDiscardChanges())
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+  void load()
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
 </script>
 
 <template>
@@ -275,7 +321,7 @@ onMounted(load)
         <div class="threshold-legend"><span>0%</span><span class="warning-text">告警 {{ form.storage_warning_percent }}%</span><span class="critical-text">严重 {{ form.storage_critical_percent }}%</span><span>100%</span></div>
       </article>
 
-      <article class="settings-panel archive-panel">
+      <article id="archive-settings" class="settings-panel archive-panel">
         <div class="settings-panel-head">
           <div><strong>OpenList / WebDAV 归档</strong><span>统一远端存储入口，不绑定具体网盘品牌</span></div>
           <div class="settings-panel-actions">
@@ -338,10 +384,10 @@ onMounted(load)
     </el-form>
 
     <div class="settings-savebar">
-      <div><strong>保存运行时配置</strong><span>部分 Recorder 参数需要重启对应摄像头连接后才完全生效。</span></div>
+      <div><strong>保存运行时配置</strong><span>{{ settingsDirty ? '存在未保存修改。' : '部分 Recorder 参数需要重启对应摄像头连接后才完全生效。' }}</span></div>
       <div class="settings-save-actions">
         <el-button :disabled="saving" @click="load">放弃修改</el-button>
-        <el-button type="primary" :loading="saving" @click="save">保存设置</el-button>
+        <el-button type="primary" :loading="saving" :disabled="!settingsDirty" @click="save">保存设置</el-button>
       </div>
     </div>
   </section>
