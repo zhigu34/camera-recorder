@@ -9,13 +9,19 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import cv2
 import numpy as np
 
 from app.core.config import settings
 from app.services.camera_preview import infer_substream_path
 from app.services.camera_probe import build_rtsp_url, probe_camera
-from app.services.motion_detection import ClosedMotionEvent, MotionEventStateMachine, sensitivity_profile, zones_for_point
+from app.services.motion_analysis import MotionAnalysisResult, MotionFrameAnalyzer
+from app.services.motion_detection import (
+    ClosedMotionEvent,
+    MotionConfidenceResult,
+    MotionConfidenceTracker,
+    MotionEventStateMachine,
+    sensitivity_profile,
+)
 
 MotionStream = Literal["main", "sub"]
 
@@ -31,13 +37,6 @@ def deployment_now() -> datetime:
     except ZoneInfoNotFoundError:
         zone = timezone.utc
     return datetime.now(zone)
-
-
-@dataclass(frozen=True, slots=True)
-class MotionFrameResult:
-    motion: bool
-    score: float
-    zone_ids: list[int | None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,56 +124,41 @@ def build_motion_command(
     ]
 
 
-class MotionFrameAnalyzer:
-    def __init__(self, sensitivity: str) -> None:
-        profile = sensitivity_profile(sensitivity)
-        self.profile = profile
-        self.background = cv2.createBackgroundSubtractorMOG2(
-            history=120,
-            varThreshold=profile.var_threshold,
-            detectShadows=False,
-        )
-        self.kernel = np.ones((3, 3), dtype=np.uint8)
+def runtime_state_for_analysis(analysis: MotionAnalysisResult) -> str:
+    if analysis.warming_up:
+        return "warming_up"
+    if analysis.global_change or analysis.stabilizing:
+        return "stabilizing"
+    return "running"
 
-    def analyze(self, frame: np.ndarray, zones: list[dict[str, Any]]) -> MotionFrameResult:
-        if frame.ndim != 3 or frame.shape[2] != 3:
-            raise ValueError("motion frames must use BGR channel layout")
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        foreground = self.background.apply(gray)
-        foreground = cv2.morphologyEx(foreground, cv2.MORPH_OPEN, self.kernel, iterations=1)
-        foreground = cv2.morphologyEx(foreground, cv2.MORPH_CLOSE, self.kernel, iterations=2)
+def runtime_diagnostics(
+    analysis: MotionAnalysisResult,
+    confidence: MotionConfidenceResult,
+) -> dict[str, Any]:
+    return {
+        "confidence": confidence.confidence,
+        "raw_score": analysis.raw_score,
+        "moving_area_ratio": analysis.moving_area_ratio,
+        "global_change_ratio": analysis.global_change_ratio,
+        "primary_zone_id": analysis.primary_zone_id,
+        "global_change": analysis.global_change,
+    }
 
-        contours, _ = cv2.findContours(foreground, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        frame_area = float(frame.shape[0] * frame.shape[1])
-        min_area = frame_area * self.profile.min_area_ratio
-        matched_zones: list[int | None] = []
-        moving_area = 0.0
 
-        for contour in contours:
-            area = float(cv2.contourArea(contour))
-            if area < min_area:
-                continue
-            x, y, width, height = cv2.boundingRect(contour)
-            center = (
-                (x + width / 2) / frame.shape[1],
-                (y + height / 2) / frame.shape[0],
-            )
-            zone_ids = zones_for_point(center, zones)
-            if not zone_ids:
-                continue
-            moving_area += area
-            for zone_id in zone_ids:
-                if zone_id not in matched_zones:
-                    matched_zones.append(zone_id)
-
-        score = min(1.0, moving_area / frame_area) if frame_area else 0.0
-        return MotionFrameResult(
-            motion=bool(matched_zones),
-            score=score,
-            zone_ids=matched_zones,
-        )
+def snapshot_quality_key(
+    analysis: MotionAnalysisResult,
+    confidence: MotionConfidenceResult,
+) -> tuple[float, float] | None:
+    if (
+        analysis.warming_up
+        or analysis.stabilizing
+        or analysis.global_change
+        or analysis.raw_score <= 0.0
+        or not confidence.motion
+    ):
+        return None
+    return (confidence.confidence, analysis.raw_score)
 
 
 async def _stop_process(process: asyncio.subprocess.Process) -> None:
@@ -190,7 +174,10 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
 
 
 EventCallback = Callable[[ClosedMotionEvent, np.ndarray | None], Awaitable[None]]
-StatusCallback = Callable[[str, MotionStream | None, datetime | None, str | None], None]
+StatusCallback = Callable[
+    [str, MotionStream | None, datetime | None, str | None, dict[str, Any] | None],
+    None,
+]
 
 
 class MotionWorker:
@@ -208,7 +195,10 @@ class MotionWorker:
 
     async def run(self) -> None:
         path, stream = select_motion_path(self.config.main_path, self.config.sub_path)
-        self.on_status("starting", stream, None, None)
+        state: MotionEventStateMachine | None = None
+        best_frame: np.ndarray | None = None
+        best_quality: tuple[float, float] | None = None
+        self.on_status("starting", stream, None, None, None)
         try:
             probe = await probe_camera(
                 ip=self.config.ip,
@@ -241,16 +231,17 @@ class MotionWorker:
                 stderr=asyncio.subprocess.PIPE,
             )
             assert self.process.stdout is not None
-            analyzer = MotionFrameAnalyzer(self.config.sensitivity)
+            analyzer = MotionFrameAnalyzer(
+                self.config.sensitivity,
+                analysis_fps=self.config.analysis_fps,
+            )
+            tracker = MotionConfidenceTracker(sensitivity_profile(self.config.sensitivity))
             state = MotionEventStateMachine(
                 min_duration_ms=self.config.min_duration_ms,
                 merge_gap_ms=self.config.merge_gap_ms,
                 event_min_interval_ms=self.config.event_min_interval_ms,
             )
             frame_size = output_width * output_height * 3
-            best_frame: np.ndarray | None = None
-            best_score = -1.0
-            self.on_status("running", stream, None, None)
 
             while True:
                 try:
@@ -264,26 +255,44 @@ class MotionWorker:
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                     (output_height, output_width, 3)
                 )
-                result = analyzer.analyze(frame, self.config.zones)
-                zone_id = result.zone_ids[0] if result.zone_ids else None
+                analysis = analyzer.analyze(frame, self.config.zones)
+                suppressed = (
+                    analysis.warming_up
+                    or analysis.stabilizing
+                    or analysis.global_change
+                )
+                confidence = tracker.update(
+                    analysis.raw_score,
+                    suppressed=suppressed,
+                )
                 closed = state.update(
                     timestamp,
-                    motion=result.motion,
-                    score=result.score,
-                    zone_id=zone_id,
+                    motion=confidence.motion,
+                    score=confidence.confidence,
+                    zone_id=analysis.primary_zone_id,
                 )
                 for event in closed:
                     await self.on_event(event, best_frame)
                     best_frame = None
-                    best_score = -1.0
+                    best_quality = None
 
-                if result.motion and result.score >= best_score:
+                quality = snapshot_quality_key(analysis, confidence)
+                if quality is not None and (
+                    best_quality is None or quality >= best_quality
+                ):
                     best_frame = frame.copy()
-                    best_score = result.score
-                elif not result.motion and not state.active:
+                    best_quality = quality
+                elif not state.active and confidence.confidence <= 0.0:
                     best_frame = None
-                    best_score = -1.0
-                self.on_status("running", stream, timestamp, None)
+                    best_quality = None
+
+                self.on_status(
+                    runtime_state_for_analysis(analysis),
+                    stream,
+                    timestamp,
+                    None,
+                    runtime_diagnostics(analysis, confidence),
+                )
 
             stderr = b""
             if self.process.stderr is not None:
@@ -293,9 +302,19 @@ class MotionWorker:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self.on_status("error", stream, None, str(exc))
+            self.on_status("error", stream, None, str(exc), None)
             raise
         finally:
+            if state is not None:
+                for event in state.flush(deployment_now()):
+                    try:
+                        await self.on_event(event, best_frame)
+                    except Exception:
+                        # Cleanup must not mask cancellation or couple recording
+                        # lifecycle to motion-event persistence failures.
+                        pass
+                    best_frame = None
+                    best_quality = None
             if self.process is not None:
                 await _stop_process(self.process)
                 self.process = None
