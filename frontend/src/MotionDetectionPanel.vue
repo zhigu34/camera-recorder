@@ -7,10 +7,16 @@ import MotionZoneEditor from './MotionZoneEditor.vue'
 import type { NormalizedPoint } from './utils/motionZones'
 
 interface MotionRuntime {
-  state: 'disabled' | 'starting' | 'running' | 'reconnecting' | 'error' | 'stopped'
+  state: 'disabled' | 'starting' | 'warming_up' | 'running' | 'stabilizing' | 'reconnecting' | 'error' | 'stopped'
   stream?: 'main' | 'sub' | null
   last_frame_at?: string | null
   last_error?: string | null
+  confidence?: number | null
+  raw_score?: number | null
+  moving_area_ratio?: number | null
+  global_change_ratio?: number | null
+  primary_zone_id?: number | null
+  global_change?: boolean
 }
 interface MotionZone {
   id: number
@@ -46,6 +52,8 @@ const zoneDraft = reactive<{ name: string; polygon: NormalizedPoint[] }>({ name:
 
 const runtimeLabel = computed(() => {
   const state = config.value?.runtime.state
+  if (state === 'warming_up') return '背景学习中'
+  if (state === 'stabilizing') return '画面稳定中'
   if (state === 'running') return '检测中'
   if (state === 'starting') return '启动中'
   if (state === 'reconnecting') return '正在重连'
@@ -57,6 +65,18 @@ const runtimeClass = computed(() => config.value?.runtime.state || 'disabled')
 const streamLabel = computed(() => config.value?.runtime.stream === 'sub' ? '子码流' : config.value?.runtime.stream === 'main' ? '主码流' : '-')
 const editorTitle = computed(() => editingZoneId.value ? '重新绘制检测区域' : '添加检测区域')
 const enabledZoneCount = computed(() => config.value?.zones.filter((zone) => zone.enabled).length || 0)
+const confidenceLabel = computed(() => {
+  const value = config.value?.runtime.confidence
+  if (typeof value !== 'number') return '-'
+  return `${Math.round(value * 100)}%`
+})
+const activeZoneLabel = computed(() => {
+  const zoneId = config.value?.runtime.primary_zone_id
+  if (zoneId == null) return '整个画面'
+  const zone = config.value?.zones.find((item) => item.id === zoneId)
+  return zone?.name || '整个画面'
+})
+const imageChangeLabel = computed(() => config.value?.runtime.global_change ? '全局变化抑制' : '正常')
 
 function errorText(error: unknown, fallback: string) {
   if (axios.isAxiosError(error)) {
@@ -166,9 +186,9 @@ async function removeZone(zone: MotionZone) {
 }
 
 function formatFrameTime(value?: string | null) {
-  if (!value) return '尚未收到画面'
+  if (!value) return '尚未收到'
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : `最近帧 ${date.toLocaleTimeString('zh-CN', { hour12: false })}`
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleTimeString('zh-CN', { hour12: false })
 }
 
 watch(() => props.cameraId, () => { closeEditor(); void load() })
@@ -193,8 +213,14 @@ onMounted(() => void load())
       <div class="runtime-strip">
         <span>分析流 <b>{{ streamLabel }}</b></span>
         <span>{{ config.analysis_width }}px · {{ config.analysis_fps }} FPS</span>
-        <span>{{ formatFrameTime(config.runtime.last_frame_at) }}</span>
         <el-button text size="small" :icon="Refresh" @click="load">刷新</el-button>
+      </div>
+      <div class="runtime-diagnostics">
+        <div><span>状态</span><strong>{{ runtimeLabel }}</strong></div>
+        <div><span>置信度</span><strong>{{ confidenceLabel }}</strong></div>
+        <div><span>活动区域</span><strong>{{ activeZoneLabel }}</strong></div>
+        <div><span>画面变化</span><strong :class="{ suppressed: config.runtime.global_change }">{{ imageChangeLabel }}</strong></div>
+        <div><span>最近帧</span><strong>{{ formatFrameTime(config.runtime.last_frame_at) }}</strong></div>
       </div>
       <div v-if="config.runtime.last_error" class="runtime-error">{{ config.runtime.last_error }}</div>
 
@@ -256,5 +282,5 @@ onMounted(() => void load())
 </template>
 
 <style scoped>
-.motion-panel{display:flex;flex-direction:column;gap:12px;color:var(--nvr-text)}.motion-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.motion-hero>div:first-child{display:flex;flex-direction:column;gap:4px}.motion-hero span,.zone-head span,.zone-row span,.zone-empty span{color:var(--nvr-muted);font-size:10px}.motion-hero strong{font-size:14px}.motion-hero small{color:var(--nvr-subtle);font-size:10px}.motion-master{display:flex;align-items:center;gap:10px}.runtime-pill{display:flex;align-items:center;gap:6px;padding:4px 7px;border-radius:6px;background:var(--nvr-surface-2);font-size:10px!important}.runtime-pill i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.runtime-pill.running i{background:var(--nvr-green)}.runtime-pill.starting i,.runtime-pill.reconnecting i{background:var(--nvr-yellow)}.runtime-pill.error i{background:var(--nvr-red)}.runtime-strip{display:flex;align-items:center;gap:12px;padding:0 3px;color:var(--nvr-muted);font-size:10px}.runtime-strip b{color:var(--nvr-text-soft);font-weight:600}.runtime-strip .el-button{margin-left:auto}.runtime-error{padding:9px 10px;border:1px solid color-mix(in srgb,var(--nvr-red) 25%,var(--nvr-border));border-radius:7px;color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 6%,transparent);font-size:10px;word-break:break-all}.setting-section{display:flex;flex-direction:column;gap:8px}.setting-section-head{display:flex;align-items:baseline;gap:8px;padding:0 2px}.setting-section-head strong{font-size:11px}.setting-section-head span{color:var(--nvr-subtle);font-size:9px}.setting-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.event-strategy-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.setting-grid label{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface)}.setting-grid label>span{color:var(--nvr-muted);font-size:10px}.setting-grid label>small{min-height:28px;color:var(--nvr-subtle);font-size:9px;line-height:1.5}.zone-section,.zone-editor-card{padding:13px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.zone-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.zone-head>div{display:flex;flex-direction:column;gap:3px}.zone-head strong{font-size:12px}.zone-list{display:flex;flex-direction:column}.zone-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--nvr-border)}.zone-row:first-child{border-top:0}.zone-row>div:first-child{display:flex;min-width:0;flex-direction:column;gap:3px}.zone-row strong{font-size:11px}.zone-actions{display:flex;align-items:center;gap:5px}.zone-empty{display:flex;flex-direction:column;gap:4px;padding:16px;text-align:center;border:1px dashed var(--nvr-border);border-radius:8px}.zone-empty strong{font-size:11px}.zone-editor-card{display:flex;flex-direction:column;gap:10px}.zone-editor-head{display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:12px}.zone-editor-head strong{font-size:12px}.zone-editor-actions{display:flex;justify-content:flex-end;gap:7px}@media(max-width:900px){.event-strategy-grid{grid-template-columns:1fr}}@media(max-width:620px){.setting-grid{grid-template-columns:1fr}.runtime-strip{flex-wrap:wrap}.setting-section-head{align-items:flex-start;flex-direction:column;gap:3px}.zone-row{align-items:flex-start;flex-direction:column}.zone-actions{width:100%;justify-content:flex-end}.zone-editor-head{grid-template-columns:1fr}}
+.motion-panel{display:flex;flex-direction:column;gap:12px;color:var(--nvr-text)}.motion-hero{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.motion-hero>div:first-child{display:flex;flex-direction:column;gap:4px}.motion-hero span,.zone-head span,.zone-row span,.zone-empty span{color:var(--nvr-muted);font-size:10px}.motion-hero strong{font-size:14px}.motion-hero small{color:var(--nvr-subtle);font-size:10px}.motion-master{display:flex;align-items:center;gap:10px}.runtime-pill{display:flex;align-items:center;gap:6px;padding:4px 7px;border-radius:6px;background:var(--nvr-surface-2);font-size:10px!important}.runtime-pill i{width:6px;height:6px;border-radius:50%;background:var(--nvr-subtle)}.runtime-pill.running i{background:var(--nvr-green)}.runtime-pill.starting i,.runtime-pill.warming_up i,.runtime-pill.stabilizing i,.runtime-pill.reconnecting i{background:var(--nvr-yellow)}.runtime-pill.error i{background:var(--nvr-red)}.runtime-strip{display:flex;align-items:center;gap:12px;padding:0 3px;color:var(--nvr-muted);font-size:10px}.runtime-strip b{color:var(--nvr-text-soft);font-weight:600}.runtime-strip .el-button{margin-left:auto}.runtime-diagnostics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface);overflow:hidden}.runtime-diagnostics>div{display:flex;min-width:0;flex-direction:column;gap:3px;padding:8px 10px;border-left:1px solid var(--nvr-border)}.runtime-diagnostics>div:first-child{border-left:0}.runtime-diagnostics span{color:var(--nvr-subtle);font-size:9px}.runtime-diagnostics strong{overflow:hidden;color:var(--nvr-text-soft);font-size:10px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}.runtime-diagnostics strong.suppressed{color:var(--nvr-yellow)}.runtime-error{padding:9px 10px;border:1px solid color-mix(in srgb,var(--nvr-red) 25%,var(--nvr-border));border-radius:7px;color:var(--nvr-red);background:color-mix(in srgb,var(--nvr-red) 6%,transparent);font-size:10px;word-break:break-all}.setting-section{display:flex;flex-direction:column;gap:8px}.setting-section-head{display:flex;align-items:baseline;gap:8px;padding:0 2px}.setting-section-head strong{font-size:11px}.setting-section-head span{color:var(--nvr-subtle);font-size:9px}.setting-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.event-strategy-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.setting-grid label{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid var(--nvr-border);border-radius:8px;background:var(--nvr-surface)}.setting-grid label>span{color:var(--nvr-muted);font-size:10px}.setting-grid label>small{min-height:28px;color:var(--nvr-subtle);font-size:9px;line-height:1.5}.zone-section,.zone-editor-card{padding:13px;border:1px solid var(--nvr-border);border-radius:10px;background:var(--nvr-surface)}.zone-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.zone-head>div{display:flex;flex-direction:column;gap:3px}.zone-head strong{font-size:12px}.zone-list{display:flex;flex-direction:column}.zone-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--nvr-border)}.zone-row:first-child{border-top:0}.zone-row>div:first-child{display:flex;min-width:0;flex-direction:column;gap:3px}.zone-row strong{font-size:11px}.zone-actions{display:flex;align-items:center;gap:5px}.zone-empty{display:flex;flex-direction:column;gap:4px;padding:16px;text-align:center;border:1px dashed var(--nvr-border);border-radius:8px}.zone-empty strong{font-size:11px}.zone-editor-card{display:flex;flex-direction:column;gap:10px}.zone-editor-head{display:grid;grid-template-columns:auto minmax(180px,1fr);align-items:center;gap:12px}.zone-editor-head strong{font-size:12px}.zone-editor-actions{display:flex;justify-content:flex-end;gap:7px}@media(max-width:900px){.event-strategy-grid{grid-template-columns:1fr}.runtime-diagnostics{grid-template-columns:repeat(3,minmax(0,1fr))}.runtime-diagnostics>div:nth-child(4){border-left:0;border-top:1px solid var(--nvr-border)}.runtime-diagnostics>div:nth-child(5){border-top:1px solid var(--nvr-border)}}@media(max-width:620px){.setting-grid{grid-template-columns:1fr}.runtime-strip{flex-wrap:wrap}.runtime-diagnostics{grid-template-columns:1fr 1fr}.runtime-diagnostics>div{border-top:1px solid var(--nvr-border)}.runtime-diagnostics>div:nth-child(-n+2){border-top:0}.runtime-diagnostics>div:nth-child(odd){border-left:0}.runtime-diagnostics>div:first-child{border-top:0}.setting-section-head{align-items:flex-start;flex-direction:column;gap:3px}.zone-row{align-items:flex-start;flex-direction:column}.zone-actions{width:100%;justify-content:flex-end}.zone-editor-head{grid-template-columns:1fr}}
 </style>
