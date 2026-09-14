@@ -19,11 +19,18 @@ describe('manual media start', () => {
     expect(mountedBlock).not.toContain('connectSlot(')
   })
 
-  it('stages playback selection without opening a media source on page entry', () => {
+  it('stages passive playback deep links and only opens media for an explicit activity intent', () => {
     expect(recordingsTypesSource).toContain('select(recording: RecordingItem | null')
     expect(playerSource).toContain('function select(')
     expect(playbackWorkspaceSource).toContain('playerRef.value?.select(recording')
-    expect(playbackWorkspaceSource).not.toContain('await openSelection(selected)')
+
+    const initializeStart = playbackWorkspaceSource.indexOf('async function initialize()')
+    const initializeEnd = playbackWorkspaceSource.indexOf('async function handleCameraChange()', initializeStart)
+    const initializeBlock = playbackWorkspaceSource.slice(initializeStart, initializeEnd)
+    expect(initializeBlock).toContain('const explicitEventAutostart = consumePlaybackEventAutostart(deepEventId)')
+    expect(initializeBlock).toContain('if (explicitEventAutostart) await openSelection(')
+    expect(initializeBlock).toContain('else await selectSelection(')
+    expect(initializeBlock).toContain('await selectSelection(selected)')
   })
 
   it('starts a staged playback only after an explicit play or seek action', () => {
