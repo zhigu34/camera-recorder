@@ -24,6 +24,7 @@ from app.core.database import SessionLocal, close_db, init_db
 from app.core.migrations import upgrade_database
 from app.services.alert_dispatcher import alert_dispatcher
 from app.services.alert_monitor import alert_monitor
+from app.services.camera_connectivity_monitor import camera_connectivity_monitor
 from app.services.camera_identity_reconcile import reconcile_camera_form_factors
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
@@ -71,6 +72,11 @@ async def lifespan(_: FastAPI):
     # start cameras while deployment-local time is inside a configured window.
     await recording_schedule_manager.start()
 
+    # Connectivity observation starts after recorder reconciliation so healthy recorder
+    # processes are the strongest online signal. Non-recording cameras are checked with
+    # a lightweight RTSP control request; no media stream is opened by this monitor.
+    await camera_connectivity_monitor.start()
+
     # Motion detection is an auxiliary low-rate path. Starting it after recorder
     # startup ensures detection can never delay or own the main recording lifecycle.
     await motion_detection_manager.start()
@@ -88,6 +94,7 @@ async def lifespan(_: FastAPI):
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
     await motion_detection_manager.stop()
+    await camera_connectivity_monitor.stop()
     await recording_schedule_manager.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
@@ -142,6 +149,7 @@ async def system_status() -> dict:
         "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
+        "connectivity_monitor": camera_connectivity_monitor.snapshot(),
         "segment_processor": segment_processor.status(),
         "recording_export": recording_export_manager.status(),
         "upload": await upload_manager.status(),
