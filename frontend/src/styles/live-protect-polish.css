@@ -1,0 +1,421 @@
+/* Protect-style refinement for the Live workspace.
+ * Behavior stays owned by PreviewViewV2.vue; this layer only adjusts visual
+ * hierarchy and interaction feedback for existing tile/media states.
+ */
+.nvr-shell .protect-live-page .video-wall {
+  gap: 6px;
+  padding: 0;
+  background: transparent;
+}
+
+.nvr-shell .protect-live-page .wall-slot {
+  isolation: isolate;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--nvr-border) 92%, transparent);
+  border-radius: 9px;
+  background: #020406;
+  box-shadow: none;
+  transition: border-color .14s ease, box-shadow .14s ease, background-color .14s ease;
+}
+
+.nvr-shell .protect-live-page .wall-slot:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 30%, var(--nvr-border));
+}
+
+/* Clicking or keyboard-focusing a tile control gives a quiet persistent
+ * selection cue without adding a new media state or starting a stream. */
+.nvr-shell .protect-live-page .wall-slot:focus-within {
+  border-color: color-mix(in srgb, var(--nvr-blue) 58%, var(--nvr-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--nvr-blue) 20%, transparent);
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-playing {
+  border-color: color-mix(in srgb, var(--nvr-green) 13%, var(--nvr-border));
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-retrying,
+.nvr-shell .protect-live-page .wall-slot.state-connecting {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 22%, var(--nvr-border));
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-error {
+  border-color: color-mix(in srgb, var(--nvr-red) 48%, var(--nvr-border));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nvr-red) 13%, transparent);
+}
+
+.nvr-shell .protect-live-page .preview-black {
+  background: #030609;
+}
+
+/* Keep media untouched: still strict contain/no crop. Only the chrome around
+ * the image changes here. */
+.nvr-shell .protect-live-page .preview-image {
+  background: #000;
+}
+
+.nvr-shell .protect-live-page .wall-slot::after {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .018);
+}
+
+/* Top metadata behaves like a camera HUD: always legible but low-noise until
+ * the tile is hovered or focused. */
+.nvr-shell .protect-live-page .tile-topbar {
+  padding: 9px 10px 22px;
+  opacity: .84;
+  transition: opacity .14s ease;
+}
+
+.nvr-shell .protect-live-page .wall-slot:hover .tile-topbar,
+.nvr-shell .protect-live-page .wall-slot:focus-within .tile-topbar,
+.nvr-shell .protect-live-page .wall-slot.state-error .tile-topbar {
+  opacity: 1;
+}
+
+.nvr-shell .protect-live-page .camera-title {
+  gap: 7px;
+}
+
+.nvr-shell .protect-live-page .camera-title strong {
+  max-width: 210px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+.nvr-shell .protect-live-page .live-dot {
+  width: 5px;
+  height: 5px;
+  background: #596677;
+  box-shadow: none;
+}
+
+.nvr-shell .protect-live-page .live-dot.playing {
+  background: var(--nvr-green);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nvr-green) 11%, transparent);
+}
+
+.nvr-shell .protect-live-page .live-dot.connecting,
+.nvr-shell .protect-live-page .live-dot.retrying {
+  background: var(--nvr-yellow);
+}
+
+.nvr-shell .protect-live-page .live-dot.error {
+  background: var(--nvr-red);
+}
+
+/* Idle recording state should not compete with actual REC/warning signals. */
+.nvr-shell .protect-live-page .rec-badge.idle {
+  display: none;
+}
+
+.nvr-shell .protect-live-page .rec-badge,
+.nvr-shell .protect-live-page .stream-status {
+  min-height: 17px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 5px;
+  border: 1px solid rgba(255, 255, 255, .055);
+  border-radius: 5px;
+  background: rgba(6, 10, 15, .66);
+  font-size: 7px;
+  letter-spacing: .045em;
+  backdrop-filter: blur(7px);
+}
+
+.nvr-shell .protect-live-page .rec-badge.recording {
+  color: #9ce9c3;
+  border-color: color-mix(in srgb, var(--nvr-green) 17%, transparent);
+  background: color-mix(in srgb, #06100c 82%, transparent);
+}
+
+.nvr-shell .protect-live-page .rec-badge.warning {
+  color: #f0c977;
+  border-color: color-mix(in srgb, var(--nvr-yellow) 18%, transparent);
+}
+
+.nvr-shell .protect-live-page .stream-status {
+  color: #9ca9b8;
+}
+
+/* Idle/paused/error states retain one obvious primary action. Playing tiles
+ * collapse that action to a small hover-only pause control. */
+.nvr-shell .protect-live-page .tile-primary-action {
+  min-width: 64px;
+  height: 58px;
+  gap: 4px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 12px;
+  background: rgba(7, 12, 18, .72);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .22);
+  backdrop-filter: blur(10px);
+}
+
+.nvr-shell .protect-live-page .tile-primary-action:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 40%, rgba(255, 255, 255, .08));
+  background: rgba(20, 63, 132, .84);
+}
+
+.nvr-shell .protect-live-page .tile-primary-action :is(svg) {
+  width: 19px;
+  height: 19px;
+}
+
+.nvr-shell .protect-live-page .tile-primary-action span {
+  font-size: 8px;
+  font-weight: 650;
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-playing .tile-primary-action {
+  min-width: 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(6, 10, 15, .68);
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-playing .tile-primary-action span {
+  display: none;
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-playing .tile-primary-action :is(svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.nvr-shell .protect-live-page .wall-slot.state-error .tile-primary-action {
+  border-color: color-mix(in srgb, var(--nvr-red) 25%, rgba(255, 255, 255, .06));
+  background: rgba(32, 8, 11, .78);
+}
+
+/* Connecting/retrying gets its own status line below the central action so the
+ * spinner and pause button no longer visually collide. */
+.nvr-shell .protect-live-page .tile-progress {
+  top: calc(50% + 44px);
+  gap: 7px;
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, .045);
+  border-radius: 6px;
+  color: #8d9aaa;
+  background: rgba(5, 9, 13, .58);
+  backdrop-filter: blur(7px);
+}
+
+.nvr-shell .protect-live-page .tile-progress small {
+  font-size: 8px;
+  font-weight: 560;
+}
+
+.nvr-shell .protect-live-page .loader-ring {
+  width: 13px;
+  height: 13px;
+  border-color: #2c3744;
+  border-top-color: var(--nvr-blue);
+}
+
+.nvr-shell .protect-live-page .tile-error-copy {
+  top: calc(50% + 48px);
+  max-width: min(72%, 340px);
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--nvr-red) 18%, transparent);
+  border-radius: 6px;
+  color: #efa4a6;
+  background: rgba(31, 7, 10, .68);
+  font-size: 8px;
+  backdrop-filter: blur(7px);
+}
+
+/* Secondary controls become one compact floating tool capsule. */
+.nvr-shell .protect-live-page .tile-edge-tools {
+  right: 9px;
+  bottom: 9px;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, .065);
+  border-radius: 8px;
+  background: rgba(5, 9, 14, .66);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .2);
+  backdrop-filter: blur(10px);
+}
+
+.nvr-shell .protect-live-page .wall-slot:hover .tile-edge-tools,
+.nvr-shell .protect-live-page .wall-slot:focus-within .tile-edge-tools {
+  opacity: 1;
+  transform: none;
+}
+
+.nvr-shell .protect-live-page .tile-edge-tools button,
+.nvr-shell .protect-live-page .mobile-more {
+  height: 27px;
+  min-width: 27px;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: rgba(225, 233, 241, .74);
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.nvr-shell .protect-live-page .tile-edge-tools button:hover,
+.nvr-shell .protect-live-page .tile-edge-tools button:focus-visible,
+.nvr-shell .protect-live-page .mobile-more:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, .09);
+}
+
+.nvr-shell .protect-live-page .stream-tool {
+  min-width: 39px !important;
+  color: #aab6c4 !important;
+}
+
+/* Camera tray chips read as compact camera selectors rather than mini cards. */
+.nvr-shell .protect-live-page .camera-chip {
+  min-width: 108px;
+  border-color: var(--nvr-border);
+  background: color-mix(in srgb, var(--nvr-surface-2) 74%, transparent);
+}
+
+.nvr-shell .protect-live-page .camera-chip:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 34%, var(--nvr-border));
+  background: var(--nvr-hover);
+}
+
+.nvr-shell .protect-live-page .camera-chip.assigned {
+  border-color: color-mix(in srgb, var(--nvr-blue) 30%, var(--nvr-border));
+  background: color-mix(in srgb, var(--nvr-blue) 6%, var(--nvr-surface));
+}
+
+.nvr-shell .protect-live-page .camera-chip.disabled {
+  filter: saturate(.55);
+}
+
+/* Empty tiles stay intentionally quiet but clearly droppable/clickable. */
+.nvr-shell .protect-live-page .wall-slot.empty {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--nvr-border) 78%, transparent);
+  background: color-mix(in srgb, var(--nvr-surface) 58%, #020406);
+}
+
+.nvr-shell .protect-live-page .wall-slot.empty:hover,
+.nvr-shell .protect-live-page .wall-slot.empty:focus-within {
+  border-color: color-mix(in srgb, var(--nvr-blue) 34%, var(--nvr-border));
+  background: color-mix(in srgb, var(--nvr-blue) 2.5%, #03070b);
+}
+
+.nvr-shell .protect-live-page .empty-slot {
+  gap: 7px;
+  border: 0;
+  color: #526071;
+}
+
+.nvr-shell .protect-live-page .empty-slot:hover {
+  border-color: transparent;
+  color: #8392a5;
+  background: transparent;
+}
+
+.nvr-shell .protect-live-page .empty-slot :is(svg) {
+  width: 22px;
+  opacity: .8;
+}
+
+.nvr-shell .protect-live-page .empty-slot strong {
+  font-size: 9px;
+  font-weight: 620;
+}
+
+.nvr-shell .protect-live-page .empty-slot span {
+  color: #5e6a79;
+  font-size: 7.5px;
+}
+
+.nvr-shell .protect-live-page .live-note {
+  gap: 11px;
+  margin-top: 8px;
+  padding: 0 2px;
+  color: color-mix(in srgb, var(--nvr-subtle) 86%, transparent);
+}
+
+/* Fullscreen becomes media-first: remove card radius, enlarge the HUD, keep
+ * secondary controls discoverable on hover/focus, and do not force the pause
+ * control to sit over the picture at all times. */
+.nvr-shell .protect-live-page .wall-slot:fullscreen {
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen .tile-topbar {
+  padding: 16px 18px 34px;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen .camera-title strong {
+  max-width: 45vw;
+  font-size: 12px;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen .tile-edge-tools {
+  right: 16px;
+  bottom: 16px;
+  padding: 4px;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen .tile-edge-tools button {
+  height: 32px;
+  min-width: 32px;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen.state-playing .tile-primary-action:not(.persistent) {
+  opacity: 0 !important;
+  transform: scale(.97) !important;
+}
+
+.nvr-shell .protect-live-page .wall-slot:fullscreen.state-playing:hover .tile-primary-action,
+.nvr-shell .protect-live-page .wall-slot:fullscreen.state-playing:focus-within .tile-primary-action {
+  opacity: 1 !important;
+  transform: scale(1) !important;
+}
+
+@media (max-width: 960px) {
+  .nvr-shell .protect-live-page .video-wall {
+    gap: 5px;
+  }
+
+  .nvr-shell .protect-live-page .camera-title strong {
+    max-width: 160px;
+  }
+}
+
+@media (max-width: 620px) {
+  .nvr-shell .protect-live-page .video-wall {
+    gap: 6px;
+  }
+
+  .nvr-shell .protect-live-page .wall-slot {
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+  }
+
+  .nvr-shell .protect-live-page .tile-topbar {
+    padding: 8px 9px 20px;
+  }
+
+  .nvr-shell .protect-live-page .tile-primary-action,
+  .nvr-shell .protect-live-page .wall-slot.state-playing .tile-primary-action {
+    opacity: 1;
+  }
+
+  .nvr-shell .protect-live-page .mobile-tools {
+    right: 8px;
+    bottom: 8px;
+  }
+
+  .nvr-shell .protect-live-page .mobile-more {
+    width: 31px;
+    height: 31px;
+    background: rgba(5, 9, 14, .7);
+    backdrop-filter: blur(9px);
+  }
+}
