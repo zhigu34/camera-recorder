@@ -58,6 +58,13 @@ class Camera(Base):
     status: Mapped[str] = mapped_column(String(32), default="unknown")
     last_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    _connectivity_failures: Mapped[int] = mapped_column(
+        "connectivity_failures",
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -69,6 +76,14 @@ class Camera(Base):
     recordings: Mapped[list["Recording"]] = relationship(
         back_populates="camera", cascade="all, delete-orphan"
     )
+
+    @property
+    def connectivity_failures(self) -> int:
+        return max(0, int(self._connectivity_failures or 0))
+
+    @connectivity_failures.setter
+    def connectivity_failures(self, value: int) -> None:
+        self._connectivity_failures = max(0, int(value))
 
     @staticmethod
     def _utc(value: datetime | None) -> datetime | None:
