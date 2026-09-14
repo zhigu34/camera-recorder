@@ -148,3 +148,56 @@ def test_state_machine_coalesces_repeated_activity_inside_event_min_interval() -
     assert event.zone_id == 3
     assert event.peak_score == 0.8
     assert state.active is False
+
+
+def test_state_machine_flush_discards_unconfirmed_candidate() -> None:
+    state = MotionEventStateMachine(min_duration_ms=800, merge_gap_ms=3000)
+    start = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+
+    state.update(start, motion=True, score=0.3, zone_id=4)
+
+    assert state.flush(start + timedelta(seconds=10)) == []
+    assert state.active is False
+
+
+def test_state_machine_flush_closes_confirmed_event_at_last_motion_time() -> None:
+    state = MotionEventStateMachine(min_duration_ms=500, merge_gap_ms=3000)
+    start = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+
+    state.update(start, motion=True, score=0.3, zone_id=4)
+    state.update(start + timedelta(seconds=1), motion=True, score=0.6, zone_id=4)
+    state.update(start + timedelta(seconds=5), motion=True, score=0.8, zone_id=4)
+
+    closed = state.flush(start + timedelta(seconds=30))
+
+    assert len(closed) == 1
+    assert closed[0].started_at == start
+    assert closed[0].ended_at == start + timedelta(seconds=5)
+    assert closed[0].peak_score == 0.8
+    assert closed[0].zone_id == 4
+
+
+def test_state_machine_flush_does_not_extend_to_pending_silence() -> None:
+    state = MotionEventStateMachine(min_duration_ms=500, merge_gap_ms=10_000)
+    start = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+
+    state.update(start, motion=True, score=0.3, zone_id=9)
+    state.update(start + timedelta(seconds=1), motion=True, score=0.6, zone_id=9)
+    state.update(start + timedelta(seconds=5), motion=True, score=0.7, zone_id=9)
+    state.update(start + timedelta(seconds=6), motion=False, score=0.0, zone_id=None)
+
+    closed = state.flush(start + timedelta(seconds=30))
+
+    assert len(closed) == 1
+    assert closed[0].ended_at == start + timedelta(seconds=5)
+
+
+def test_state_machine_flush_is_idempotent() -> None:
+    state = MotionEventStateMachine(min_duration_ms=500, merge_gap_ms=3000)
+    start = datetime(2026, 9, 14, 8, 0, tzinfo=timezone.utc)
+
+    state.update(start, motion=True, score=0.3, zone_id=None)
+    state.update(start + timedelta(seconds=1), motion=True, score=0.5, zone_id=None)
+
+    assert len(state.flush(start + timedelta(seconds=2))) == 1
+    assert state.flush(start + timedelta(seconds=3)) == []
