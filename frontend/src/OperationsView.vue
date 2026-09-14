@@ -10,6 +10,13 @@ interface LogEntry {
   modified_at: string
 }
 
+interface LogPolicy {
+  camera_log_strategy: 'size'
+  camera_log_max_bytes: number
+  camera_log_backups: number
+  deploy_log_strategy: 'truncate_each_deploy'
+}
+
 interface AuditEvent {
   id: number
   code: string
@@ -40,6 +47,7 @@ interface SystemStatus {
 const loading = ref(false)
 const status = ref<SystemStatus | null>(null)
 const logs = ref<LogEntry[]>([])
+const logPolicy = ref<LogPolicy | null>(null)
 const audits = ref<AuditEvent[]>([])
 const selectedLog = ref<LogEntry | null>(null)
 const logContent = ref('')
@@ -59,6 +67,10 @@ const monitorState = computed(() => {
 const storageLabel = computed(() => {
   const used = status.value?.storage?.used_percent
   return typeof used === 'number' ? `${used.toFixed(1)}%` : '—'
+})
+const logPolicyLabel = computed(() => {
+  if (!logPolicy.value) return ''
+  return `摄像头日志 ${formatBytes(logPolicy.value.camera_log_max_bytes)} 轮转，保留 ${logPolicy.value.camera_log_backups} 份历史；部署日志每次部署重置`
 })
 
 function formatBytes(value: number) {
@@ -88,6 +100,11 @@ async function loadLogs() {
   }
 }
 
+async function loadLogPolicy() {
+  const { data } = await axios.get<LogPolicy>('/api/operations/log-policy')
+  logPolicy.value = data
+}
+
 async function loadAudit() {
   const { data } = await axios.get<AuditEvent[]>('/api/operations/audit', { params: { limit: 50 } })
   audits.value = data
@@ -96,7 +113,7 @@ async function loadAudit() {
 async function refreshAll() {
   loading.value = true
   try {
-    await Promise.all([loadStatus(), loadLogs(), loadAudit()])
+    await Promise.all([loadStatus(), loadLogs(), loadLogPolicy(), loadAudit()])
   } catch (error) {
     ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '加载运维信息失败')
   } finally {
@@ -222,7 +239,11 @@ onMounted(() => { void refreshAll() })
     <div class="operations-grid">
       <article class="operation-card log-panel">
         <div class="card-heading">
-          <div><h3>运行日志</h3><p>仅显示服务日志目录中的直属文件，不递归访问其他路径。</p></div>
+          <div>
+            <h3>运行日志</h3>
+            <p>仅显示服务日志目录中的直属文件，不递归访问其他路径。</p>
+            <p v-if="logPolicyLabel" class="log-policy-note">{{ logPolicyLabel }}</p>
+          </div>
           <span>{{ logs.length }} 个文件</span>
         </div>
         <div class="log-layout">
@@ -281,7 +302,7 @@ onMounted(() => { void refreshAll() })
 .operations-page{width:min(1380px,100%);margin:0 auto;padding:18px 22px 28px;box-sizing:border-box;color:var(--nvr-text)}
 .operations-header{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:12px}.operations-header h2{margin:3px 0 4px;font-size:18px;font-weight:650;letter-spacing:-.02em}.operations-header p,.card-heading p{margin:0;color:var(--nvr-muted);font-size:11px}.eyebrow{color:var(--nvr-subtle);font-size:9px;font-weight:700;letter-spacing:.12em}.header-actions{display:flex;align-items:center;gap:6px}.metrics-link{display:inline-flex;align-items:center;height:30px;padding:0 10px;border:1px solid var(--nvr-border);border-radius:7px;color:var(--nvr-text-soft);font-size:11px;text-decoration:none;background:var(--nvr-surface)}.metrics-link:hover{border-color:var(--nvr-blue);color:var(--nvr-text)}
 .status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}.status-card,.operation-card{border:1px solid var(--nvr-border);border-radius:9px;background:var(--nvr-surface)}.status-card{display:flex;min-height:78px;flex-direction:column;justify-content:center;padding:10px 12px}.status-card>span{color:var(--nvr-muted);font-size:10px}.status-card strong{margin:4px 0 2px;font-size:15px;font-weight:620}.status-card small{overflow:hidden;color:var(--nvr-subtle);font-size:9px;text-overflow:ellipsis;white-space:nowrap}
-.operations-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);gap:10px}.operation-card{min-width:0;padding:12px}.card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.card-heading h3{margin:0 0 3px;font-size:12px;font-weight:650}.card-heading>span{color:var(--nvr-subtle);font-size:9px}.log-layout{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:420px;overflow:hidden;border:1px solid var(--nvr-border);border-radius:8px}.log-list{overflow:auto;border-right:1px solid var(--nvr-border);background:color-mix(in srgb,var(--nvr-surface) 88%,var(--nvr-bg))}.log-list>button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:0;border-bottom:1px solid color-mix(in srgb,var(--nvr-border) 72%,transparent);background:transparent;color:var(--nvr-text);text-align:left;cursor:pointer}.log-list>button:hover,.log-list>button.active{background:var(--nvr-hover)}.log-list>button>span{display:flex;min-width:0;flex-direction:column;gap:2px}.log-list strong{overflow:hidden;font-size:10px;font-weight:580;text-overflow:ellipsis;white-space:nowrap}.log-list small{color:var(--nvr-subtle);font-size:8px}.log-list a{display:grid;width:24px;height:24px;flex:0 0 24px;place-items:center;border-radius:6px;color:var(--nvr-muted)}.log-list a:hover{background:var(--nvr-surface);color:var(--nvr-text)}.log-list a svg{width:13px}.log-preview{display:flex;min-width:0;flex-direction:column;background:#090b0e}.preview-title{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);color:#d8dde6;font-size:10px}.preview-title small{color:#737b88;font-size:8px}.log-preview pre{min-height:0;flex:1;overflow:auto;margin:0;padding:10px;color:#adb5c0;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}.log-preview.loading{opacity:.65}
+.operations-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(300px,.8fr);gap:10px}.operation-card{min-width:0;padding:12px}.card-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}.card-heading h3{margin:0 0 3px;font-size:12px;font-weight:650}.card-heading>span{color:var(--nvr-subtle);font-size:9px}.log-policy-note{margin-top:4px!important;color:var(--nvr-subtle)!important;font-size:9px!important}.log-layout{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:420px;overflow:hidden;border:1px solid var(--nvr-border);border-radius:8px}.log-list{overflow:auto;border-right:1px solid var(--nvr-border);background:color-mix(in srgb,var(--nvr-surface) 88%,var(--nvr-bg))}.log-list>button{display:flex;width:100%;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;border:0;border-bottom:1px solid color-mix(in srgb,var(--nvr-border) 72%,transparent);background:transparent;color:var(--nvr-text);text-align:left;cursor:pointer}.log-list>button:hover,.log-list>button.active{background:var(--nvr-hover)}.log-list>button>span{display:flex;min-width:0;flex-direction:column;gap:2px}.log-list strong{overflow:hidden;font-size:10px;font-weight:580;text-overflow:ellipsis;white-space:nowrap}.log-list small{color:var(--nvr-subtle);font-size:8px}.log-list a{display:grid;width:24px;height:24px;flex:0 0 24px;place-items:center;border-radius:6px;color:var(--nvr-muted)}.log-list a:hover{background:var(--nvr-surface);color:var(--nvr-text)}.log-list a svg{width:13px}.log-preview{display:flex;min-width:0;flex-direction:column;background:#090b0e}.preview-title{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border-bottom:1px solid rgba(255,255,255,.08);color:#d8dde6;font-size:10px}.preview-title small{color:#737b88;font-size:8px}.log-preview pre{min-height:0;flex:1;overflow:auto;margin:0;padding:10px;color:#adb5c0;font:10px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}.log-preview.loading{opacity:.65}
 .side-stack{display:flex;min-width:0;flex-direction:column;gap:10px}.security-note{margin:8px 0 12px;padding:9px 10px;border-left:2px solid var(--nvr-blue);background:color-mix(in srgb,var(--nvr-blue) 7%,transparent);color:var(--nvr-muted);font-size:10px;line-height:1.55}.backup-actions{display:flex;flex-wrap:wrap;gap:6px}.hidden-file{display:none}.audit-card{min-height:0;flex:1}.audit-list{max-height:330px;overflow:auto}.audit-row{display:grid;grid-template-columns:8px minmax(0,1fr);gap:7px;padding:8px 2px;border-bottom:1px solid color-mix(in srgb,var(--nvr-border) 72%,transparent)}.audit-dot{width:5px;height:5px;margin-top:5px;border-radius:50%;background:var(--nvr-blue)}.audit-row>div{display:flex;min-width:0;flex-direction:column;gap:2px}.audit-row strong{font-size:10px;font-weight:550}.audit-row small{color:var(--nvr-subtle);font-size:8px}.empty-line{padding:18px 10px;color:var(--nvr-subtle);font-size:10px;text-align:center}
 @media(max-width:1050px){.status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.operations-grid{grid-template-columns:1fr}.side-stack{display:grid;grid-template-columns:1fr 1fr}.audit-list{max-height:250px}}
 @media(max-width:720px){.operations-page{padding:14px}.operations-header{align-items:flex-start;flex-direction:column}.header-actions{width:100%}.status-grid{grid-template-columns:1fr 1fr}.log-layout{grid-template-columns:1fr;min-height:0}.log-list{max-height:210px;border-right:0;border-bottom:1px solid var(--nvr-border)}.log-preview{min-height:300px}.side-stack{grid-template-columns:1fr}}
