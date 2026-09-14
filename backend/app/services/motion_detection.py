@@ -171,7 +171,7 @@ class ClosedMotionEvent:
 
 
 class MotionEventStateMachine:
-    """Convert frame-level motion into durable playback-anchor events."""
+    """Convert stable motion into durable playback-anchor events."""
 
     def __init__(
         self,
@@ -189,6 +189,7 @@ class MotionEventStateMachine:
         self._zone_id: int | None = None
         self._peak_score = 0.0
         self._pending_end_at: datetime | None = None
+        self._last_motion_at: datetime | None = None
 
     @property
     def active(self) -> bool:
@@ -201,6 +202,7 @@ class MotionEventStateMachine:
         self._zone_id = None
         self._peak_score = 0.0
         self._pending_end_at = None
+        self._last_motion_at = None
 
     def _close_ready(self, timestamp: datetime) -> bool:
         if self._started_at is None or self._pending_end_at is None:
@@ -213,7 +215,7 @@ class MotionEventStateMachine:
     def _close_active(self) -> ClosedMotionEvent | None:
         if self._started_at is None:
             return None
-        ended_at = self._pending_end_at or self._started_at
+        ended_at = self._pending_end_at or self._last_motion_at or self._started_at
         event = ClosedMotionEvent(
             started_at=self._started_at,
             ended_at=ended_at,
@@ -222,6 +224,30 @@ class MotionEventStateMachine:
         )
         self._reset()
         return event
+
+    def flush(self, timestamp: datetime) -> list[ClosedMotionEvent]:
+        """Finalize confirmed motion without extending it to shutdown/reconnect time."""
+
+        _ = timestamp
+        if not self.active:
+            self._reset()
+            return []
+
+        assert self._started_at is not None
+        candidates = [
+            boundary
+            for boundary in (self._last_motion_at, self._pending_end_at)
+            if boundary is not None
+        ]
+        ended_at = min(candidates) if candidates else self._started_at
+        event = ClosedMotionEvent(
+            started_at=self._started_at,
+            ended_at=max(self._started_at, ended_at),
+            zone_id=self._zone_id,
+            peak_score=self._peak_score,
+        )
+        self._reset()
+        return [event]
 
     def update(
         self,
@@ -244,6 +270,7 @@ class MotionEventStateMachine:
                     # still open, even if the shorter activity merge gap elapsed.
                     self._pending_end_at = None
 
+            self._last_motion_at = timestamp
             if self._candidate_started_at is None and not self.active:
                 self._candidate_started_at = timestamp
                 self._candidate_zone_id = zone_id
@@ -273,4 +300,5 @@ class MotionEventStateMachine:
         self._candidate_started_at = None
         self._candidate_zone_id = None
         self._peak_score = 0.0
+        self._last_motion_at = None
         return closed
