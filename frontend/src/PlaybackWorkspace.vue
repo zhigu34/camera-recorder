@@ -8,6 +8,7 @@ import { ElMessage } from 'element-plus'
 import PlaybackEventFeed from './PlaybackEventFeed.vue'
 import PlaybackPlayer from './PlaybackPlayer.vue'
 import PlaybackTimelineV3 from './PlaybackTimelineV3.vue'
+import PlaybackTransportControls from './PlaybackTransportControls.vue'
 import { useCameraStore } from './stores/cameras'
 import type { SharedCamera } from './stores/cameras'
 import type {
@@ -25,6 +26,12 @@ import {
   buildExportRequest,
   initialExportRange,
 } from './utils/playbackExport'
+import {
+  loadSkipInterval,
+  normalizePlaybackRate,
+  playbackSkipTarget,
+  saveSkipInterval,
+} from './utils/playbackTransport'
 import { wallClockSeconds } from './utils/playbackTimelineV3'
 import {
   playbackWallClockAction,
@@ -48,6 +55,8 @@ const selectedCamera = ref<number | null>(null)
 const selectedDate = ref(todayString())
 const activeRecordingId = ref<number | null>(null)
 const activeWallSeconds = ref<number | null>(null)
+const playbackRate = ref(1)
+const skipSeconds = ref(loadSkipInterval(playbackStorage()))
 const loading = ref(false)
 const initialized = ref(false)
 const rangeSelectEnabled = ref(false)
@@ -75,6 +84,14 @@ const packageModes = computed(() => availablePackageModes(gapPolicy.value, hasEx
 const exportRangeLabel = computed(() => exportRange.value
   ? `${clockText(exportRange.value.start)} – ${clockText(exportRange.value.end)}`
   : '--:--:--')
+
+function playbackStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
 
 function todayString() {
   const now = new Date()
@@ -303,6 +320,20 @@ async function seekWallClock(wallSeconds: number) {
     await playerRef.value?.play().catch(() => undefined)
   }
   activeWallSeconds.value = action.wallSeconds
+}
+
+function handlePlaybackRate(value: number) {
+  playbackRate.value = normalizePlaybackRate(value)
+}
+
+function handleSkipSeconds(value: number) {
+  skipSeconds.value = saveSkipInterval(value, playbackStorage())
+}
+
+async function skipPlayback(deltaSeconds: number) {
+  const target = playbackSkipTarget(activeWallSeconds.value, deltaSeconds)
+  if (target === null) return
+  await seekWallClock(target)
 }
 
 function handlePlayerTime(seconds: number) {
@@ -535,8 +566,17 @@ onBeforeUnmount(() => stopExportPolling())
         </div>
         <PlaybackPlayer
           ref="playerRef"
+          :playback-rate="playbackRate"
           @timeupdate="handlePlayerTime"
           @ended="handlePlayerEnded"
+        />
+        <PlaybackTransportControls
+          :active="activeWallSeconds !== null"
+          :playback-rate="playbackRate"
+          :skip-seconds="skipSeconds"
+          @skip="skipPlayback"
+          @update:playback-rate="handlePlaybackRate"
+          @update:skip-seconds="handleSkipSeconds"
         />
       </section>
 
