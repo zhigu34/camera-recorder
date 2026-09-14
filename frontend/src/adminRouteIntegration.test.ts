@@ -1,10 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-
-const uploadSource = readFileSync(new URL('./UploadManagementView.vue', import.meta.url), 'utf8')
-const settingsWorkspaceSource = readFileSync(new URL('./SystemSettingsWorkspace.vue', import.meta.url), 'utf8')
-const settingsSource = readFileSync(new URL('./SystemSettingsView.vue', import.meta.url), 'utf8')
-const workspaceRouteSource = readFileSync(new URL('./WorkspaceRoute.vue', import.meta.url), 'utf8')
+import uploadSource from './UploadManagementView.vue?raw'
+import settingsWorkspaceSource from './SystemSettingsWorkspace.vue?raw'
+import settingsSource from './SystemSettingsView.vue?raw'
+import workspaceRouteSource from './WorkspaceRoute.vue?raw'
 
 describe('admin route integration', () => {
   it('syncs upload detail selection with task_id and reuses the shared camera store', () => {
