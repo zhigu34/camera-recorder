@@ -4,7 +4,16 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MotionSensitivity = Literal["low", "medium", "high"]
-MotionRuntimeState = Literal["disabled", "starting", "running", "reconnecting", "error", "stopped"]
+MotionRuntimeState = Literal[
+    "disabled",
+    "starting",
+    "warming_up",
+    "running",
+    "stabilizing",
+    "reconnecting",
+    "error",
+    "stopped",
+]
 
 
 class MotionDetectionUpdate(BaseModel):
@@ -67,6 +76,12 @@ class MotionRuntimeRead(BaseModel):
     stream: Literal["main", "sub"] | None = None
     last_frame_at: datetime | None = None
     last_error: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    raw_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    moving_area_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    global_change_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    primary_zone_id: int | None = None
+    global_change: bool = False
 
 
 class MotionDetectionRead(MotionDetectionUpdate):
