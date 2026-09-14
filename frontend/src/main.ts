@@ -4,7 +4,7 @@ import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 
-// Style ownership: tokens -> shared component system -> product shell -> page refinements.
+// Style ownership: tokens -> shared component system -> product shell -> page refinements -> final convergence.
 import './styles/nvr-theme.css'
 import './styles/appliance-console.css'
 import './styles/unifi-console.css'
@@ -22,6 +22,7 @@ import './styles/camera-detail-drawer-v2.css'
 import './styles/protect-workspace-unification.css'
 import './styles/live-protect-polish.css'
 import './styles/protect-drawer-responsive-v2.css'
+import './styles/protect-admin-convergence.css'
 
 import Root from './Root.vue'
 import { router } from './router'
