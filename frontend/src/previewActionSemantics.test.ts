@@ -29,4 +29,26 @@ describe('Live preview action semantics', () => {
     expect(previewSource).toContain('title="录像回放" @click="openPlayback"')
     expect(previewSource).toContain('<Clock />')
   })
+
+  it('offers explicit global play and pause controls for the current layout', () => {
+    expect(previewSource).toContain('function startAllVisibleSlots()')
+    expect(previewSource).toContain('function pauseAllVisibleSlots()')
+    expect(previewSource).toContain('@click="startAllVisibleSlots"')
+    expect(previewSource).toContain('>全部播放</el-button>')
+    expect(previewSource).toContain('@click="pauseAllVisibleSlots"')
+    expect(previewSource).toContain('>全部暂停</el-button>')
+    expect(previewSource).toContain('activeSlots.value.forEach((slot, index) => {')
+    expect(previewSource).toContain('if (slot.cameraId === null) return')
+    expect(previewSource).toContain('startSlot(index)')
+    expect(previewSource).toContain('pauseSlot(index)')
+  })
+
+  it('does not invoke global playback controls during page mount', () => {
+    const mountStart = previewSource.indexOf('onMounted(() => {')
+    const mountEnd = previewSource.indexOf('onBeforeUnmount(() => {', mountStart)
+    const mountBlock = previewSource.slice(mountStart, mountEnd)
+    expect(mountBlock).not.toContain('startAllVisibleSlots')
+    expect(mountBlock).not.toContain('pauseAllVisibleSlots')
+    expect(mountBlock).not.toContain('startSlot(')
+  })
 })
