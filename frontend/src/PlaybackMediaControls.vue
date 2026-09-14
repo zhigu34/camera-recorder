@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
 
 const props = defineProps<{
@@ -22,6 +22,7 @@ const emit = defineEmits<{
 }>()
 
 const controlsVisible = ref(true)
+const effectiveSkipSeconds = ref(props.skipSeconds)
 let hideTimer: number | null = null
 
 function dispatchTransport(type: 'skip' | 'rate' | 'interval', value: number) {
@@ -65,6 +66,7 @@ function onRate(event: Event) {
 
 function onSkipInterval(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
+  effectiveSkipSeconds.value = value
   emit('update:skipSeconds', value)
   dispatchTransport('interval', value)
   showControls()
@@ -75,12 +77,22 @@ function onVolume(event: Event) {
   showControls()
 }
 
+function handleIntervalSync(event: Event) {
+  const value = Number((event as CustomEvent<number>).detail)
+  if (SKIP_INTERVALS.includes(value as (typeof SKIP_INTERVALS)[number])) effectiveSkipSeconds.value = value
+}
+
 watch(() => props.playing, () => {
   controlsVisible.value = true
   scheduleHide()
 })
+watch(() => props.skipSeconds, (value) => { effectiveSkipSeconds.value = value })
 
-onBeforeUnmount(clearHideTimer)
+onMounted(() => window.addEventListener('camera-recorder:playback-interval-sync', handleIntervalSync))
+onBeforeUnmount(() => {
+  clearHideTimer()
+  window.removeEventListener('camera-recorder:playback-interval-sync', handleIntervalSync)
+})
 </script>
 
 <template>
@@ -115,30 +127,30 @@ onBeforeUnmount(clearHideTimer)
         type="button"
         class="media-icon-button media-skip-button"
         :disabled="!active"
-        :aria-label="`倒退 ${skipSeconds} 秒`"
-        :title="`倒退 ${skipSeconds} 秒`"
-        @click="onSkip(-skipSeconds)"
+        :aria-label="`倒退 ${effectiveSkipSeconds} 秒`"
+        :title="`倒退 ${effectiveSkipSeconds} 秒`"
+        @click="onSkip(-effectiveSkipSeconds)"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4.5 5v4h4" />
           <path d="M5 8.2A8 8 0 1 1 4.9 16.4" />
         </svg>
-        <span>{{ skipSeconds }}</span>
+        <span>{{ effectiveSkipSeconds }}</span>
       </button>
 
       <button
         type="button"
         class="media-icon-button media-skip-button"
         :disabled="!active"
-        :aria-label="`快进 ${skipSeconds} 秒`"
-        :title="`快进 ${skipSeconds} 秒`"
-        @click="onSkip(skipSeconds)"
+        :aria-label="`快进 ${effectiveSkipSeconds} 秒`"
+        :title="`快进 ${effectiveSkipSeconds} 秒`"
+        @click="onSkip(effectiveSkipSeconds)"
       >
         <svg class="media-forward-icon" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M4.5 5v4h4" />
           <path d="M5 8.2A8 8 0 1 1 4.9 16.4" />
         </svg>
-        <span>{{ skipSeconds }}</span>
+        <span>{{ effectiveSkipSeconds }}</span>
       </button>
 
       <div class="media-controls-spacer"></div>
@@ -181,7 +193,7 @@ onBeforeUnmount(clearHideTimer)
 
       <label class="media-select-pill media-skip-select">
         <span class="sr-only">跳转间隔</span>
-        <select :value="skipSeconds" aria-label="跳转间隔" @change="onSkipInterval">
+        <select :value="effectiveSkipSeconds" aria-label="跳转间隔" @change="onSkipInterval">
           <option v-for="seconds in SKIP_INTERVALS" :key="seconds" :value="seconds">{{ seconds }}s</option>
         </select>
       </label>
