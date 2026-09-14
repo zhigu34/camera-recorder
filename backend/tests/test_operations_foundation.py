@@ -41,7 +41,7 @@ def isolated_session(tmp_path):
 
 
 def test_operations_routes_are_registered() -> None:
-    paths = {path for route in app.routes if (path := getattr(route, "path", None))}
+    paths = set(app.openapi()["paths"])
     assert "/api/operations/logs" in paths
     assert "/api/operations/backup" in paths
     assert "/api/operations/restore" in paths
