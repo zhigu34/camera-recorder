@@ -25,6 +25,8 @@ export interface CameraHealth {
   enabled: boolean
   expected_recording: boolean
   connectivity_status: 'unknown' | 'online' | 'offline'
+  connectivity_source?: string | null
+  connectivity_failures?: number
   recorder_state: string
   schedule_state: string
   state?: string
