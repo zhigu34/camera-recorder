@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { usePlaybackTransportStore } from './stores/playbackTransport'
 import { PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
 
 const props = defineProps<{
@@ -21,6 +22,7 @@ const emit = defineEmits<{
   fullscreen: []
 }>()
 
+const transportStore = usePlaybackTransportStore()
 const rootRef = ref<HTMLElement | null>(null)
 const controlsVisible = ref(true)
 const effectiveSkipSeconds = ref(props.skipSeconds)
@@ -50,12 +52,14 @@ function showControls() {
 
 function onSkip(deltaSeconds: number) {
   emit('skip', deltaSeconds)
+  transportStore.requestSkip(deltaSeconds)
   showControls()
 }
 
 function onRate(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   emit('update:playbackRate', value)
+  transportStore.requestRate(value)
   showControls()
 }
 
@@ -63,6 +67,7 @@ function onSkipInterval(event: Event) {
   const value = Number((event.target as HTMLSelectElement).value)
   effectiveSkipSeconds.value = value
   emit('update:skipSeconds', value)
+  transportStore.requestInterval(value)
   showControls()
 }
 
