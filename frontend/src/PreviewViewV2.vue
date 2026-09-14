@@ -292,6 +292,22 @@ function toggleSlotPlayback(index: number) {
   else startSlot(index)
 }
 
+function startAllVisibleSlots() {
+  activeSlots.value.forEach((slot, index) => {
+    if (slot.cameraId === null) return
+    if (isActiveTileState(slot.state)) return
+    startSlot(index)
+  })
+}
+
+function pauseAllVisibleSlots() {
+  activeSlots.value.forEach((slot, index) => {
+    if (slot.cameraId === null) return
+    if (!isActiveTileState(slot.state)) return
+    pauseSlot(index)
+  })
+}
+
 function loadSavedWall() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -508,6 +524,8 @@ onBeforeUnmount(() => {
       <div class="header-actions">
         <div class="live-summary-pill"><span></span>{{ playingCount }} / {{ configuredCount }} 活动</div>
         <div class="profile-pill">{{ previewProfile.label }}</div>
+        <el-button size="small" type="primary" :icon="VideoPlay" :disabled="configuredCount === 0 || playingCount === configuredCount" @click="startAllVisibleSlots">全部播放</el-button>
+        <el-button size="small" :icon="VideoPause" :disabled="playingCount === 0" @click="pauseAllVisibleSlots">全部暂停</el-button>
         <el-button size="small" @click="autoFill">自动布局</el-button>
         <el-button size="small" plain @click="clearWall">清空</el-button>
       </div>
