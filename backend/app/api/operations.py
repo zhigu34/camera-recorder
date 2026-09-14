@@ -218,7 +218,10 @@ async def restore_configuration_backup(
         for field in _CAMERA_FIELDS:
             if field == "name":
                 continue
-            setattr(camera, field, getattr(camera_payload, field))
+            value = getattr(camera_payload, field)
+            if field == "recording_schedule":
+                value = [item.model_dump() for item in value]
+            setattr(camera, field, value)
         restored_ids.append(camera.id)
 
     add_event(
