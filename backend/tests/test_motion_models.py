@@ -17,7 +17,8 @@ def test_motion_detection_defaults_and_bounds() -> None:
     assert payload.analysis_fps == 5
     assert payload.analysis_width == 640
     assert payload.min_duration_ms == 800
-    assert payload.merge_gap_ms == 3000
+    assert payload.merge_gap_ms == 10_000
+    assert payload.event_min_interval_ms == 60_000
 
     with pytest.raises(ValidationError):
         MotionDetectionUpdate(enabled=True, analysis_fps=0)
@@ -29,6 +30,10 @@ def test_motion_detection_defaults_and_bounds() -> None:
         MotionDetectionUpdate(enabled=True, min_duration_ms=99)
     with pytest.raises(ValidationError):
         MotionDetectionUpdate(enabled=True, merge_gap_ms=30_001)
+    with pytest.raises(ValidationError):
+        MotionDetectionUpdate(enabled=True, event_min_interval_ms=-1)
+    with pytest.raises(ValidationError):
+        MotionDetectionUpdate(enabled=True, event_min_interval_ms=600_001)
 
 
 def test_zone_polygon_requires_three_normalized_points() -> None:
