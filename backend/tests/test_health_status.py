@@ -11,6 +11,9 @@ def test_system_status_shape() -> None:
     body = response.json()
     assert isinstance(body["recorders"], list)
     assert isinstance(body["recording_schedule"], dict)
+    assert isinstance(body["connectivity_monitor"], dict)
+    assert body["connectivity_monitor"]["interval_seconds"] == 15
+    assert body["connectivity_monitor"]["failure_threshold"] == 3
     assert isinstance(body["segment_processor"], dict)
     assert isinstance(body["upload"], dict)
     assert "enabled" in body["upload"]
