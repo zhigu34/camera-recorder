@@ -18,12 +18,12 @@ describe('dashboard protect home v2 semantics', () => {
     expect(dashboardSource).toContain('wall_seconds')
   })
 
-  it('opens a camera in Live as passive context only', () => {
+  it('primes Live camera context through its saved wall without starting media', () => {
+    expect(dashboardSource).toContain('nvr-video-wall-v1')
     expect(dashboardSource).toContain("path: '/preview'")
-    expect(dashboardSource).toContain("camera_id: String(cameraId)")
-    expect(previewSource).toContain('useRoute')
-    expect(previewSource).toContain('route.query.camera_id')
-    expect(previewSource).toContain('focusRouteCamera')
-    expect(previewSource).toContain('assignCamera(0, cameraId)')
+    expect(dashboardSource).toContain('primeLiveCamera')
+    expect(previewSource).toContain('loadSavedWall()')
+    expect(previewSource).toContain('function startSlot(index: number)')
+    expect(previewSource).toContain('void loadData()')
   })
 })
