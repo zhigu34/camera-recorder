@@ -131,7 +131,10 @@ def point_in_polygon(point: tuple[float, float], polygon: list[list[float]]) -> 
         dy = y2 - y1
         cross = (x - x1) * dy - (y - y1) * dx
         if abs(cross) <= 1e-9:
-            if min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9 and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9:
+            if (
+                min(x1, x2) - 1e-9 <= x <= max(x1, x2) + 1e-9
+                and min(y1, y2) - 1e-9 <= y <= max(y1, y2) + 1e-9
+            ):
                 return True
 
         intersects = (y1 > y) != (y2 > y)
@@ -188,6 +191,7 @@ class MotionEventStateMachine:
         self._started_at: datetime | None = None
         self._zone_id: int | None = None
         self._peak_score = 0.0
+        self._pending_started_at: datetime | None = None
         self._pending_end_at: datetime | None = None
         self._last_motion_at: datetime | None = None
 
@@ -201,14 +205,16 @@ class MotionEventStateMachine:
         self._started_at = None
         self._zone_id = None
         self._peak_score = 0.0
+        self._pending_started_at = None
         self._pending_end_at = None
         self._last_motion_at = None
 
     def _close_ready(self, timestamp: datetime) -> bool:
         if self._started_at is None or self._pending_end_at is None:
             return False
+        pending_started_at = self._pending_started_at or self._pending_end_at
         return (
-            timestamp - self._pending_end_at > self.merge_gap
+            timestamp - pending_started_at > self.merge_gap
             and timestamp - self._started_at >= self.event_min_interval
         )
 
@@ -218,7 +224,7 @@ class MotionEventStateMachine:
         ended_at = self._pending_end_at or self._last_motion_at or self._started_at
         event = ClosedMotionEvent(
             started_at=self._started_at,
-            ended_at=ended_at,
+            ended_at=max(self._started_at, ended_at),
             zone_id=self._zone_id,
             peak_score=self._peak_score,
         )
@@ -256,6 +262,7 @@ class MotionEventStateMachine:
         motion: bool,
         score: float,
         zone_id: int | None,
+        end_boundary_at: datetime | None = None,
     ) -> list[ClosedMotionEvent]:
         closed: list[ClosedMotionEvent] = []
 
@@ -268,6 +275,7 @@ class MotionEventStateMachine:
                 else:
                     # Keep one playback anchor while the minimum anchor interval is
                     # still open, even if the shorter activity merge gap elapsed.
+                    self._pending_started_at = None
                     self._pending_end_at = None
 
             self._last_motion_at = timestamp
@@ -288,7 +296,8 @@ class MotionEventStateMachine:
 
         if self.active:
             if self._pending_end_at is None:
-                self._pending_end_at = timestamp
+                self._pending_started_at = timestamp
+                self._pending_end_at = end_boundary_at or timestamp
                 return closed
             if self._close_ready(timestamp):
                 event = self._close_active()
