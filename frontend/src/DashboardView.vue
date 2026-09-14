@@ -36,7 +36,6 @@ const ACTIVITY_FALLBACK_REFRESH_MS = 60_000
 const ACTIVITY_RECONNECT_MS = 5_000
 const ACTIVITY_FRESH_MS = 1_800
 const ACTIVITY_MAX_ITEMS = 100
-const HOME_SYSTEM_EVENT_CURSOR = Number.MAX_SAFE_INTEGER
 
 const router = useRouter()
 const runtime = useRuntimeStore()
@@ -247,16 +246,6 @@ function updateActivityCursor(events: MotionActivityEvent[]) {
   for (const event of events) activityMotionCursor = Math.max(activityMotionCursor, event.id)
 }
 
-async function seedActivityCursor() {
-  if (activityMotionCursor > 0) return
-  try {
-    const { data } = await axios.get<MotionActivityEvent[]>('/api/motion-events', { params: { limit: 1 } })
-    updateActivityCursor(data)
-  } catch {
-    // The socket can still recover the cursor later; do not turn cursor seeding into a visible error.
-  }
-}
-
 async function loadActivities() {
   activityLoading.value = true
   activityError.value = ''
@@ -273,10 +262,8 @@ async function loadActivities() {
     activities.value = [...data]
       .sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
       .slice(0, ACTIVITY_MAX_ITEMS)
-    if (!data.length) await seedActivityCursor()
   } catch (error) {
     activityError.value = axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '活动加载失败'
-    await seedActivityCursor()
   } finally {
     activityLoading.value = false
   }
@@ -308,11 +295,10 @@ function mergeRealtimeActivity(event: MotionActivityEvent) {
 
 function activityEventsWsUrl() {
   const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const params = new URLSearchParams({
-    after_id: String(HOME_SYSTEM_EVENT_CURSOR),
-    after_motion_id: String(activityMotionCursor),
-  })
-  return `${scheme}//${window.location.host}/ws/events?${params.toString()}`
+  const params = new URLSearchParams()
+  if (activityMotionCursor > 0) params.set('after_motion_id', String(activityMotionCursor))
+  const query = params.toString()
+  return `${scheme}//${window.location.host}/ws/events${query ? `?${query}` : ''}`
 }
 
 function clearActivityReconnect() {
