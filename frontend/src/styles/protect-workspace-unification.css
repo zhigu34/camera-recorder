@@ -99,8 +99,8 @@
   min-height: 28px;
 }
 
-/* Keep the common panel language quiet and flat. Do not target video/player
- * elements here: all media retain their page-owned 16:9/object-fit behavior.
+/* Keep the common panel language quiet and flat. Media fitting stays owned by
+ * each page so this layer cannot alter the 16:9 player and preview contracts.
  */
 .nvr-shell .nvr-workspace-content .protect-home .surface,
 .nvr-shell .nvr-workspace-content .events-page .table-panel,
