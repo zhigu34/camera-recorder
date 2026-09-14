@@ -1,8 +1,6 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-
-const mediaControlsSource = readFileSync(new URL('./PlaybackMediaControls.vue', import.meta.url), 'utf8')
-const transportBridgeSource = readFileSync(new URL('./PlaybackTransportControls.vue', import.meta.url), 'utf8')
+import mediaControlsSource from './PlaybackMediaControls.vue?raw'
+import transportBridgeSource from './PlaybackTransportControls.vue?raw'
 
 describe('playback transport communication', () => {
   it('uses a scoped Pinia transport channel instead of window CustomEvents', () => {
