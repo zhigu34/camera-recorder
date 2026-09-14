@@ -1,7 +1,7 @@
 /* Cross-workspace Protect visual consistency.
- * This layer is deliberately behavior-free: it aligns the visual skeleton of
- * Home, Live, Activity, Playback and Cameras without touching media sizing,
- * playback state, navigation, or page-specific information architecture.
+ * This layer is deliberately behavior-free: it aligns the visual skeleton and
+ * shared UI primitives of Home, Live, Activity, Playback and Cameras without
+ * touching media sizing, playback state, navigation, or page information architecture.
  */
 .nvr-shell {
   --protect-content-max: 1760px;
@@ -9,7 +9,17 @@
   --protect-page-gutter-mobile: 12px;
   --protect-section-gap: 10px;
   --protect-control-height: 32px;
+  --protect-control-radius: 7px;
+  --protect-compact-radius: 8px;
   --protect-surface-radius: 10px;
+  --protect-control-gap: 6px;
+  --protect-status-dot: 6px;
+  --protect-status-online: var(--nvr-green);
+  --protect-status-warning: var(--nvr-yellow);
+  --protect-status-danger: var(--nvr-red);
+  --protect-status-neutral: var(--nvr-subtle);
+  --protect-surface-border: color-mix(in srgb, var(--nvr-border) 92%, transparent);
+  --protect-focus-ring: color-mix(in srgb, var(--nvr-blue) 62%, transparent);
 }
 
 /* One content rail for the five core Protect workspaces. Keep each page's
@@ -78,6 +88,82 @@
   font-size: 9px;
 }
 
+/* Shared control system ----------------------------------------------------
+ * Element Plus adds its own sibling margins and page components historically
+ * used slightly different heights. Scope one compact Protect control geometry
+ * to the five core workspaces only, leaving Settings and other admin pages alone.
+ */
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) :is(.header-actions, .heading-actions, .camera-toolbar-actions, .activity-head-actions, .playback-video-actions, .export-panel-actions) {
+  gap: var(--protect-control-gap) !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) .el-button + .el-button {
+  margin-left: 0 !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) .el-button:not(.is-link):not(.is-text) {
+  min-height: var(--protect-control-height);
+  height: var(--protect-control-height);
+  padding: 0 10px;
+  border-radius: var(--protect-control-radius) !important;
+  box-shadow: none !important;
+  font-size: 10px;
+}
+
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) .el-button.is-text {
+  min-height: 28px;
+  padding: 0 6px;
+  border-radius: 6px !important;
+  font-size: 9px;
+}
+
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) :is(.el-input__wrapper, .el-select__wrapper, .el-date-editor.el-input__wrapper) {
+  min-height: var(--protect-control-height);
+  height: var(--protect-control-height);
+  border-radius: var(--protect-control-radius) !important;
+}
+
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home,
+  .protect-live-page,
+  .events-page,
+  .camera-page,
+  .playback-workspace
+) :is(button, [role="button"]):focus-visible {
+  outline: 2px solid var(--protect-focus-ring);
+  outline-offset: 2px;
+}
+
 /* Repeated control surfaces share one restrained geometry. Individual page
  * layouts remain untouched; only chrome, height and spacing are normalized.
  */
@@ -87,7 +173,7 @@
   min-height: 42px;
   margin-bottom: var(--protect-section-gap);
   padding: 7px 9px;
-  border-color: var(--nvr-border);
+  border-color: var(--protect-surface-border);
   border-radius: 9px;
   background: var(--nvr-surface);
   box-shadow: none;
@@ -99,18 +185,111 @@
   min-height: 28px;
 }
 
+/* Segmented filters and mode selectors should read as the same family even
+ * when each page owns different labels and data behavior.
+ */
+.nvr-shell .nvr-workspace-content .protect-live-page .layout-switcher,
+.nvr-shell .nvr-workspace-content .events-page .event-mode-tabs,
+.nvr-shell .nvr-workspace-content .camera-page .summary-grid {
+  border-color: var(--protect-surface-border) !important;
+  border-radius: var(--protect-compact-radius) !important;
+  background: var(--nvr-surface) !important;
+  box-shadow: none !important;
+}
+
+.nvr-shell .nvr-workspace-content .protect-live-page .layout-switcher button,
+.nvr-shell .nvr-workspace-content .events-page .event-mode-tabs button,
+.nvr-shell .nvr-workspace-content .camera-page .summary-card {
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  transition: background-color .14s ease, color .14s ease, border-color .14s ease;
+}
+
 /* Keep the common panel language quiet and flat. Media fitting stays owned by
  * each page so this layer cannot alter the 16:9 player and preview contracts.
  */
 .nvr-shell .nvr-workspace-content .protect-home .surface,
+.nvr-shell .nvr-workspace-content .protect-home .status-strip,
 .nvr-shell .nvr-workspace-content .events-page .table-panel,
+.nvr-shell .nvr-workspace-content .events-page .metric-card,
+.nvr-shell .nvr-workspace-content .events-page .activity-card,
 .nvr-shell .nvr-workspace-content .playback-workspace .playback-sidebar,
 .nvr-shell .nvr-workspace-content .playback-workspace .playback-video-panel,
 .nvr-shell .nvr-workspace-content .playback-workspace .playback-export-panel,
 .nvr-shell .nvr-workspace-content .playback-workspace .playback-export-job,
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-v3,
 .nvr-shell .nvr-workspace-content .camera-page .camera-card {
+  border-color: var(--protect-surface-border) !important;
   border-radius: var(--protect-surface-radius) !important;
   box-shadow: none;
+}
+
+.nvr-shell .nvr-workspace-content .events-page .activity-card:hover,
+.nvr-shell .nvr-workspace-content .events-page .activity-card:focus-visible,
+.nvr-shell .nvr-workspace-content .camera-page .camera-card:hover,
+.nvr-shell .nvr-workspace-content .camera-page .camera-card:focus-visible {
+  transform: none !important;
+}
+
+/* Status language ---------------------------------------------------------
+ * Connectivity/activity indicators use one size and semantic color mapping.
+ * Tile-specific HUD dots may override this later in live-protect-polish.css.
+ */
+.nvr-shell .nvr-workspace-content .protect-home :is(.camera-dot, .activity-feed-state i),
+.nvr-shell .nvr-workspace-content .protect-live-page .live-summary-pill > span,
+.nvr-shell .nvr-workspace-content .events-page .live-dot,
+.nvr-shell .nvr-workspace-content .playback-workspace .camera-status-dot,
+.nvr-shell .nvr-workspace-content .camera-page :is(.health-badge i, .record-badge i) {
+  width: var(--protect-status-dot) !important;
+  height: var(--protect-status-dot) !important;
+  flex: 0 0 var(--protect-status-dot) !important;
+  border-radius: 50%;
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .camera-dot.success,
+.nvr-shell .nvr-workspace-content .protect-home .activity-feed-state.live i,
+.nvr-shell .nvr-workspace-content .playback-workspace .camera-status-dot.online,
+.nvr-shell .nvr-workspace-content .camera-page .health-badge.online i {
+  background: var(--protect-status-online) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--protect-status-online) 9%, transparent) !important;
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .camera-dot.warning,
+.nvr-shell .nvr-workspace-content .protect-home .activity-feed-state.fallback i,
+.nvr-shell .nvr-workspace-content .events-page .live-dot.offline,
+.nvr-shell .nvr-workspace-content .camera-page .health-badge.unknown i {
+  background: var(--protect-status-warning) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--protect-status-warning) 8%, transparent) !important;
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .camera-dot.danger,
+.nvr-shell .nvr-workspace-content .playback-workspace .camera-status-dot.offline,
+.nvr-shell .nvr-workspace-content .camera-page .health-badge.offline i,
+.nvr-shell .nvr-workspace-content .camera-page .record-badge.active i {
+  background: var(--protect-status-danger) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--protect-status-danger) 8%, transparent) !important;
+}
+
+.nvr-shell .nvr-workspace-content .protect-home .camera-dot.muted,
+.nvr-shell .nvr-workspace-content .playback-workspace .camera-status-dot:not(.online):not(.offline),
+.nvr-shell .nvr-workspace-content .camera-page .health-badge.disabled i {
+  background: var(--protect-status-neutral) !important;
+  box-shadow: none !important;
+}
+
+/* Numeric/status microcopy should feel equally dense across toolbars. */
+.nvr-shell .nvr-workspace-content :is(
+  .protect-home .camera-total,
+  .protect-live-page .profile-pill,
+  .protect-live-page .live-summary-pill,
+  .events-page .activity-summary,
+  .events-page .result-count,
+  .camera-page .result-count,
+  .playback-workspace .playback-sidebar-label
+) {
+  color: var(--nvr-subtle) !important;
+  font-size: 9px !important;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Empty states should read as quiet workspace placeholders instead of large
@@ -126,14 +305,38 @@
   box-shadow: none;
 }
 
+.nvr-shell .nvr-workspace-content .events-page .activity-empty strong,
+.nvr-shell .nvr-workspace-content .camera-page .empty-state strong,
+.nvr-shell .nvr-workspace-content .protect-home .activity-empty strong {
+  color: var(--nvr-text-soft);
+  font-size: 11px;
+  font-weight: 620;
+}
+
+.nvr-shell .nvr-workspace-content .events-page .activity-empty > span,
+.nvr-shell .nvr-workspace-content .camera-page .empty-state > span,
+.nvr-shell .nvr-workspace-content .protect-home .activity-empty > span {
+  color: var(--nvr-muted);
+  font-size: 9px;
+}
+
 /* Cameras already owns a dense single-line command band. Align only its outer
- * rail with the other workspaces and keep the specialized 34px controls.
+ * rail and control vocabulary; keep the specialized device-wall layout.
  */
 .nvr-shell .nvr-workspace-content .camera-page .page-heading,
 .nvr-shell .nvr-workspace-content .camera-page .summary-grid,
 .nvr-shell .nvr-workspace-content .camera-page .toolbar {
   margin-top: 0;
   margin-bottom: 0;
+}
+
+.nvr-shell .nvr-workspace-content .camera-page .search-box .el-input__wrapper,
+.nvr-shell .nvr-workspace-content .camera-page .camera-sort-select .el-select__wrapper,
+.nvr-shell .nvr-workspace-content .camera-page .batch-probe-button,
+.nvr-shell .nvr-workspace-content .camera-page .heading-actions .el-button {
+  min-height: var(--protect-control-height) !important;
+  height: var(--protect-control-height) !important;
+  border-radius: var(--protect-control-radius) !important;
 }
 
 /* Playback's route tabs remain the workspace-level sub-navigation. Align their
@@ -143,6 +346,21 @@
 .nvr-shell .nvr-workspace-content .recordings-tabs {
   padding-left: var(--protect-page-gutter);
   padding-right: var(--protect-page-gutter);
+}
+
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-video-meta {
+  min-height: 36px;
+  align-items: center;
+}
+
+.nvr-shell .nvr-workspace-content .playback-workspace .playback-camera-row {
+  border-radius: var(--protect-control-radius);
+}
+
+@media (max-width: 900px) {
+  .nvr-shell .nvr-workspace-content .camera-page :is(.page-heading, .toolbar, .summary-grid) {
+    min-height: 0 !important;
+  }
 }
 
 @media (max-width: 720px) {
@@ -168,5 +386,15 @@
 
   .nvr-shell .nvr-workspace-content .events-page .event-mode-bar {
     align-items: flex-start;
+  }
+
+  .nvr-shell .nvr-workspace-content :is(
+    .protect-live-page .header-actions,
+    .events-page .activity-toolbar,
+    .events-page .filter-bar,
+    .playback-workspace .playback-video-actions,
+    .camera-page .heading-actions
+  ) {
+    row-gap: 6px;
   }
 }
