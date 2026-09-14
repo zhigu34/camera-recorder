@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import WorkspaceRoute from './WorkspaceRoute.vue'
+
+const WorkspaceRoute = () => import('./WorkspaceRoute.vue')
 
 const routes: RouteRecordRaw[] = [
   { path: '/', name: 'dashboard', component: WorkspaceRoute, meta: { navKey: 'dashboard' } },
