@@ -1,0 +1,453 @@
+/* Protect visual consistency V2: teleported drawers + narrow-screen rhythm.
+ * This layer is visual-only. It intentionally avoids media sizing/state rules
+ * and is loaded last so Element Plus drawers teleported to <body> share the
+ * same product language as the five core workspaces.
+ */
+
+/* Drawer shell ------------------------------------------------------------ */
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) {
+  --protect-drawer-pad: 16px;
+  border-left: 1px solid var(--nvr-border-strong) !important;
+  background: var(--nvr-bg) !important;
+  box-shadow: -16px 0 44px rgba(0, 0, 0, .18) !important;
+}
+
+.el-drawer:has(.activity-detail-image) {
+  width: min(460px, 100vw) !important;
+}
+
+.el-drawer:has(.detail-hero) {
+  width: min(480px, 100vw) !important;
+}
+
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__header {
+  min-height: 56px;
+  margin: 0 !important;
+  padding: 12px var(--protect-drawer-pad) !important;
+  border-bottom: 1px solid var(--nvr-border) !important;
+  color: var(--nvr-text);
+  background: color-mix(in srgb, var(--nvr-surface) 95%, transparent) !important;
+  backdrop-filter: blur(10px);
+}
+
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__title {
+  color: var(--nvr-text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+}
+
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__body {
+  padding: 12px var(--protect-drawer-pad) 20px !important;
+  background: var(--nvr-bg) !important;
+}
+
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__close-btn {
+  width: 30px;
+  height: 30px;
+  margin-left: 8px;
+  border-radius: 7px;
+  color: var(--nvr-muted);
+}
+
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__close-btn:hover,
+:is(
+  .camera-detail-drawer.el-drawer,
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .el-drawer__close-btn:focus-visible {
+  color: var(--nvr-text);
+  background: var(--nvr-hover);
+  outline: 2px solid color-mix(in srgb, var(--nvr-blue) 58%, transparent);
+  outline-offset: 1px;
+}
+
+/* Camera drawer: flatten the section vocabulary without changing hierarchy. */
+.camera-detail-drawer :is(
+  .device-overview,
+  .camera-drawer-shortcuts,
+  .preview-section,
+  .drawer-operation-panel-v2,
+  .detail-section-v2,
+  .drawer-danger-zone
+) {
+  border-color: color-mix(in srgb, var(--nvr-border) 92%, transparent) !important;
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.camera-detail-drawer :is(.device-overview, .camera-drawer-shortcuts, .preview-section, .drawer-operation-panel-v2, .detail-section-v2) {
+  background: var(--nvr-surface) !important;
+}
+
+.camera-detail-drawer .drawer-device-nav {
+  min-height: 34px;
+}
+
+.camera-detail-drawer .drawer-device-nav .el-button,
+.camera-detail-drawer .drawer-actions-v2 .el-button {
+  min-height: 32px !important;
+  height: 32px !important;
+  margin: 0 !important;
+  border-radius: 7px !important;
+  font-size: 9px;
+}
+
+.camera-detail-drawer .drawer-actions-v2 {
+  gap: 6px !important;
+}
+
+.camera-detail-drawer .device-overview-visual {
+  border-radius: 10px !important;
+  box-shadow: none !important;
+}
+
+.camera-detail-drawer .preview-panel-v2 {
+  border-radius: 8px !important;
+}
+
+/* Activity + system-event drawers --------------------------------------- */
+.el-drawer:has(.activity-detail-image) .activity-detail-image,
+.el-drawer:has(.detail-hero) .detail-hero,
+.el-drawer:has(.detail-hero) .metadata-block pre {
+  border: 1px solid var(--nvr-border) !important;
+  border-radius: 9px !important;
+  box-shadow: none !important;
+}
+
+.el-drawer:has(.activity-detail-image) .activity-detail-image {
+  overflow: hidden;
+  background: #05090d;
+}
+
+.el-drawer:has(.activity-detail-image) .activity-detail-title {
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  margin-top: 10px;
+}
+
+.el-drawer:has(.activity-detail-image) .activity-detail-title strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.el-drawer:has(.activity-detail-image) .activity-detail-title > span {
+  font-size: 9px;
+}
+
+.el-drawer:has(.activity-detail-image) .activity-dot {
+  width: 6px;
+  height: 6px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--nvr-blue) 10%, transparent);
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .detail-list {
+  margin: 14px 0 0;
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .detail-list > div {
+  grid-template-columns: 92px minmax(0, 1fr);
+  min-height: 36px;
+  align-items: center;
+  padding: 7px 2px;
+  border-bottom-color: color-mix(in srgb, var(--nvr-border) 88%, transparent);
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .detail-list dt {
+  color: var(--nvr-subtle);
+  font-size: 9px;
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .detail-list dd {
+  color: var(--nvr-text-soft);
+  font-size: 10px;
+}
+
+.el-drawer:has(.detail-hero) .detail-hero {
+  gap: 10px;
+  padding: 12px;
+  background: var(--nvr-surface) !important;
+}
+
+.el-drawer:has(.detail-hero) .detail-hero strong {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.el-drawer:has(.detail-hero) .detail-hero > div {
+  gap: 5px;
+}
+
+.el-drawer:has(.detail-hero) .detail-icon {
+  width: 20px;
+  flex-basis: 20px;
+}
+
+.el-drawer:has(.detail-hero) .metadata-block {
+  margin-top: 14px;
+}
+
+.el-drawer:has(.detail-hero) .metadata-block pre {
+  max-height: 240px;
+  padding: 10px;
+  background: var(--nvr-surface) !important;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--nvr-border);
+}
+
+:is(
+  .el-drawer:has(.activity-detail-image),
+  .el-drawer:has(.detail-hero)
+) .drawer-actions .el-button {
+  min-height: 32px;
+  height: 32px;
+  margin: 0 !important;
+  padding: 0 10px;
+  border-radius: 7px !important;
+  box-shadow: none !important;
+  font-size: 9px;
+}
+
+/* Workspace responsive finish ------------------------------------------- */
+@media (max-width: 960px) {
+  .nvr-shell .nvr-workspace-content .events-page .activity-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .activity-summary {
+    flex: 1 1 auto;
+    margin-left: 0 !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .filter-bar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: center;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .search-input {
+    grid-column: 1 / -1;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page :is(.filter-select, .camera-select) {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .result-count {
+    margin-left: 0 !important;
+    justify-self: end;
+  }
+
+  .nvr-shell .nvr-workspace-content .playback-workspace .playback-video-meta {
+    flex-wrap: wrap;
+  }
+
+  .nvr-shell .nvr-workspace-content .playback-workspace .playback-video-actions {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 720px) {
+  :is(
+    .camera-detail-drawer.el-drawer,
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) {
+    --protect-drawer-pad: 12px;
+    width: 100vw !important;
+  }
+
+  :is(
+    .camera-detail-drawer.el-drawer,
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .el-drawer__header {
+    min-height: 52px;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+  :is(
+    .camera-detail-drawer.el-drawer,
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .el-drawer__body {
+    padding-top: 10px !important;
+    padding-bottom: 16px !important;
+  }
+
+  .camera-detail-drawer .drawer-title {
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+
+  .camera-detail-drawer .drawer-title-states {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .camera-detail-drawer .device-overview {
+    grid-template-columns: 54px minmax(0, 1fr) !important;
+    gap: 10px !important;
+  }
+
+  .camera-detail-drawer .device-overview-visual {
+    width: 54px !important;
+    height: 54px !important;
+    padding: 8px !important;
+  }
+
+  .camera-detail-drawer .device-overview-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camera-detail-drawer .drawer-actions-v2,
+  :is(
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .drawer-actions {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .camera-detail-drawer .drawer-actions-v2 .el-button,
+  :is(
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .drawer-actions .el-button {
+    width: 100%;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .event-mode-tabs {
+    width: 100%;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .event-mode-tabs button {
+    flex: 1 1 0;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .activity-toolbar,
+  .nvr-shell .nvr-workspace-content .events-page .filter-bar {
+    display: grid !important;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page :is(.activity-date, .activity-camera, .search-input, .filter-select, .camera-select) {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page :is(.activity-summary, .activity-live-note, .result-count) {
+    margin-left: 0 !important;
+    justify-self: start;
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .actions-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .nvr-shell .nvr-workspace-content .playback-workspace .playback-video-meta {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nvr-shell .nvr-workspace-content .playback-workspace .playback-video-actions {
+    width: 100%;
+    gap: 6px;
+  }
+
+  .nvr-shell .nvr-workspace-content .camera-page .heading-actions {
+    width: 100%;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px !important;
+  }
+
+  .nvr-shell .nvr-workspace-content .camera-page .heading-actions .el-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .camera-detail-drawer .device-overview-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-detail-drawer .drawer-actions-v2,
+  :is(
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .drawer-actions {
+    grid-template-columns: 1fr;
+  }
+
+  :is(
+    .el-drawer:has(.activity-detail-image),
+    .el-drawer:has(.detail-hero)
+  ) .detail-list > div {
+    grid-template-columns: 80px minmax(0, 1fr);
+  }
+
+  .nvr-shell .nvr-workspace-content .events-page .metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .nvr-shell .nvr-workspace-content .camera-page .heading-actions {
+    grid-template-columns: 1fr;
+  }
+}
