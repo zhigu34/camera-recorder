@@ -49,13 +49,16 @@ describe('playback transport helpers', () => {
 })
 
 describe('playback transport integration', () => {
-  it('uses one custom overlay while retaining workspace wall-clock skip semantics', () => {
+  it('uses one custom overlay and a scoped transport store while retaining workspace wall-clock skip semantics', () => {
     expect(playerSource).toContain('import PlaybackMediaControls')
     expect(playerSource).toContain('<PlaybackMediaControls')
     expect(playerSource).not.toContain('\n        controls\n')
     expect(controlsSource).toContain('aria-label="回放媒体控制"')
-    expect(controlsSource).toContain("dispatchTransport('skip', deltaSeconds)")
-    expect(bridgeSource).toContain("window.addEventListener('camera-recorder:playback-skip', handleSkip)")
+    expect(controlsSource).toContain('transportStore.requestSkip(deltaSeconds)')
+    expect(bridgeSource).toContain("usePlaybackTransportStore")
+    expect(bridgeSource).toContain("if (next.type === 'skip')")
+    expect(controlsSource).not.toContain('new CustomEvent')
+    expect(bridgeSource).not.toContain('window.addEventListener')
     expect(workspaceSource).toContain('@skip="skipPlayback"')
     expect(workspaceSource).toContain('saveSkipInterval(value, playbackStorage())')
   })

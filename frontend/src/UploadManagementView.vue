@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Cloudy, Refresh, Search, Setting, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { useCameraStore } from './stores/cameras'
+import { parsePositiveQueryId, uploadTaskLocation } from './utils/adminDeepLinks'
 
 interface UploadTask {
   id: number
@@ -39,12 +43,6 @@ interface Recording {
   upload_status: string
 }
 
-interface Camera {
-  id: number
-  name: string
-  ip: string
-}
-
 interface UploadStreamMessage {
   type?: 'uploads.snapshot' | 'uploads.delta'
   tasks?: UploadTask[]
@@ -57,12 +55,16 @@ const emit = defineEmits<{
   (event: 'open-recordings'): void
 }>()
 
+const route = useRoute()
+const router = useRouter()
+const cameraStore = useCameraStore()
+const { cameras } = storeToRefs(cameraStore)
+
 const loading = ref(false)
 const scanning = ref(false)
 const tasks = ref<UploadTask[]>([])
 const status = ref<UploadStatus | null>(null)
 const recordings = ref<Recording[]>([])
-const cameras = ref<Camera[]>([])
 const searchText = ref('')
 const statusFilter = ref('')
 const detailVisible = ref(false)
@@ -144,21 +146,52 @@ function formatBytes(bytes?: number | null) {
   return `${(value / 1024 ** 2).toFixed(1)} MB`
 }
 
+function clearTaskDeepLink() {
+  const nextQuery = { ...route.query }
+  delete nextQuery.task_id
+  void router.replace({ path: '/uploads', query: nextQuery })
+}
+
+function syncDeepLinkedTask(showMissing = false) {
+  const taskId = parsePositiveQueryId(route.query.task_id)
+  if (taskId === null) {
+    detailVisible.value = false
+    activeTask.value = null
+    return
+  }
+  const task = tasks.value.find((item) => item.id === taskId)
+  if (!task) {
+    if (showMissing) ElMessage.warning(`未找到上传任务 #${taskId}`)
+    detailVisible.value = false
+    activeTask.value = null
+    clearTaskDeepLink()
+    return
+  }
+  activeTask.value = task
+  detailVisible.value = true
+}
+
 function openDetail(task: UploadTask) {
   activeTask.value = task
   detailVisible.value = true
+  void router.push(uploadTaskLocation(task.id))
+}
+
+function closeDetail() {
+  detailVisible.value = false
+  activeTask.value = null
+  if (parsePositiveQueryId(route.query.task_id) !== null) clearTaskDeepLink()
 }
 
 async function refreshReferences() {
   if (referencesRefreshing) return
   referencesRefreshing = true
   try {
-    const [recordingRes, cameraRes] = await Promise.all([
+    const [recordingRes] = await Promise.all([
       axios.get<Recording[]>('/api/recordings?limit=1000'),
-      axios.get<Camera[]>('/api/cameras'),
+      cameraStore.load(true),
     ])
     recordings.value = recordingRes.data
-    cameras.value = cameraRes.data
   } catch {
     // Keep the previous maps; task rows can still fall back to remote path / IDs.
   } finally {
@@ -180,9 +213,10 @@ function applyTasks(incoming: UploadTask[], removedIds: number[] = []) {
   if (activeTask.value) {
     const current = byId.get(activeTask.value.id)
     if (current) activeTask.value = current
-    else detailVisible.value = false
+    else closeDetail()
   }
   refreshReferencesIfNeeded(incoming)
+  syncDeepLinkedTask(false)
 }
 
 function wsUrl() {
@@ -232,6 +266,7 @@ function connectStream() {
         tasks.value = (message.tasks || []).slice(0, 1000)
         if (message.status) status.value = message.status
         refreshReferencesIfNeeded(tasks.value)
+        syncDeepLinkedTask(false)
       } else if (message.type === 'uploads.delta') {
         applyTasks(message.tasks || [], message.removed_ids || [])
         if (message.status) status.value = message.status
@@ -279,16 +314,16 @@ async function scan() {
 async function load(showLoading = true) {
   if (showLoading) loading.value = true
   try {
-    const [statusRes, taskRes, recordingRes, cameraRes] = await Promise.all([
+    const [statusRes, taskRes, recordingRes] = await Promise.all([
       axios.get<UploadStatus>('/api/uploads'),
       axios.get<UploadTask[]>('/api/uploads/tasks?limit=1000'),
       axios.get<Recording[]>('/api/recordings?limit=1000'),
-      axios.get<Camera[]>('/api/cameras'),
+      cameraStore.load(),
     ])
     status.value = statusRes.data
     tasks.value = taskRes.data
     recordings.value = recordingRes.data
-    cameras.value = cameraRes.data
+    syncDeepLinkedTask(false)
   } catch (error) {
     if (showLoading) ElMessage.error(axios.isAxiosError(error) ? error.response?.data?.detail || error.message : '上传管理加载失败')
   } finally {
@@ -296,9 +331,10 @@ async function load(showLoading = true) {
   }
 }
 
+watch(() => route.query.task_id, () => syncDeepLinkedTask(false))
 onMounted(() => {
   mounted = true
-  void load().finally(connectStream)
+  void load().then(() => syncDeepLinkedTask(true)).finally(connectStream)
 })
 onBeforeUnmount(() => {
   mounted = false
@@ -381,7 +417,7 @@ onBeforeUnmount(() => {
       </el-table>
     </section>
 
-    <el-drawer v-model="detailVisible" title="上传任务详情" size="460px">
+    <el-drawer v-model="detailVisible" title="上传任务详情" size="460px" @closed="closeDetail">
       <template v-if="activeTask">
         <div class="drawer-head">
           <strong>任务 #{{ activeTask.id }}</strong>

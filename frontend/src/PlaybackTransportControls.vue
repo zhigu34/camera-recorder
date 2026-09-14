@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, watch } from 'vue'
+import { watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { usePlaybackTransportStore } from './stores/playbackTransport'
 
 const props = defineProps<{
   active: boolean
@@ -13,45 +15,21 @@ const emit = defineEmits<{
   'update:skipSeconds': [value: number]
 }>()
 
-function numericDetail(event: Event) {
-  return Number((event as CustomEvent<number>).detail)
-}
+const transportStore = usePlaybackTransportStore()
+const { command } = storeToRefs(transportStore)
 
-function handleSkip(event: Event) {
-  if (!props.active) return
-  const value = numericDetail(event)
-  if (Number.isFinite(value)) emit('skip', value)
-}
-
-function handleRate(event: Event) {
-  const value = numericDetail(event)
-  if (Number.isFinite(value)) emit('update:playbackRate', value)
-}
-
-function handleInterval(event: Event) {
-  const value = numericDetail(event)
-  if (Number.isFinite(value)) emit('update:skipSeconds', value)
-}
-
-function syncInterval() {
-  if (typeof window === 'undefined') return
-  window.dispatchEvent(new CustomEvent('camera-recorder:playback-interval-sync', { detail: props.skipSeconds }))
-}
-
-onMounted(() => {
-  window.addEventListener('camera-recorder:playback-skip', handleSkip)
-  window.addEventListener('camera-recorder:playback-rate', handleRate)
-  window.addEventListener('camera-recorder:playback-interval', handleInterval)
-  syncInterval()
-})
-
-watch(() => props.skipSeconds, syncInterval)
-
-onBeforeUnmount(() => {
-  window.removeEventListener('camera-recorder:playback-skip', handleSkip)
-  window.removeEventListener('camera-recorder:playback-rate', handleRate)
-  window.removeEventListener('camera-recorder:playback-interval', handleInterval)
-})
+watch(command, (next) => {
+  if (!next || !Number.isFinite(next.value)) return
+  if (next.type === 'skip') {
+    if (props.active) emit('skip', next.value)
+    return
+  }
+  if (next.type === 'rate') {
+    emit('update:playbackRate', next.value)
+    return
+  }
+  emit('update:skipSeconds', next.value)
+}, { flush: 'sync' })
 </script>
 
 <template>
