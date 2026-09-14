@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Bell, Setting } from '@element-plus/icons-vue'
 import AlertSettingsView from './AlertSettingsView.vue'
 import SystemSettingsView from './SystemSettingsView.vue'
@@ -8,20 +9,28 @@ const emit = defineEmits<{
   (event: 'open-events'): void
 }>()
 
+const route = useRoute()
+const router = useRouter()
 const activeSection = ref<'system' | 'alerts'>('system')
 
-function syncFromUrl() {
-  const section = new URLSearchParams(window.location.search).get('section')
+async function syncFromRoute() {
+  const raw = Array.isArray(route.query.section) ? route.query.section[0] : route.query.section
+  const section = raw || 'system'
   activeSection.value = section === 'alerts' ? 'alerts' : 'system'
+  if (section === 'archive') {
+    await nextTick()
+    document.getElementById('archive-settings')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 }
 
 function setSection(section: 'system' | 'alerts') {
   activeSection.value = section
-  const next = section === 'alerts' ? '/settings?section=alerts' : '/settings'
-  window.history.replaceState({}, '', next)
+  const query = section === 'alerts' ? { section: 'alerts' } : {}
+  void router.replace({ path: '/settings', query })
 }
 
-onMounted(syncFromUrl)
+watch(() => route.query.section, () => { void syncFromRoute() })
+onMounted(() => { void syncFromRoute() })
 </script>
 
 <template>
