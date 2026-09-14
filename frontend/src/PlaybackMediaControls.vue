@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
+import { loadSkipInterval, PLAYBACK_RATES, SKIP_INTERVALS } from './utils/playbackTransport'
 
 const props = defineProps<{
   active: boolean
@@ -21,8 +21,16 @@ const emit = defineEmits<{
   fullscreen: []
 }>()
 
+function playbackStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
+
 const controlsVisible = ref(true)
-const effectiveSkipSeconds = ref(props.skipSeconds)
+const effectiveSkipSeconds = ref(loadSkipInterval(playbackStorage()))
 let hideTimer: number | null = null
 
 function dispatchTransport(type: 'skip' | 'rate' | 'interval', value: number) {
@@ -86,7 +94,9 @@ watch(() => props.playing, () => {
   controlsVisible.value = true
   scheduleHide()
 })
-watch(() => props.skipSeconds, (value) => { effectiveSkipSeconds.value = value })
+watch(() => props.skipSeconds, (value) => {
+  if (SKIP_INTERVALS.includes(value as (typeof SKIP_INTERVALS)[number])) effectiveSkipSeconds.value = value
+})
 
 onMounted(() => window.addEventListener('camera-recorder:playback-interval-sync', handleIntervalSync))
 onBeforeUnmount(() => {
