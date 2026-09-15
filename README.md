@@ -20,6 +20,7 @@
 - 本地与 OpenList 云端录像统一时间轴回放
 - 1 / 4 / 9 宫格实时预览
 - 事件中心、邮件告警、系统健康、24h/72h 稳定性验收
+- 运维日志、脱敏配置备份/恢复、操作审计与 Prometheus 基础指标
 - Vue 3 + TypeScript + Vue Router + Pinia 管理界面
 - Docker Compose 一键部署，支持 amd64 / arm64
 
@@ -63,6 +64,8 @@ git pull && ./deploy.sh
 
 `deploy.sh` 会检查 Docker/Compose/Buildx、FFmpeg 本地包、Compose 配置、镜像构建和服务健康状态。已有且有效的 FFmpeg 包与 Docker 层会直接复用；普通前端改动只重建前端，不重启录像 backend。
 
+涉及正式升级、数据库迁移或回滚前，先阅读：[V1 发布、升级与回滚](docs/RELEASE.md)。运维页导出的 JSON 是脱敏配置备份，不替代 `.env`、SQLite 和 OpenList 持久化数据的完整灾备。
+
 服务默认地址：
 
 ```text
@@ -91,7 +94,8 @@ openlist-data/  OpenList 配置与数据库
 5. 手动开始录像，或在 `录制计划` 中启用自动录像。
 6. 在 `实时监控` 查看预览，在 `录像回放` 查看时间轴和云端归档录像。
 7. 在 `系统设置` 配置切片、磁盘阈值、OpenList/WebDAV 和本地保留策略。
-8. 在 `告警设置` 配置 SMTP 与通知策略。
+8. 在 `通知与告警` 配置 SMTP 与通知策略。
+9. 在 `系统设置 → 运维工具` 查看日志、审计、配置备份和 Prometheus 指标。
 
 ## OpenList / WebDAV 归档
 
@@ -136,6 +140,8 @@ WebDAV URL: http://openlist:5244/dav
 - [系统架构](docs/ARCHITECTURE.md)
 - [开发设计](docs/DEVELOPMENT.md)
 - [OpenList / WebDAV](docs/OPENLIST.md)
+- [V1 当前状态](docs/V1_STATUS.md)
+- [V1 发布、升级与回滚](docs/RELEASE.md)
 - [版本路线](docs/ROADMAP.md)
 
 ## 安全
@@ -147,8 +153,7 @@ WebDAV URL: http://openlist:5244/dav
 
 ## 当前重点
 
-- 前端路由、共享运行状态和实体深链接继续收敛
-- 10 路 24h / 72h 真实稳定性验证与阈值校准
-- Chrome / Safari / Edge 本地与云端回放实机验收
-- 继续清理旧兼容代码与重复状态获取
-- 更细粒度录像健康评分与更多告警通道
+- 完成 V1.0 外部实机验收：10 路 24h / 72h、故障恢复、磁盘保护与 OpenList 中断恢复
+- 完成 Chrome / Safari / Edge 本地与云端 H.264 / HEVC 回放矩阵
+- 根据真实长期运行数据继续校准录像健康、连接监控和告警阈值
+- V1.0 验收通过前不扩展 ONVIF、事件录像、人物检测等 Post-V1 功能

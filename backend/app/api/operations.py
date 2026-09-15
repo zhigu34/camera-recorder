@@ -28,7 +28,11 @@ from app.services.notification_settings import (
     parse_email_recipients,
     serialize_email_recipients,
 )
-from app.services.recorder_manager import recorder_manager
+from app.services.recorder_manager import (
+    CAMERA_LOG_BACKUPS,
+    CAMERA_LOG_MAX_BYTES,
+    recorder_manager,
+)
 from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.system_settings import get_or_create_system_settings
 
@@ -123,6 +127,16 @@ async def list_operation_logs() -> list[dict]:
             }
         )
     return result
+
+
+@router.get("/api/operations/log-policy")
+async def operation_log_policy() -> dict:
+    return {
+        "camera_log_strategy": "size",
+        "camera_log_max_bytes": CAMERA_LOG_MAX_BYTES,
+        "camera_log_backups": CAMERA_LOG_BACKUPS,
+        "deploy_log_strategy": "truncate_each_deploy",
+    }
 
 
 @router.get("/api/operations/logs/{name}")

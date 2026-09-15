@@ -5,7 +5,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.system_settings import SystemSettings
 from app.schemas.system_settings import SystemSettingsRead, SystemSettingsUpdate
-from app.services.event_log import add_event
+from app.services.event_log import add_audit_event, add_event
 from app.services.system_settings import (
     get_or_create_system_settings,
     load_runtime_settings,
@@ -73,6 +73,11 @@ async def update_settings(
         category="system",
         code="system.settings_updated",
         message="系统运行参数已更新",
+    )
+    add_audit_event(
+        db,
+        code="operations.system_settings_updated",
+        message="系统设置已修改",
     )
     await db.commit()
     await db.refresh(row)
