@@ -207,6 +207,20 @@ def _diagnose_gap_cause(
                 "high",
             )
 
+    # A persisted backend restart is bounded temporal evidence. It is weaker
+    # than camera/FFmpeg-specific events, but stronger than a generic recorder
+    # state sample because the restart itself can explain that unavailable state.
+    for event in events:
+        if event.code != _BACKEND_STARTED_CODE:
+            continue
+        created_at = _event_created_at(event)
+        if created_at is not None and padded_start <= created_at <= padded_end:
+            return (
+                "backend_restart",
+                f"缺口附近记录到 Backend 启动：{created_at.isoformat()}",
+                "medium",
+            )
+
     unavailable = [
         sample
         for sample in expected_samples
@@ -219,20 +233,6 @@ def _diagnose_gap_cause(
             f"缺口期间 Recorder 健康采样异常：{', '.join(states)}",
             "medium",
         )
-
-    # Backend startup is intentionally weak/bounded evidence. It explains only
-    # intervals temporally adjacent to a persisted restart marker and never wins
-    # over camera/recorder-specific evidence above.
-    for event in events:
-        if event.code != _BACKEND_STARTED_CODE:
-            continue
-        created_at = _event_created_at(event)
-        if created_at is not None and padded_start <= created_at <= padded_end:
-            return (
-                "backend_restart",
-                f"缺口附近记录到 Backend 启动：{created_at.isoformat()}",
-                "medium",
-            )
 
     if not gap_samples:
         return (
