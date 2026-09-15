@@ -12,6 +12,7 @@ from app.services.camera_config import runtime_config
 from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule import recording_schedule_allows, schedule_label
+from app.services.recording_start import start_regular_recorder
 from app.services.system_settings import load_runtime_settings
 
 _POLL_INTERVAL_SECONDS = 10.0
@@ -242,7 +243,7 @@ class RecordingScheduleManager:
                         # Explicit schedules segment relative to actual start time;
                         # 24/7 auto-record preserves the global clock alignment.
                         align_override = False if camera.recording_schedule_enabled else None
-                        await recorder_manager.start(
+                        await start_regular_recorder(
                             runtime_config(camera, align_segments_to_clock=align_override)
                         )
                         self._managed.add(camera.id)
