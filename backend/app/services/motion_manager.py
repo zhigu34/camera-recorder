@@ -296,8 +296,7 @@ class MotionDetectionManager:
                     end_recording_event(camera_id)
 
             worker = self.worker_factory(config, on_event=on_event, on_status=on_status)
-            if hasattr(worker, "on_event_started"):
-                worker.on_event_started = on_event_started
+            worker.on_event_started = on_event_started
             try:
                 await worker.run()
                 if not self._running:
