@@ -15,33 +15,41 @@ class OnvifDeviceAdapter:
         if metadata is None:
             raise ValueError("ONVIF metadata is missing; re-add or repair the camera")
 
-        main_uri = str(metadata.recording_uri or "").strip()
+        main_uri = str(getattr(metadata, "recording_uri", None) or "").strip()
         if not main_uri:
             raise ValueError("ONVIF recording profile has no stream URI")
 
         auxiliary_uri = (
-            str(metadata.preview_uri or "").strip()
+            str(getattr(metadata, "preview_uri", None) or "").strip()
             if purpose == "preview"
-            else str(metadata.detection_uri or "").strip()
+            else str(getattr(metadata, "detection_uri", None) or "").strip()
         )
+        recording_token = getattr(metadata, "recording_profile_token", None)
         auxiliary_token = (
-            metadata.preview_profile_token
+            getattr(metadata, "preview_profile_token", None)
             if purpose == "preview"
-            else metadata.detection_profile_token
+            else getattr(metadata, "detection_profile_token", None)
         )
-        recording_token = metadata.recording_profile_token
+        auxiliary_is_sub = bool(
+            auxiliary_uri
+            and (
+                auxiliary_token != recording_token
+                if auxiliary_token is not None or recording_token is not None
+                else auxiliary_uri != main_uri
+            )
+        )
 
         if purpose == "recording" or preferred == "main":
             selected_uri = main_uri
             role = "main"
         elif preferred == "sub":
-            if not auxiliary_uri or auxiliary_token == recording_token:
+            if not auxiliary_is_sub:
                 raise ValueError("ONVIF sub stream is not available")
             selected_uri = auxiliary_uri
             role = "sub"
         elif auxiliary_uri:
             selected_uri = auxiliary_uri
-            role = "sub" if auxiliary_token != recording_token else "main"
+            role = "sub" if auxiliary_is_sub else "main"
         else:
             selected_uri = main_uri
             role = "main"
