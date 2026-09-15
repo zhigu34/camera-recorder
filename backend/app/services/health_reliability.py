@@ -18,15 +18,26 @@ _FAILURE_CODES = ("camera.ffmpeg_start_failed", "camera.ffmpeg_exited")
 _STREAK_CODE = "camera.ffmpeg_failure_streak"
 _RESTORED_CODE = "camera.connection_restored"
 _SEGMENT_FAILURE_CODE = "recording.segment_processing_failed"
-_EVENT_CODES = (*_FAILURE_CODES, _STREAK_CODE, _RESTORED_CODE, _SEGMENT_FAILURE_CODE)
+_MANUAL_DELETE_CODE = "recording.deleted"
+_BACKEND_STARTED_CODE = "system.backend_started"
+_EVENT_CODES = (
+    *_FAILURE_CODES,
+    _STREAK_CODE,
+    _RESTORED_CODE,
+    _SEGMENT_FAILURE_CODE,
+    _MANUAL_DELETE_CODE,
+    _BACKEND_STARTED_CODE,
+)
 _MIN_RECORDING_GAP_SECONDS = 5.0
 _EVENT_MATCH_PADDING_SECONDS = 60.0
 
 GAP_CAUSE_LABELS = {
+    "manual_deletion": "手动删除",
     "segment_processing_failed": "片段处理失败",
     "camera_offline": "摄像头断流",
     "ffmpeg_failure": "FFmpeg 异常",
     "recorder_unavailable": "Recorder 未处于录像状态",
+    "backend_restart": "Backend 重启",
     "unknown": "未知原因",
 }
 
@@ -129,6 +140,31 @@ def _diagnose_gap_cause(
     padded_start = gap_start - timedelta(seconds=_EVENT_MATCH_PADDING_SECONDS)
     padded_end = gap_end + timedelta(seconds=_EVENT_MATCH_PADDING_SECONDS)
 
+    # A manual deletion is an explicit explanation and must outrank incidental
+    # processing/network failures that happened near the same interval.
+    for event in events:
+        if event.code != _MANUAL_DELETE_CODE:
+            continue
+        metadata = _metadata(event)
+        if str(metadata.get("reason") or "manual") != "manual":
+            continue
+        deleted_start = _parse_iso(metadata.get("started_at"))
+        deleted_end = _parse_iso(metadata.get("ended_at"))
+        if deleted_start is not None and deleted_end is not None:
+            if not _overlaps(deleted_start, deleted_end, gap_start, gap_end):
+                continue
+        else:
+            event_time = _event_created_at(event)
+            if event_time is None or not padded_start <= event_time <= padded_end:
+                continue
+        recording_id = metadata.get("recording_id")
+        suffix = f"（录像 #{recording_id}）" if recording_id else ""
+        return (
+            "manual_deletion",
+            f"缺口对应的录像被手动删除{suffix}",
+            "high",
+        )
+
     for event in events:
         if event.code != _SEGMENT_FAILURE_CODE:
             continue
@@ -184,15 +220,29 @@ def _diagnose_gap_cause(
             "medium",
         )
 
+    # Backend startup is intentionally weak/bounded evidence. It explains only
+    # intervals temporally adjacent to a persisted restart marker and never wins
+    # over camera/recorder-specific evidence above.
+    for event in events:
+        if event.code != _BACKEND_STARTED_CODE:
+            continue
+        created_at = _event_created_at(event)
+        if created_at is not None and padded_start <= created_at <= padded_end:
+            return (
+                "backend_restart",
+                f"缺口附近记录到 Backend 启动：{created_at.isoformat()}",
+                "medium",
+            )
+
     if not gap_samples:
         return (
             "unknown",
-            "缺口期间没有健康采样，也未找到匹配的断流、FFmpeg 或片段处理失败事件",
+            "缺口期间没有健康采样，也未找到匹配的删除、重启、断流、FFmpeg 或片段处理失败事件",
             "low",
         )
     return (
         "unknown",
-        "缺口期间 Recorder 健康采样均为 RECORDING，但未找到匹配的断流、FFmpeg 或片段处理失败事件",
+        "缺口期间 Recorder 健康采样均为 RECORDING，但未找到匹配的删除、重启、断流、FFmpeg 或片段处理失败事件",
         "low",
     )
 
@@ -484,6 +534,7 @@ async def health_reliability(*, hours: int) -> dict[str, Any]:
         recordings_by_camera[recording.camera_id].append(recording)
 
     events_by_camera: dict[int, list[Event]] = defaultdict(list)
+    global_events: list[Event] = []
     for event in events:
         if event.camera_id is not None:
             events_by_camera[event.camera_id].append(event)
@@ -492,6 +543,9 @@ async def health_reliability(*, hours: int) -> dict[str, Any]:
             camera_id = int(_metadata(event).get("camera_id") or 0)
             if camera_id > 0:
                 events_by_camera[camera_id].append(event)
+                continue
+        if event.code == _BACKEND_STARTED_CODE:
+            global_events.append(event)
 
     max_ffmpeg_failures = max(1, int(CRITERIA["max_ffmpeg_failures_per_24h"] * hours / 24))
     camera_rows: list[dict[str, Any]] = []
@@ -533,7 +587,7 @@ async def health_reliability(*, hours: int) -> dict[str, Any]:
             and recording.has_video == 1
         )
 
-        camera_events = events_by_camera.get(camera.id, [])
+        camera_events = [*events_by_camera.get(camera.id, []), *global_events]
         failures = [event for event in camera_events if event.code in _FAILURE_CODES]
         streaks = [event for event in camera_events if event.code == _STREAK_CODE]
         restored = [event for event in camera_events if event.code == _RESTORED_CODE]
