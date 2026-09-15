@@ -3,7 +3,7 @@ import { computed, markRaw, onBeforeUnmount, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { RouterView, useRoute, useRouter } from 'vue-router'
 import {
-  Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
+  Aim, Bell, Calendar, Camera, CircleCheckFilled, DataAnalysis, Expand, Files, Fold,
   Monitor, Moon, Setting, Sunny, UploadFilled, VideoCamera, WarningFilled,
 } from '@element-plus/icons-vue'
 
@@ -24,6 +24,7 @@ const navEntries: NavEntry[] = [
   { key: 'preview', label: '实时监控', description: '实时画面与码流状态', target: '/preview', group: 'core', icon: markRaw(VideoCamera) },
   { key: 'recordings', label: '录像', description: '连续回放与录像管理', target: '/recordings/playback', group: 'core', icon: markRaw(Files) },
   { key: 'cameras', label: '摄像头', description: '设备、码流与录像配置', target: '/cameras', group: 'core', icon: markRaw(Camera) },
+  { key: 'detection', label: '事件检测', description: '移动检测与智能事件来源', target: '/event-detection', group: 'core', icon: markRaw(Aim) },
   { key: 'schedule', label: '录制计划', description: '自动录像与时间窗口', target: '/recording-schedules', group: 'core', icon: markRaw(Calendar) },
   { key: 'health', label: '系统健康', description: '录像服务、存储与稳定性', target: '/health-center', group: 'ops', icon: markRaw(Monitor) },
   { key: 'uploads', label: '上传管理', description: 'OpenList 归档任务与传输', target: '/uploads', group: 'ops', icon: markRaw(UploadFilled) },

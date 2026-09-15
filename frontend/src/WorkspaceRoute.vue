@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 const CamerasWorkspace = defineAsyncComponent(() => import('./CamerasWorkspace.vue'))
 const DashboardView = defineAsyncComponent(() => import('./DashboardView.vue'))
 const EventCenterView = defineAsyncComponent(() => import('./EventCenterView.vue'))
+const EventDetectionView = defineAsyncComponent(() => import('./EventDetectionView.vue'))
 const HealthCenterView = defineAsyncComponent(() => import('./HealthCenterView.vue'))
 const PreviewView = defineAsyncComponent(() => import('./PreviewView.vue'))
 const RecordingsWorkspace = defineAsyncComponent(() => import('./RecordingsWorkspace.vue'))
@@ -24,6 +25,7 @@ function go(path: string) {
 <template>
   <DashboardView v-if="renderKey === 'dashboard'" />
   <CamerasWorkspace v-else-if="renderKey === 'cameras'" @open-preview="go('/preview')" />
+  <EventDetectionView v-else-if="renderKey === 'detection'" />
   <RecordingsWorkspace v-else-if="renderKey === 'recordings'" />
   <UploadManagementView v-else-if="renderKey === 'uploads'" @open-settings="go('/settings?section=archive')" @open-recordings="go('/recordings/manage')" />
   <EventCenterView v-else-if="renderKey === 'events'" @open-cameras="go('/cameras')" @open-recordings="go('/recordings/playback')" @open-uploads="go('/uploads')" @open-health="go('/health-center')" />

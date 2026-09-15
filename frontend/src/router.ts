@@ -23,6 +23,7 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/cameras', name: 'cameras', component: WorkspaceRoute, meta: { navKey: 'cameras' } },
   { path: '/cameras/batch', name: 'camera-batch', component: WorkspaceRoute, meta: { navKey: 'cameras' } },
+  { path: '/event-detection', name: 'event-detection', component: WorkspaceRoute, meta: { navKey: 'detection' } },
   { path: '/recording-schedules', name: 'schedule', component: WorkspaceRoute, meta: { navKey: 'schedule' } },
   { path: '/health-center', name: 'health', component: WorkspaceRoute, meta: { navKey: 'health' } },
   { path: '/uploads', name: 'uploads', component: WorkspaceRoute, meta: { navKey: 'uploads' } },
