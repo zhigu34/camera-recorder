@@ -35,26 +35,9 @@ def _ratio(value: str | None) -> tuple[int | None, int | None, float | None]:
     return ratio.numerator, ratio.denominator, float(ratio)
 
 
-async def probe_camera(
-    *,
-    ip: str,
-    port: int,
-    username: str,
-    password: str,
-    rtsp_path: str,
-    rtsp_timeout_us: int,
-) -> dict:
-    """Probe video and audio in one RTSP session.
+async def probe_stream_uri(*, stream_uri: str, rtsp_timeout_us: int) -> dict:
+    """Probe video and audio from an already-resolved stream URI."""
 
-    Audio/video stream metadata must come from the same ffprobe process. We do
-    not compare RTSP stream ``start_time`` values because independent RTP clock
-    origins are not a reliable A/V sync metric.
-
-    ``rtsp_timeout_us`` is supplied from SQLite-backed runtime settings. Keep
-    only the internal process watchdog timeout in ``app.core.config``.
-    """
-
-    url = build_rtsp_url(ip, port, username, password, rtsp_path)
     command = [
         settings.ffprobe_bin,
         "-v",
@@ -66,7 +49,7 @@ async def probe_camera(
         "-show_streams",
         "-of",
         "json",
-        url,
+        stream_uri,
     ]
 
     try:
@@ -138,3 +121,20 @@ async def probe_camera(
         "channels": audio.get("channels") if audio else None,
         "audio_frame_samples": audio_frame_samples,
     }
+
+
+async def probe_camera(
+    *,
+    ip: str,
+    port: int,
+    username: str,
+    password: str,
+    rtsp_path: str,
+    rtsp_timeout_us: int,
+) -> dict:
+    """Compatibility wrapper that resolves the legacy RTSP fields to one URI."""
+
+    return await probe_stream_uri(
+        stream_uri=build_rtsp_url(ip, port, username, password, rtsp_path),
+        rtsp_timeout_us=rtsp_timeout_us,
+    )
