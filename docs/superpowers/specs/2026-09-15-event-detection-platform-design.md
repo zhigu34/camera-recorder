@@ -24,8 +24,9 @@
 - 将现有移动检测配置与检测区域从摄像头详情抽离到独立工作区。
 - 建立 Event Source / Detector Registry 抽象，让 UI 和上层业务不再直接绑定 `motion`。
 - 建立统一事件来源与能力描述，为本地 AI 和 ONVIF Native Events 留出稳定接口。
-- 建立 Stream Resolver 边界，让录像、预览、检测逐步从直接读取 `camera.rtsp_path` 过渡到按用途解析流。
-- 保留现有移动检测数据库、API、事件和时间轴兼容，避免为架构重组做高风险数据迁移。
+- 建立 Device Adapter 与 Stream Resolver 边界，让录像、预览、检测按用途获取流，而不是各自直接读取 `camera.rtsp_path`。
+- 为 Camera 落库 `connection_type`，现有摄像头统一迁移为 `manual_rtsp`，未来 ONVIF 使用 `onvif`。
+- 保留现有移动检测数据库、API、事件和时间轴兼容，避免为架构重组做高风险事件数据迁移。
 - 明确 ONVIF 设备适配、流解析、原生事件订阅的后续扩展点，但本轮不实现 ONVIF 协议。
 
 ## 3. 非目标
@@ -39,6 +40,7 @@ V1 不实现：
 - 人形、车辆、越界、徘徊等真实 AI 检测。
 - 将现有 `motion_detection_settings`、`motion_zones`、`motion_events` 表重命名或迁移。
 - 对已有录像、移动事件、时间轴数据做破坏性变更。
+- 持久化 preferred source；V1 只有 `local.motion` 一个真实事件源，多源选择在第二个真实 provider 接入时再落库。
 
 ## 4. 总体架构
 
@@ -46,7 +48,7 @@ V1 不实现：
 Camera
   |
   +-- Device Adapter
-  |     +-- Manual RTSP        (当前)
+  |     +-- Manual RTSP        (V1)
   |     +-- ONVIF              (后续)
   |
   +-- Stream Resolver
@@ -65,11 +67,83 @@ Camera
 
 核心原则：录像、预览、检测、事件中心不需要知道设备底层是手工 RTSP 还是 ONVIF；事件消费者也不需要知道事件来自本地算法还是摄像头原生能力。
 
-## 5. Event Source 抽象
+## 5. Device Adapter 与 Camera 连接来源
 
-### 5.1 Event Source Descriptor
+### 5.1 connection_type
 
-后端提供统一能力描述，至少包含：
+V1 为 `cameras` 表新增：
+
+```text
+connection_type = manual_rtsp | onvif
+```
+
+实现要求：
+
+- 数据库字段非空，默认值和 server default 都是 `manual_rtsp`。
+- Alembic 迁移把所有历史 Camera 视为 `manual_rtsp`。
+- `CameraCreate` V1 只接受/默认 `manual_rtsp`；`onvif` 在协议实现前不得通过普通创建接口伪造为已支持设备。
+- `CameraRead` 暴露 `connection_type`。
+- 现有手工 RTSP 添加流程不改变。
+
+### 5.2 Device Adapter
+
+V1 建立稳定接口并实现：
+
+```text
+ManualRtspDeviceAdapter
+```
+
+未来新增：
+
+```text
+OnvifDeviceAdapter
+```
+
+Device Adapter 负责设备级能力和流来源，不负责事件中心展示。ONVIF 专属元数据未来使用独立表/模型保存，不把 Profile Token、Service URL、PTZ capability 等全部塞入 `cameras` 表。
+
+未来 ONVIF 元数据至少包括：
+
+- Device UUID / endpoint reference。
+- Device service URL。
+- Media / Media2 / Events / PTZ capabilities。
+- Profile Token 与流角色映射。
+- Snapshot URI 能力。
+- 固件、厂商、型号等发现信息。
+
+## 6. Stream Resolver
+
+V1 提供统一入口：
+
+```text
+resolve_stream(camera, purpose)
+
+purpose:
+  recording
+  preview
+  detection
+```
+
+Manual RTSP 行为：
+
+- `recording`：主码流。
+- `preview`：优先子码流，没有则主码流。
+- `detection`：优先子码流，没有则主码流。
+
+V1 必须让以下三条链路通过 resolver 获取流：
+
+1. Recorder / FFmpeg 录像输入。
+2. 实时预览。
+3. 本地移动检测。
+
+这样未来 `OnvifDeviceAdapter` 只需要把 ONVIF Profile 映射成 recording / preview / detection 三种用途，上述三条业务链路不需要再次重构。
+
+Resolver 输出的是业务可消费的流描述，不要求上层知道 Profile Token。V1 Manual RTSP 可最终解析成当前 RTSP URL/路径；未来 ONVIF 可解析成设备返回的 Stream URI。
+
+## 7. Event Source 抽象
+
+### 7.1 Event Source Descriptor
+
+后端统一返回：
 
 ```text
 id                  例如 local.motion / camera.onvif
@@ -83,36 +157,34 @@ runtime_state
 reason              不可用时的说明
 ```
 
-前端只根据 descriptor 渲染能力，而不是写死“移动检测、人形检测、车辆检测”的业务逻辑。
+前端根据 descriptor 渲染能力，不根据品牌或未来 provider 写死业务判断。
 
-### 5.2 Detector Registry
+### 7.2 Detector Registry
 
-后端建立 registry，用于注册事件源适配器。
-
-V1 注册：
+V1 registry 注册：
 
 ```text
 local.motion
 ```
 
-后续可直接增加：
+后续直接增加：
 
 ```text
 local.ai
 camera.onvif
 ```
 
-每个 adapter 至少承担三类职责：
+每个 adapter 至少承担：
 
 - capability discovery：当前摄像头可以提供哪些事件。
-- configuration bridge：获取与更新该 source 的配置。
-- runtime status：报告 source 当前是否运行、异常原因等。
+- configuration bridge：读取/更新该 source 的配置。
+- runtime status：报告运行状态和错误原因。
 
-事件订阅/产生机制由 adapter 内部实现，上层只消费规范化事件。
+事件产生或订阅机制由 adapter 内部实现，上层只消费规范化事件。
 
-## 6. 统一 Detection Event
+## 8. 统一 Detection Event
 
-事件检测平台定义统一事件 DTO。数据库 V1 仍允许现有 `MotionEvent` 继续存储，但新上层接口输出统一结构。
+事件检测平台定义统一事件 DTO。V1 数据库仍使用现有 `MotionEvent`，通过 compatibility adapter 输出通用结构：
 
 ```text
 DetectionEvent
@@ -131,7 +203,7 @@ DetectionEvent
   metadata          provider-specific metadata
 ```
 
-V1 的 `MotionEvent` 通过 adapter 映射为：
+V1 `MotionEvent` 映射固定为：
 
 ```text
 source_kind = local
@@ -139,128 +211,73 @@ provider    = motion
 event_type  = motion
 ```
 
-未来 ONVIF 事件也映射为同一结构，因此事件中心、录像时间轴、通知系统只依赖 DetectionEvent。
+后续 ONVIF 和本地 AI 也输出 DetectionEvent，因此新的事件消费者只依赖统一结构。现有依赖 `/api/motion-events` 的消费者在 V1 保持兼容，不要求一次性切换。
 
-## 7. 事件来源优先级与重复控制
+## 9. 事件来源优先级与重复控制
 
-系统不能默认同时对同一能力开启多个来源，否则会产生重复事件并浪费服务器资源。
+系统默认不能同时对同一种逻辑能力开启多个 provider，否则会产生重复事件并浪费服务器资源。
 
-推荐默认优先级：
+未来默认优先级：
 
 ```text
 camera_native
     -> 不支持时 local_ai
-    -> 不支持时 local.motion
+    -> 对 motion 能力可回退 local.motion
 ```
 
-注意：`local.motion` 只能作为 motion 能力的回退，不能伪装成人形/车辆事件。
+`local.motion` 只能生成 motion，不能伪装成人形、车辆或越界事件。
 
-V1 尚无 ONVIF 与 AI，因此实际只有 `local.motion` 可启用；其他能力在 UI 中显示为“待接入能力”，不可操作。
+V1 只有 `local.motion` 一个真实 source，因此不持久化 preferred source。AI 和 ONVIF 在 UI 中只作为 capability slot 显示为“待接入/未安装”，不可开启。第二个真实 provider 接入时，再新增 preferred source 配置与跨 provider 去重策略。
 
-后续每种逻辑能力允许配置一个 preferred source，也允许高级用户显式启用多个来源进行验证，但多源并行不是默认状态。
+## 10. ONVIF Native Events 扩展契约
 
-## 8. ONVIF 预留边界
-
-### 8.1 Camera 连接来源
-
-Camera 增加轻量连接来源概念：
-
-```text
-connection_type = manual_rtsp | onvif
-```
-
-V1 现有摄像头默认 `manual_rtsp`，不改变已有使用方式。
-
-ONVIF 专属数据不应全部塞入 `cameras` 表。未来建议新增独立设备元数据结构，保存：
-
-- ONVIF device UUID / endpoint reference。
-- Device service URL。
-- Media / Media2 / Events / PTZ capabilities。
-- Profile Token 与流角色映射。
-- Snapshot URI 能力。
-- 固件、厂商、型号等发现信息。
-
-### 8.2 Device Adapter
-
-预留：
-
-```text
-ManualRtspDeviceAdapter
-OnvifDeviceAdapter
-```
-
-Device Adapter 负责设备能力发现与设备级操作，不直接负责录像和事件中心展示。
-
-### 8.3 ONVIF Event Source
-
-未来 `camera.onvif` adapter 负责：
+未来 `camera.onvif` Event Source 负责：
 
 - 查询 Events capability。
 - 建立 PullPointSubscription 或其他受支持订阅。
 - 解析 ONVIF Topic / Message。
-- 将摄像头厂商事件映射为系统事件类型。
-- 维护订阅续期、断线重连和时钟偏差处理。
-- 对无法识别的 vendor event 保留原始 topic 与 metadata，而不是丢弃。
+- 把标准 topic 和已识别厂商 topic 映射为系统 event_type。
+- 维护订阅续期、断线重连和设备时钟偏差处理。
+- 无法识别的 vendor event 仍保留原始 topic 与 metadata，不静默丢弃。
 
 ONVIF 原生事件与本地事件进入同一 DetectionEvent 管线。
 
-## 9. Stream Resolver
+连接状态与事件订阅状态必须独立：ONVIF Events 订阅断线表现为 source `error/reconnecting`，不能把整个 Camera 判为 offline。
 
-当前代码大量直接使用 `camera.rtsp_path`。V1 建立统一解析边界：
+## 11. 前端信息架构
 
-```text
-resolve_stream(camera, purpose)
+### 11.1 主导航与路由
 
-purpose:
-  recording
-  preview
-  detection
-```
-
-Manual RTSP 默认行为：
-
-- recording -> 主码流。
-- preview -> 优先子码流，没有则主码流。
-- detection -> 优先子码流，没有则主码流。
-
-未来 ONVIF Adapter 获取 Profiles 后，只需要让 resolver 返回相应 profile 的 RTSP URI，上层 Recorder、Preview、Detector 无需重构。
-
-V1 不要求一次性重写所有录像调用；先建立 resolver 与新事件检测工作区使用它，随后逐步迁移旧调用点。
-
-## 10. 前端信息架构
-
-### 10.1 主导航
-
-新增一级：
+主导航新增一级：
 
 ```text
 事件检测
 ```
 
-与摄像头、录像、事件中心、系统设置同级。
-
-路由：
+路由固定为：
 
 ```text
 /event-detection
 /event-detection?camera_id=12
 ```
 
-### 10.2 页面布局
+与摄像头、录像、事件中心、系统设置同级。
+
+### 11.2 页面布局
 
 采用已确认效果图结构：
 
-- 顶部：页面标题与真实统计。
+- 顶部：标题与真实统计。
 - 左栏：摄像头搜索、状态过滤、摄像头列表。
 - 中栏：当前摄像头、实时画面、检测区域编辑。
-- 右栏：检测来源/类型、灵敏度及当前 source 参数。
-- 底部：重置与保存配置。
+- 右栏：Event Source / capability、灵敏度和当前 source 参数。
+- 底部：重置与保存普通配置。
 
-不显示虚假的 AI 模型统计。如果 V1 没有 AI provider，就明确显示未安装/待接入。
+不显示虚假的 AI 模型数量或已启用状态。
 
-### 10.3 检测能力呈现
+### 11.3 capability 呈现
 
-普通 RTSP 摄像头示例：
+普通 RTSP 摄像头 V1：
 
 ```text
 移动检测    可用 · 本地
@@ -269,7 +286,7 @@ V1 不要求一次性重写所有录像调用；先建立 resolver 与新事件�
 越界检测    暂不可用
 ```
 
-未来 ONVIF 设备示例：
+未来 ONVIF AI 摄像头：
 
 ```text
 移动检测    摄像头原生 ONVIF
@@ -278,36 +295,36 @@ V1 不要求一次性重写所有录像调用；先建立 resolver 与新事件�
 本地 AI     可选
 ```
 
-前端通过 capability descriptor 渲染，不根据品牌硬编码。
+前端只消费 capability descriptor，不根据厂商硬编码。
 
-## 11. 摄像头详情调整
+## 12. 摄像头详情调整
 
-现有摄像头抽屉不再承载完整 `MotionDetectionPanel`。
+现有摄像头抽屉移除完整 `MotionDetectionPanel`。
 
-替换为简洁“事件检测”摘要卡：
+替换为“事件检测”摘要卡：
 
-- 是否启用事件检测。
-- 当前主要来源，例如“本地移动检测”。
+- 当前是否存在启用的事件源。
+- 主要事件源，例如“本地移动检测”。
 - 当前运行状态。
-- “前往配置”按钮，跳转 `/event-detection?camera_id=<id>`。
+- “前往配置”按钮跳转 `/event-detection?camera_id=<id>`。
 
-这样摄像头页面负责设备管理，事件检测工作区负责检测策略，职责分离。
+摄像头页面负责设备管理；事件检测工作区负责检测规则和来源配置。
 
-## 12. 检测区域
+## 13. 检测区域
 
-V1 继续复用现有 `MotionZone` 与区域编辑能力，避免迁移。
+V1 继续使用现有 `MotionZone` 与 `MotionZoneEditor`，不迁移通用区域表。
 
-区域操作规则：
+规则：
 
-- 参数表单使用统一草稿保存。
-- 区域创建、重绘、启停、删除继续即时提交。
-- 页面清晰提示区域变更会立即生效，而普通参数需点击保存。
+- 普通检测参数使用页面草稿 + 保存按钮。
+- 区域创建、重绘、启停、删除保持即时提交。
+- UI 明确提示区域操作立即生效，普通参数保存后生效。
 
-未来如果 AI/ONVIF 对区域语义有不同要求，再引入通用 DetectionZone / Rule 模型；V1 不提前迁表。
+未来 AI 或 ONVIF 出现不同区域语义时，再设计通用 DetectionRule / DetectionZone；不在 V1 预建空表。
 
-## 13. API 边界
+## 14. API 契约
 
-保留现有兼容 API：
+### 14.1 保留兼容 API
 
 ```text
 GET/PUT /api/cameras/{id}/motion-detection
@@ -315,114 +332,135 @@ POST/PUT/DELETE /api/cameras/{id}/motion-zones/...
 GET /api/motion-events
 ```
 
-新增事件检测聚合 API，命名以实现阶段最终路由规范为准，但职责固定为：
+### 14.2 V1 新增聚合 API
 
 ```text
-GET  camera detection overview
-GET  camera event-source capabilities
-GET  normalized detection configuration
-PUT  normalized detection configuration
-GET  normalized detection runtime status
+GET /api/cameras/{id}/event-detection
 ```
 
-V1 聚合层内部调用现有 motion service，不复制第二套业务逻辑。
+返回该摄像头事件检测 overview：Camera 摘要、所有 Event Source descriptors、当前启用 source、运行状态和 capability 汇总。
 
-事件查询逐步增加统一 DetectionEvent 输出；旧 `/api/motion-events` 保持兼容，直到所有消费者迁移完成。
+```text
+GET /api/cameras/{id}/event-detection/sources/{source_id}
+PUT /api/cameras/{id}/event-detection/sources/{source_id}
+```
 
-## 14. 数据迁移策略
+读取/更新指定 source 配置。V1 只支持 `source_id=local.motion`，内部桥接现有 motion service，不复制第二套配置逻辑。
 
-本轮采用兼容优先策略：
+```text
+GET /api/detection-events?start=...&end=...&camera_id=...&event_type=...&provider=...
+```
 
-- 不重命名 motion 表。
-- 不搬迁现有 MotionEvent 数据。
-- 不改变现有录像关联。
-- 新的聚合层把 legacy motion 数据映射成统一 DTO。
-- `connection_type` 若落库，老数据迁移默认 `manual_rtsp`。
+返回统一 DetectionEvent。V1 由 MotionEvent adapter 提供数据；原 `/api/motion-events` 保持兼容。
 
-任何未来通用事件表迁移必须独立设计，不与本轮 UI/架构调整混在一起。
+对于尚未实现的 `local.ai` / `camera.onvif`，overview 可以返回 unavailable/unsupported descriptor，但 source detail/update 不得伪装成功，应返回明确的不可用错误。
 
-## 15. 错误处理
+## 15. 数据迁移策略
 
-事件源必须能区分：
+V1 数据库迁移只增加 Camera `connection_type`：
 
-- unsupported：设备/系统不具备该能力。
-- unavailable：能力理论可用，但依赖未安装或尚未配置。
-- error：已配置但运行失败。
-- available：可正常使用。
+- 非空字符串字段。
+- default/server default：`manual_rtsp`。
+- 历史数据全部保持 `manual_rtsp`。
 
-前端不能把 unsupported/error 都显示成“关闭”。
+不修改：
 
-未来 ONVIF 订阅断线必须表现为 source runtime error/reconnecting，而不能让整个摄像头被判断为离线。
+- `motion_detection_settings`
+- `motion_zones`
+- `motion_events`
+- 录像关联和现有事件 ID
 
-## 16. 测试要求
+新的聚合层负责把 legacy motion 数据映射成统一 DTO。未来若需要通用事件表，单独设计和迁移，不与本轮 UI/设备边界调整混合。
+
+## 16. 错误与状态模型
+
+Event Source 状态至少区分：
+
+- `available`：能力可正常使用。
+- `unavailable`：能力存在于平台设计中，但依赖未安装/未配置。
+- `unsupported`：当前摄像头或 adapter 不具备该能力。
+- `error`：已经配置但运行失败。
+
+Runtime state 可以进一步表示 `disabled / starting / running / reconnecting / error`。
+
+前端不能把 unsupported、unavailable、error 都显示成“关闭”。
+
+## 17. 测试要求
 
 ### 后端
 
-- registry 能正确注册并查询 `local.motion`。
-- legacy motion config 能映射到通用 capability/config DTO。
-- legacy MotionEvent 能映射到 DetectionEvent。
-- 未支持 AI/ONVIF 时 descriptor 正确返回 unavailable/unsupported，而不是伪造能力。
-- connection_type 老数据兼容。
-- Stream Resolver 对 recording/preview/detection 的 manual RTSP 行为稳定。
+- registry 正确注册并查询 `local.motion`。
+- event-detection overview 对普通 RTSP Camera 返回正确 descriptor。
+- legacy motion config 能通过 source API 读取和保存。
+- legacy MotionEvent 正确映射成 DetectionEvent。
+- 未实现 AI/ONVIF 时返回 unavailable/unsupported，不伪造功能。
+- `connection_type` 迁移后历史数据为 `manual_rtsp`。
+- Manual RTSP Stream Resolver 对 recording/preview/detection 行为正确。
+- Recorder、Preview、Motion Detection 三条链路均通过 resolver，行为与改造前兼容。
 
 ### 前端
 
-- `/event-detection` 主导航与路由正确。
+- `/event-detection` 主导航和路由正确。
 - `camera_id` 深链正确选择摄像头。
-- 摄像头列表切换不会污染其他摄像头草稿。
-- 移动检测现有配置可完整读取、编辑、保存。
-- 检测区域 CRUD 行为保持兼容。
-- AI / ONVIF 未实现能力明确禁用并显示原因。
-- 摄像头详情只显示摘要并正确跳转事件检测工作区。
+- 摄像头切换不会污染其他摄像头的未保存草稿。
+- 现有移动检测全部参数可以读取、修改、保存。
+- MotionZone CRUD 与区域编辑保持兼容。
+- AI / ONVIF 未实现能力明确禁用并说明原因。
+- 摄像头详情只显示检测摘要并正确跳转事件检测页面。
 
 ### 回归
 
-- 现有移动事件查询保持可用。
+- 原 `/api/motion-events` 保持可用。
 - 回放时间轴移动事件保持可用。
-- 现有通知/事件中心不因新工作区出现重复事件。
-- 前端 lint/test/build、后端 pytest、Docker smoke 全部通过后才可合并。
+- 事件中心与通知系统不会因为聚合 API 出现重复事件。
+- 前端 lint/test/build、后端 pytest、Docker smoke 全部通过后才允许合并。
 
-## 17. 分阶段实现
+## 18. 分阶段路线
 
 ### V1：事件检测平台骨架
 
-- 主导航与新工作区。
-- local.motion adapter / registry。
-- capability descriptor。
-- legacy motion compatibility bridge。
-- Stream Resolver 边界。
-- 摄像头详情移除完整移动检测面板，替换摘要入口。
+- `connection_type` migration。
+- ManualRtspDeviceAdapter。
+- Stream Resolver，并接管 recording / preview / detection 三条流用途。
+- Event Source registry。
+- `local.motion` adapter 与兼容桥。
+- DetectionEvent adapter + `/api/detection-events`。
+- 新主导航与事件检测工作区。
+- 摄像头详情改为事件检测摘要入口。
 
 ### V2：ONVIF Device
 
 - WS-Discovery。
-- ONVIF 登录与设备身份发现。
+- ONVIF 登录和设备身份发现。
 - Media/Media2 Profiles。
 - 主/子/检测流自动解析。
-- 自动添加摄像头。
+- ONVIF 设备自动添加。
 
 ### V3：ONVIF Native Events
 
 - Events capability discovery。
-- PullPoint 订阅与续期。
-- Topic 映射。
-- motion/tamper/digital input 统一事件。
-- 支持设备原生 AI topic 时映射 person/vehicle/intrusion 等。
+- PullPoint 订阅、续期与重连。
+- 标准 Topic 与 vendor Topic 映射。
+- motion/tamper/digital input 等统一事件。
+- 设备原生 AI topic 可识别时映射 person/vehicle/intrusion 等。
+- 引入 preferred source 和必要的跨 provider 去重策略。
 
 ### V4：Local AI
 
-- local.ai provider。
-- 模型生命周期与资源调度。
+- `local.ai` provider。
+- 模型生命周期和资源调度。
 - person/vehicle 等检测能力。
-- 与 camera_native 的 preferred source / fallback 策略。
+- 与 camera_native 的来源选择与 fallback。
 
-## 18. 成功标准
+## 19. 成功标准
 
-本轮完成后应达到：
+本轮完成后必须达到：
 
 1. 用户从主导航进入独立“事件检测”工作区即可配置现有移动检测。
-2. 摄像头详情不再承担复杂检测配置。
-3. 前端和事件消费者通过通用 source/capability 概念工作，而不是继续扩大 `motion` 特例。
-4. 现有移动检测数据、事件、时间轴完全兼容。
-5. 未来增加 `camera.onvif` 时，不需要重构事件中心、录像时间轴和事件检测页面主体。
-6. 未来增加 `local.ai` 时，不需要再次重新设计事件来源模型。
+2. 摄像头详情不再承担完整检测配置。
+3. UI 和新的聚合接口围绕 Event Source / capability 工作，而不是继续扩大 motion 特例。
+4. 现有移动检测数据、事件、回放时间轴完全兼容。
+5. Camera 已有明确的 `connection_type`，但 ONVIF 未实现时不会伪装可用。
+6. Recorder、Preview、Detection 都通过统一 Stream Resolver 获取流。
+7. 未来加入 `OnvifDeviceAdapter` 和 `camera.onvif` 时，不需要再次重构 Recorder、Preview、事件中心、录像时间轴和事件检测页面主体。
+8. 未来加入 `local.ai` 时，不需要重新设计事件来源模型。
