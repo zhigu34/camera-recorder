@@ -32,6 +32,15 @@ interface HealthTrends {
   cameras: CameraTrend[]
 }
 type Verdict = 'pass' | 'fail' | 'collecting' | 'ignored'
+interface RecordingGapDiagnostic {
+  start_at: string
+  end_at: string
+  duration_seconds: number
+  cause: string
+  cause_label: string
+  detail: string
+  confidence: 'high' | 'medium' | 'low'
+}
 interface StabilityCamera {
   camera_id: number
   name: string
@@ -42,6 +51,10 @@ interface StabilityCamera {
   sample_coverage: number
   online_rate: number | null
   recording_completeness: number | null
+  recording_gap_count: number
+  missing_recording_seconds: number
+  unexplained_recording_gaps: number
+  gap_diagnostics: RecordingGapDiagnostic[]
   ffmpeg_failures: number
   outage_count: number
   longest_offline_seconds: number
@@ -58,6 +71,9 @@ interface StabilityReport {
     collecting_cameras: number
     online_rate: number | null
     recording_completeness: number | null
+    recording_gap_count: number
+    missing_recording_seconds: number
+    unexplained_recording_gaps: number
     ffmpeg_failures: number
     outage_count: number
     longest_offline_seconds: number
@@ -172,6 +188,12 @@ function verdictType(value: Verdict) {
   if (value === 'collecting') return 'warning'
   return 'info'
 }
+function gapDiagnostics(row: StabilityCamera) {
+  if (!row.gap_diagnostics.length) return '-'
+  return row.gap_diagnostics
+    .map((gap) => `${formatTime(gap.start_at)} · ${gap.cause_label} · ${gap.detail}`)
+    .join('；')
+}
 function openCamera(row: CameraHealth | CameraTrend | StabilityCamera) {
   void router.push({ path: '/cameras', query: { camera_id: String(row.camera_id) } })
 }
@@ -270,18 +292,21 @@ onBeforeUnmount(() => {
       </div>
 
       <article v-if="stability" class="panel stability-panel">
-        <div class="panel-head"><div><strong>稳定性验收</strong><span>FFmpeg 连续失败、断流与录像完整性综合验收</span></div><div class="panel-actions"><el-tag :type="verdictType(stability.overall.verdict)">{{ verdictLabel(stability.overall.verdict) }}</el-tag><el-radio-group v-model="stabilityWindow" size="small" @change="changeStabilityWindow"><el-radio-button :value="24">24h</el-radio-button><el-radio-button :value="72">72h</el-radio-button></el-radio-group></div></div>
-        <div class="stability-summary"><span>通过 <b>{{ stability.overall.passed_cameras }}/{{ stability.overall.monitored_cameras }}</b></span><span>FFmpeg 异常 <b>{{ stability.overall.ffmpeg_failures }}</b></span><span>断流 <b>{{ stability.overall.outage_count }}</b></span><span>最长断流 <b>{{ formatDuration(stability.overall.longest_offline_seconds) }}</b></span></div>
+        <div class="panel-head"><div><strong>稳定性验收</strong><span>FFmpeg、断流、录像时间缺口与片段处理证据综合验收</span></div><div class="panel-actions"><el-tag :type="verdictType(stability.overall.verdict)">{{ verdictLabel(stability.overall.verdict) }}</el-tag><el-radio-group v-model="stabilityWindow" size="small" @change="changeStabilityWindow"><el-radio-button :value="24">24h</el-radio-button><el-radio-button :value="72">72h</el-radio-button></el-radio-group></div></div>
+        <div class="stability-summary"><span>通过 <b>{{ stability.overall.passed_cameras }}/{{ stability.overall.monitored_cameras }}</b></span><span>缺片段 <b>{{ stability.overall.recording_gap_count }}</b></span><span>缺失时长 <b>{{ formatDuration(stability.overall.missing_recording_seconds) }}</b></span><span>未知原因 <b>{{ stability.overall.unexplained_recording_gaps }}</b></span><span>FFmpeg 异常 <b>{{ stability.overall.ffmpeg_failures }}</b></span><span>断流 <b>{{ stability.overall.outage_count }}</b></span><span>最长断流 <b>{{ formatDuration(stability.overall.longest_offline_seconds) }}</b></span></div>
         <el-table :data="monitoredStability" size="small" empty-text="暂无稳定性样本" @row-click="openCamera">
-          <el-table-column prop="name" label="摄像头" min-width="140" />
+          <el-table-column prop="name" label="摄像头" min-width="140" fixed="left" />
           <el-table-column label="结果" width="90"><template #default="{ row }"><el-tag :type="verdictType(row.verdict)">{{ verdictLabel(row.verdict) }}</el-tag></template></el-table-column>
           <el-table-column label="覆盖率" width="100"><template #default="{ row }">{{ rate(row.sample_coverage) }}</template></el-table-column>
           <el-table-column label="录像可用率" width="115"><template #default="{ row }">{{ rate(row.online_rate) }}</template></el-table-column>
           <el-table-column label="完整率" width="100"><template #default="{ row }">{{ rate(row.recording_completeness) }}</template></el-table-column>
+          <el-table-column prop="recording_gap_count" label="缺片段" width="80" />
+          <el-table-column label="缺失时长" width="100"><template #default="{ row }">{{ formatDuration(row.missing_recording_seconds) }}</template></el-table-column>
+          <el-table-column label="缺片段原因" min-width="320" show-overflow-tooltip><template #default="{ row }">{{ gapDiagnostics(row) }}</template></el-table-column>
           <el-table-column prop="ffmpeg_failures" label="FFmpeg" width="80" />
           <el-table-column prop="outage_count" label="断流" width="70" />
           <el-table-column label="最长断流" width="105"><template #default="{ row }">{{ formatDuration(row.longest_offline_seconds) }}</template></el-table-column>
-          <el-table-column label="原因" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.reasons.length ? row.reasons.join('；') : '-' }}</template></el-table-column>
+          <el-table-column label="验收原因" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.reasons.length ? row.reasons.join('；') : '-' }}</template></el-table-column>
         </el-table>
       </article>
 
