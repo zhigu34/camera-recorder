@@ -2,17 +2,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services.event_detection import event_source_registry
+from app.services.event_detection.registry import EventSourceRegistry, UnknownEventSource
+
 
 def test_default_registry_contains_only_local_motion() -> None:
-    from app.services.event_detection import event_source_registry
-
     assert event_source_registry.ids() == ["local.motion"]
 
 
 @pytest.mark.asyncio
 async def test_motion_descriptor_is_honest_local_motion_provider() -> None:
-    from app.services.event_detection import event_source_registry
-
     adapter = event_source_registry.get("local.motion")
     descriptor = await adapter.descriptor(SimpleNamespace(id=1), None)
 
@@ -25,8 +24,6 @@ async def test_motion_descriptor_is_honest_local_motion_provider() -> None:
 
 
 def test_registry_rejects_duplicate_source_ids() -> None:
-    from app.services.event_detection.registry import EventSourceRegistry
-
     class FakeAdapter:
         source_id = "local.motion"
 
@@ -37,7 +34,5 @@ def test_registry_rejects_duplicate_source_ids() -> None:
 
 
 def test_registry_raises_typed_error_for_unknown_source() -> None:
-    from app.services.event_detection.registry import EventSourceRegistry, UnknownEventSource
-
     with pytest.raises(UnknownEventSource):
         EventSourceRegistry().get("camera.onvif")
