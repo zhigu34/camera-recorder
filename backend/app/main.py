@@ -11,6 +11,7 @@ from app.api.exports import router as exports_router
 from app.api.health import router as health_router
 from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
+from app.api.onvif_cameras import router as onvif_cameras_router
 from app.api.operations import router as operations_router
 from app.api.playback_control import router as playback_control_router
 from app.api.playback_metrics import router as playback_metrics_router
@@ -29,6 +30,7 @@ from app.services.alert_monitor import alert_monitor
 from app.services.camera_connectivity_monitor import camera_connectivity_monitor
 from app.services.camera_identity_reconcile import reconcile_camera_form_factors
 from app.services.event_log import add_event
+from app.services.event_recording import event_recording_manager
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.motion_manager import motion_detection_manager
@@ -94,6 +96,11 @@ async def lifespan(_: FastAPI):
     # start cameras while deployment-local time is inside a configured window.
     await recording_schedule_manager.start()
 
+    # Event prebuffer starts only after regular recorder reconciliation. It uses the
+    # same main stream but only while motion detection is enabled and no regular
+    # recorder owns the camera, so ordinary recording always has priority.
+    await event_recording_manager.start()
+
     # Connectivity observation starts after recorder reconciliation so healthy recorder
     # processes are the strongest online signal. Non-recording cameras are checked with
     # a lightweight RTSP control request; no media stream is opened by this monitor.
@@ -117,6 +124,7 @@ async def lifespan(_: FastAPI):
     await health_sampler.stop()
     await motion_detection_manager.stop()
     await camera_connectivity_monitor.stop()
+    await event_recording_manager.stop()
     await recording_schedule_manager.stop()
     await recorder_manager.stop_all()
     await asyncio.sleep(settings.segment_finalize_grace_seconds)
@@ -142,6 +150,8 @@ app.add_middleware(
 )
 app.add_middleware(PlaybackPrefetchMiddleware)
 
+# Keep the static ONVIF endpoints before /api/cameras/{camera_id} routes.
+app.include_router(onvif_cameras_router)
 app.include_router(cameras_router)
 app.include_router(recordings_router)
 app.include_router(recording_management_router)
@@ -173,6 +183,7 @@ async def system_status() -> dict:
         "ffmpeg": await capabilities_dict(),
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
+        "event_recording": event_recording_manager.status(),
         "connectivity_monitor": camera_connectivity_monitor.snapshot(),
         "segment_processor": segment_processor.status(),
         "recording_export": recording_export_manager.status(),
