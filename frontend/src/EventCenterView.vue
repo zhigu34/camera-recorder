@@ -8,7 +8,7 @@ import { Refresh, Search, WarningFilled } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
 import type { ExportJob, ExportRangeAnalysis } from './types/exports'
 import { buildExportRequest } from './utils/playbackExport'
-import { wallClockSeconds } from './utils/playbackTimelineV3'
+import { motionPlaybackStartSeconds, wallClockSeconds } from './utils/playbackTimelineV3'
 
 interface EventItem {
   id: number
@@ -266,7 +266,7 @@ function writePlaybackAutostart(eventId: number) {
   } catch { /* session storage unavailable */ }
 }
 function playActivity(event: MotionActivityEvent) {
-  const seconds = wallClockSeconds(event.started_at)
+  const seconds = motionPlaybackStartSeconds(event.started_at)
   if (seconds === null) {
     ElMessage.warning('该活动缺少可用的回放时间')
     return
