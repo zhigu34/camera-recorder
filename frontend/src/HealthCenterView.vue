@@ -126,18 +126,20 @@ onBeforeUnmount(() => {
       <span>{{ error }}。实时状态仍保持可用，历史数据恢复后会自动刷新。</span>
     </div>
 
-    <HealthAttentionList
-      class="attention-section"
-      :realtime-cameras="realtime?.camera_health || []"
-      :historical-issues="report?.issues || []"
-      @select="selectCamera"
-    />
+    <section class="attention-section" aria-label="需要关注">
+      <HealthAttentionList
+        :realtime-cameras="realtime?.camera_health || []"
+        :historical-issues="report?.issues || []"
+        @select="selectCamera"
+      />
+    </section>
 
-    <CameraReliabilityTable
-      class="reliability-section"
-      :cameras="report?.cameras || []"
-      @select="selectCamera"
-    />
+    <section class="reliability-section" aria-label="摄像头可靠性">
+      <CameraReliabilityTable
+        :cameras="report?.cameras || []"
+        @select="selectCamera"
+      />
+    </section>
 
     <HealthServiceStrip
       :realtime="realtime"
@@ -158,6 +160,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.health-center{width:min(1500px,100%);margin:0 auto;padding:20px 24px 30px;box-sizing:border-box;color:var(--nvr-text)}.health-header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:12px}.eyebrow{color:var(--nvr-subtle);font-size:8px;font-weight:800;letter-spacing:.17em}.health-header h1{margin:4px 0 4px;font-size:20px;font-weight:670;letter-spacing:-.02em}.health-header p{margin:0;color:var(--nvr-muted);font-size:10px}.header-actions{display:flex;align-items:center;gap:7px}.feed-state{display:flex;align-items:center;gap:5px;color:var(--nvr-muted);font-size:8px;white-space:nowrap}.feed-state i{width:6px;height:6px;border-radius:50%}.feed-state i.live{background:var(--nvr-green)}.feed-state i.fallback{background:var(--nvr-yellow)}.window-switch{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-surface)}.window-switch button,.refresh-button{height:27px;border:0;border-radius:5px;background:transparent;color:var(--nvr-muted);font-size:9px;cursor:pointer}.window-switch button{min-width:40px}.window-switch button.active{background:var(--nvr-surface-2);color:var(--nvr-text)}.refresh-button{border:1px solid var(--nvr-border);padding:0 10px;background:var(--nvr-surface)}.refresh-button:disabled{opacity:.55;cursor:default}.history-notice{display:flex;align-items:center;gap:10px;margin-top:9px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 35%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,var(--nvr-surface));font-size:9px}.history-notice strong{white-space:nowrap}.history-notice span{color:var(--nvr-muted)}.attention-section,.reliability-section{margin-top:10px}.reliability-section+*{margin-top:10px}
+.health-center{width:min(1500px,100%);margin:0 auto;padding:20px 24px 30px;box-sizing:border-box;color:var(--nvr-text)}.health-header{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:12px}.eyebrow{color:var(--nvr-subtle);font-size:8px;font-weight:800;letter-spacing:.17em}.health-header h1{margin:4px 0 4px;font-size:20px;font-weight:670;letter-spacing:-.02em}.health-header p{margin:0;color:var(--nvr-muted);font-size:10px}.header-actions{display:flex;align-items:center;gap:7px}.feed-state{display:flex;align-items:center;gap:5px;color:var(--nvr-muted);font-size:8px;white-space:nowrap}.feed-state i{width:6px;height:6px;border-radius:50%}.feed-state i.live{background:var(--nvr-green)}.feed-state i.fallback{background:var(--nvr-yellow)}.window-switch{display:flex;padding:2px;border:1px solid var(--nvr-border);border-radius:7px;background:var(--nvr-surface)}.window-switch button,.refresh-button{height:27px;border:0;border-radius:5px;background:transparent;color:var(--nvr-muted);font-size:9px;cursor:pointer}.window-switch button{min-width:40px}.window-switch button.active{background:var(--nvr-surface-2);color:var(--nvr-text)}.refresh-button{border:1px solid var(--nvr-border);padding:0 10px;background:var(--nvr-surface)}.refresh-button:disabled{opacity:.55;cursor:default}.history-notice{display:flex;align-items:center;gap:10px;margin-top:9px;padding:8px 10px;border:1px solid color-mix(in srgb,var(--nvr-yellow) 35%,var(--nvr-border));border-radius:7px;background:color-mix(in srgb,var(--nvr-yellow) 5%,var(--nvr-surface));font-size:9px}.history-notice strong{white-space:nowrap}.history-notice span{color:var(--nvr-muted)}.attention-section,.reliability-section{margin-top:10px}.attention-section,.reliability-section{display:block}.reliability-section+*{margin-top:10px}
 @media(max-width:780px){.health-center{padding:15px}.health-header{align-items:flex-start;flex-direction:column}.header-actions{width:100%;flex-wrap:wrap}.refresh-button{margin-left:auto}.history-notice{align-items:flex-start;flex-direction:column}}
 </style>
