@@ -1,6 +1,22 @@
 from datetime import datetime
 
+from app.core.timezone import configured_timezone_name
 from app.schemas.event import EventRead
+
+
+def test_configured_timezone_defaults_to_shanghai(monkeypatch) -> None:
+    monkeypatch.delenv("TZ", raising=False)
+    assert configured_timezone_name() == "Asia/Shanghai"
+
+
+def test_configured_timezone_uses_valid_iana_name(monkeypatch) -> None:
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    assert configured_timezone_name() == "Asia/Shanghai"
+
+
+def test_configured_timezone_invalid_falls_back_to_utc(monkeypatch) -> None:
+    monkeypatch.setenv("TZ", "Invalid/Timezone")
+    assert configured_timezone_name() == "UTC"
 
 
 def test_event_timestamp_uses_configured_timezone(monkeypatch) -> None:
