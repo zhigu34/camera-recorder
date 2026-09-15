@@ -180,6 +180,7 @@ def test_onvif_camera_creation_revalidates_media_and_persists_safe_metadata(monk
 def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkeypatch) -> None:
     discoveries = [DISCOVERED, UPDATED_DISCOVERED]
     stream_calls: list[str] = []
+    recorder_calls: list[tuple[str, int]] = []
 
     async def fake_onvif_probe(_payload):
         return discoveries.pop(0)
@@ -192,9 +193,27 @@ def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkey
     async def no_reconcile():
         return None
 
+    async def no_motion_restart(_camera_id: int):
+        return None
+
+    def recorder_is_running(_camera_id: int) -> bool:
+        return True
+
+    async def stop_recorder(camera_id: int):
+        recorder_calls.append(("stop", camera_id))
+        return {"camera_id": camera_id, "state": "STOPPED", "pid": None}
+
+    async def start_regular(camera):
+        recorder_calls.append(("start", int(camera.id)))
+        return {"camera_id": int(camera.id), "state": "RECORDING", "pid": 1}
+
     monkeypatch.setattr(onvif_api, "_probe_onvif", fake_onvif_probe)
     monkeypatch.setattr(onvif_api, "probe_stream_uri", fake_stream_probe)
     monkeypatch.setattr(onvif_api.recording_schedule_manager, "reconcile", no_reconcile)
+    monkeypatch.setattr(onvif_api.motion_detection_manager, "restart_camera", no_motion_restart)
+    monkeypatch.setattr(onvif_api.recorder_manager, "is_running", recorder_is_running)
+    monkeypatch.setattr(onvif_api.recorder_manager, "stop", stop_recorder)
+    monkeypatch.setattr(onvif_api, "start_regular_recorder", start_regular)
 
     with TestClient(app) as client:
         created = client.post(
@@ -236,6 +255,7 @@ def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkey
         assert body["sub_rtsp_path"] == "/sub-v2"
         assert body["video_codec"] == "hevc"
         assert stream_calls[-1] == "rtsp://operator:new-secret@10.0.0.21:8554/main-v2"
+        assert recorder_calls == [("stop", camera_id), ("start", camera_id)]
 
         metadata = asyncio.run(_metadata(camera_id))
         assert metadata is not None
