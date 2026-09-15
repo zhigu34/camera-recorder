@@ -19,6 +19,7 @@ import {
 } from '@element-plus/icons-vue'
 import CameraDeviceGlyph from './CameraDeviceGlyph.vue'
 import { useCameraStore } from './stores/cameras'
+import { formatDateTime } from './utils/dateTime'
 
 type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'doorbell' | 'indoor' | 'panoramic'
 type PreviewSource = 'main' | 'sub'
@@ -212,9 +213,7 @@ function scheduleStateLabel(camera: Camera) {
   return '未启用'
 }
 function formatTime(value?: string | null) {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return formatDateTime(value)
 }
 function compareCameraNames(left: Camera, right: Camera) { return left.name.localeCompare(right.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || left.id - right.id }
 function ipParts(camera: Camera) {
