@@ -6,6 +6,7 @@ import pytest
 
 import app.main as main_module
 from app.models.event import Event
+from app.models.health_sample import CameraHealthSample
 from app.models.recording import Recording
 from app.services.health_reliability import diagnose_recording_gaps
 
@@ -162,3 +163,43 @@ def test_backend_restart_is_bounded_gap_evidence() -> None:
         now=gap_end + timedelta(minutes=5),
     )
     assert distant_gaps[0]["cause"] == "unknown"
+
+
+def test_backend_restart_outranks_recorder_unavailable_gap_evidence() -> None:
+    first_start = datetime(2026, 9, 15, 10, 0, tzinfo=UTC)
+    gap_start = first_start + timedelta(minutes=5)
+    gap_end = first_start + timedelta(minutes=10)
+    recordings = [
+        _recording(1, first_start, gap_start),
+        _recording(2, gap_end, gap_end + timedelta(minutes=5)),
+    ]
+    samples = [
+        CameraHealthSample(
+            camera_id=1,
+            sampled_at=gap_start + timedelta(minutes=1),
+            state="STOPPED",
+            expected_recording=True,
+            online=True,
+            recorder_ok=False,
+            restart_count=0,
+            timestamp_warning_count=0,
+            network_warning_count=0,
+        )
+    ]
+    restart = _event(
+        code="system.backend_started",
+        created_at=gap_start + timedelta(seconds=30),
+        camera_id=None,
+    )
+
+    gaps = diagnose_recording_gaps(
+        recordings=recordings,
+        samples=samples,
+        events=[restart],
+        cutoff=first_start,
+        now=gap_end + timedelta(minutes=5),
+    )
+
+    assert len(gaps) == 1
+    assert gaps[0]["cause"] == "backend_restart"
+    assert gaps[0]["confidence"] == "medium"
