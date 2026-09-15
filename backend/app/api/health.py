@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Query, WebSocket
+from fastapi import APIRouter, HTTPException, Query, WebSocket
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
@@ -10,6 +10,8 @@ from app.services.camera_connectivity_monitor import (
     recorder_runtime_is_healthy,
 )
 from app.services.health_monitor import health_snapshot, health_trends
+from app.services.health_realtime import realtime_health_snapshot
+from app.services.health_reliability import health_reliability
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule import schedule_label
 from app.services.recording_schedule_manager import recording_schedule_manager
@@ -47,7 +49,7 @@ def _timestamp_guidance(mode: str, warning_count: int) -> dict | None:
 
 
 async def _schedule_aware_snapshot() -> dict:
-    """Enrich health data from connectivity, recorder, and schedule state owners."""
+    """Legacy mixed snapshot kept while frontend consumers migrate to Health V3."""
 
     snapshot = await health_snapshot()
     runtime_by_camera = {
@@ -127,6 +129,20 @@ async def _schedule_aware_snapshot() -> dict:
     return snapshot
 
 
+@router.get("/api/health/realtime")
+async def get_realtime_health() -> dict:
+    return await realtime_health_snapshot()
+
+
+@router.get("/api/health/reliability")
+async def get_health_reliability(
+    hours: int = Query(default=24),
+) -> dict:
+    if hours not in {24, 72}:
+        raise HTTPException(status_code=422, detail="hours must be 24 or 72")
+    return await health_reliability(hours=hours)
+
+
 @router.get("/api/health/summary")
 async def get_health_summary() -> dict:
     return await _schedule_aware_snapshot()
@@ -154,8 +170,8 @@ async def status_websocket(websocket: WebSocket) -> None:
         while True:
             await websocket.send_json(
                 {
-                    "type": "health.snapshot",
-                    "data": await _schedule_aware_snapshot(),
+                    "type": "health.realtime",
+                    "data": await realtime_health_snapshot(),
                 }
             )
             try:

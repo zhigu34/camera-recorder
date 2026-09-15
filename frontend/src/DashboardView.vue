@@ -61,16 +61,16 @@ const freshActivityTimers = new Map<number, number>()
 
 const loading = computed(() => runtimeLoading.value && !summary.value)
 const recentActivities = computed(() => activities.value.slice(0, 8))
-const pendingUploads = computed(() => {
-  const rows = summary.value?.uploads || {}
-  return (rows.pending || 0) + (rows.uploading || 0) + (rows.retry_wait || 0)
-})
-const uploadFailures = computed(() => summary.value?.uploads?.failed || 0)
+const storageUsedBytes = computed(() => Math.max(
+  0,
+  Number(summary.value?.storage.total_bytes || 0) - Number(summary.value?.storage.free_bytes || 0),
+))
+const archiveNeedsAttention = computed(() => Boolean(summary.value?.upload.enabled && !summary.value?.upload.configured))
 const overallHealthy = computed(() => Boolean(
   summary.value &&
   summary.value.cameras.abnormal === 0 &&
   summary.value.storage.state !== 'critical' &&
-  uploadFailures.value === 0 &&
+  !archiveNeedsAttention.value &&
   system.value?.ffmpeg?.setts_available !== false,
 ))
 const healthClass = computed(() => overallHealthy.value ? 'healthy' : 'attention')
@@ -82,7 +82,11 @@ const activityFeedLabel = computed(() => {
   return '断线补偿中'
 })
 const activityFeedClass = computed(() => activitySocketState.value === 'connected' ? 'live' : 'fallback')
-const attentionCount = computed(() => (summary.value?.cameras.abnormal || 0) + uploadFailures.value)
+const attentionCount = computed(() =>
+  (summary.value?.cameras.abnormal || 0)
+  + (summary.value?.storage.state === 'critical' ? 1 : 0)
+  + (archiveNeedsAttention.value ? 1 : 0),
+)
 const latestActivityByCamera = computed(() => {
   const result = new Map<number, MotionActivityEvent>()
   for (const event of activities.value) {
@@ -465,13 +469,13 @@ onBeforeUnmount(() => {
           <div class="storage-line">
             <div class="storage-title"><span>录像存储</span><strong>{{ summary?.storage.used_percent ?? '-' }}%</strong></div>
             <div class="storage-track"><i :style="{ width: `${Math.min(100, summary?.storage.used_percent || 0)}%` }"></i></div>
-            <div class="storage-copy"><span>{{ bytes(summary?.storage.used_bytes) }} 已使用</span><span>{{ bytes(summary?.storage.free_bytes) }} 可用</span></div>
+            <div class="storage-copy"><span>{{ bytes(storageUsedBytes) }} 已使用</span><span>{{ bytes(summary?.storage.free_bytes) }} 可用</span></div>
           </div>
           <div class="system-list">
-            <div><span>24 小时录像</span><strong>{{ summary?.recordings_24h.segments ?? '-' }} 片段</strong><small>{{ summary?.recordings_24h.unhealthy_segments ?? 0 }} 异常</small></div>
-            <div><span>上传队列</span><strong>{{ pendingUploads }} 待处理</strong><small>{{ uploadFailures }} 失败</small></div>
+            <div><span>连接监控</span><strong>{{ summary?.connectivity_monitor?.running ? '运行中' : '未运行' }}</strong><small>最近轮询 {{ summary?.connectivity_monitor?.last_cycle_at ? new Date(summary.connectivity_monitor.last_cycle_at).toLocaleTimeString() : '尚无记录' }}</small></div>
+            <div><span>录像计划</span><strong>{{ system?.recording_schedule?.running ? '运行中' : '未运行' }}</strong><small>{{ summary?.cameras.recording ?? 0 }} 路当前录像</small></div>
             <div><span>FFmpeg / setts</span><strong>{{ system?.ffmpeg?.setts_available === false ? '异常' : system?.ffmpeg ? '正常' : '检测中' }}</strong><small>{{ system?.ffmpeg?.ffmpeg_version || '运行环境' }}</small></div>
-            <div><span>OpenList 上传</span><strong>{{ system?.upload?.enabled ? (system?.upload?.configured ? '已连接' : '未配置') : '未启用' }}</strong><small>{{ system?.upload?.active ? '正在上传' : '当前空闲' }}</small></div>
+            <div><span>OpenList 上传</span><strong>{{ summary?.upload.enabled ? (summary?.upload.configured ? '已连接' : '未配置') : '未启用' }}</strong><small>{{ summary?.upload.active ? '归档服务可用' : '当前未激活' }}</small></div>
           </div>
         </div>
       </aside>

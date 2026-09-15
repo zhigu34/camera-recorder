@@ -13,6 +13,7 @@ from app.models.camera import Camera
 from app.models.recording import Recording
 from app.models.upload import UploadTask
 from app.schemas.recording import RecordingRead
+from app.services.event_log import add_event
 from app.services.recording_playback import recording_playback_manager
 
 router = APIRouter(prefix="/api/recording-management", tags=["recording-management"])
@@ -133,13 +134,36 @@ async def _delete_recordings(ids: list[int], db: AsyncSession) -> RecordingDelet
 
             local_path = Path(recording.mp4_path)
             source_path = Path(recording.source_mkv_path) if recording.source_mkv_path else None
+            local_available_before = local_path.exists()
+            cloud_available = recording.upload_status == "success"
             local_deleted = await _unlink_if_exists(local_path)
             if source_path is not None and source_path != local_path:
                 await _unlink_if_exists(source_path)
             if local_deleted:
                 result.deleted_local += 1
 
-            if recording.upload_status == "success":
+            # Preserve the interval and storage context before the Recording row is
+            # mutated or removed. Reliability diagnostics can then explain a later
+            # timeline gap without retaining credentials or media URLs.
+            add_event(
+                db,
+                level="info",
+                category="recording",
+                code="recording.deleted",
+                message="手动删除录像",
+                camera_id=recording.camera_id,
+                recording_id=recording.id,
+                metadata={
+                    "recording_id": recording.id,
+                    "started_at": recording.started_at.isoformat() if recording.started_at else None,
+                    "ended_at": recording.ended_at.isoformat() if recording.ended_at else None,
+                    "local_available_before": local_available_before,
+                    "cloud_available": cloud_available,
+                    "reason": "manual",
+                },
+            )
+
+            if cloud_available:
                 # Preserve the successful archive record and remote playback path.
                 # Manual deletion only removes the local asset; it never deletes
                 # the OpenList/WebDAV copy.

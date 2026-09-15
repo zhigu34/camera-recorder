@@ -94,11 +94,12 @@ def test_stability_report_reject_invalid_window() -> None:
     assert response.status_code == 422
 
 
-def test_health_websocket_sends_snapshot() -> None:
+def test_health_websocket_sends_realtime_snapshot() -> None:
     with TestClient(app) as client:
         with client.websocket_connect("/ws/status") as websocket:
             message = websocket.receive_json()
 
-    assert message["type"] == "health.snapshot"
+    assert message["type"] == "health.realtime"
     assert "uptime_seconds" in message["data"]
     assert "camera_health" in message["data"]
+    assert "recordings_24h" not in message["data"]

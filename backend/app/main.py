@@ -27,6 +27,7 @@ from app.services.alert_dispatcher import alert_dispatcher
 from app.services.alert_monitor import alert_monitor
 from app.services.camera_connectivity_monitor import camera_connectivity_monitor
 from app.services.camera_identity_reconcile import reconcile_camera_form_factors
+from app.services.event_log import add_event
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.motion_manager import motion_detection_manager
@@ -39,6 +40,20 @@ from app.services.storage_cleanup import storage_cleanup_manager
 from app.services.storage_manager import storage_snapshot
 from app.services.system_settings import get_or_create_system_settings
 from app.services.upload_manager import upload_manager
+
+
+async def _record_backend_started() -> None:
+    """Persist a bounded restart marker for later recording-gap diagnosis."""
+
+    async with SessionLocal() as session:
+        add_event(
+            session,
+            level="info",
+            category="system",
+            code="system.backend_started",
+            message="Camera Recorder backend 已启动",
+        )
+        await session.commit()
 
 
 @asynccontextmanager
@@ -60,6 +75,11 @@ async def lifespan(_: FastAPI):
         await get_or_create_system_settings(session)
         await reconcile_camera_form_factors(session)
         await session.commit()
+
+    # Persist startup after the database/configuration are ready but before workers
+    # begin mutating recorder state. Reliability diagnostics can then explain only
+    # gaps temporally adjacent to an actual backend restart.
+    await _record_backend_started()
 
     # Start the alert observer before background workers/recorders so new failure
     # events are never missed. It only reads state/events and cannot block recording.
