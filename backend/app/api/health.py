@@ -1,4 +1,5 @@
 import asyncio
+from typing import Literal
 
 from fastapi import APIRouter, Query, WebSocket
 from sqlalchemy import select
@@ -11,6 +12,7 @@ from app.services.camera_connectivity_monitor import (
 )
 from app.services.health_monitor import health_snapshot, health_trends
 from app.services.health_realtime import realtime_health_snapshot
+from app.services.health_reliability import health_reliability
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule import schedule_label
 from app.services.recording_schedule_manager import recording_schedule_manager
@@ -131,6 +133,13 @@ async def _schedule_aware_snapshot() -> dict:
 @router.get("/api/health/realtime")
 async def get_realtime_health() -> dict:
     return await realtime_health_snapshot()
+
+
+@router.get("/api/health/reliability")
+async def get_health_reliability(
+    hours: Literal[24, 72] = Query(default=24),
+) -> dict:
+    return await health_reliability(hours=hours)
 
 
 @router.get("/api/health/summary")
