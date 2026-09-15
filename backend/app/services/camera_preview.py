@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.core.config import settings
-from app.services.camera_probe import build_rtsp_url
 
 PreviewStream = Literal["auto", "main", "sub"]
 
@@ -15,7 +14,7 @@ class CameraPreviewError(RuntimeError):
 
 
 def infer_substream_path(main_path: str) -> str | None:
-    """Infer the common /main -> /sub convention without changing recording config."""
+    """Compatibility helper; stream selection now belongs to stream_resolver."""
 
     if "/main" in main_path:
         return main_path.rsplit("/main", 1)[0] + "/sub" + main_path.rsplit("/main", 1)[1]
@@ -30,6 +29,11 @@ def resolve_preview_path(
     sub_path: str | None,
     stream: PreviewStream,
 ) -> tuple[str, Literal["main", "sub"]]:
+    """Compatibility shim for callers/tests outside the camera API.
+
+    Production camera preview resolves the complete URI through stream_resolver.
+    """
+
     configured_sub = sub_path.strip() if sub_path else None
     inferred_sub = infer_substream_path(main_path)
 
@@ -49,16 +53,11 @@ def resolve_preview_path(
 
 def build_preview_command(
     *,
-    ip: str,
-    port: int,
-    username: str,
-    password: str,
-    rtsp_path: str,
+    stream_uri: str,
     rtsp_timeout_us: int,
     fps: int,
     width: int,
 ) -> list[str]:
-    url = build_rtsp_url(ip, port, username, password, rtsp_path)
     return [
         settings.ffmpeg_bin,
         "-nostdin",
@@ -74,7 +73,7 @@ def build_preview_command(
         "-flags",
         "low_delay",
         "-i",
-        url,
+        stream_uri,
         "-map",
         "0:v:0",
         "-an",
@@ -123,21 +122,13 @@ class PreviewSession:
 
 async def open_mjpeg_preview(
     *,
-    ip: str,
-    port: int,
-    username: str,
-    password: str,
-    rtsp_path: str,
+    stream_uri: str,
     rtsp_timeout_us: int,
     fps: int,
     width: int,
 ) -> PreviewSession:
     command = build_preview_command(
-        ip=ip,
-        port=port,
-        username=username,
-        password=password,
-        rtsp_path=rtsp_path,
+        stream_uri=stream_uri,
         rtsp_timeout_us=rtsp_timeout_us,
         fps=fps,
         width=width,
