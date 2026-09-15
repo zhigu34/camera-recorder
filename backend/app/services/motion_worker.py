@@ -184,6 +184,7 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
 
 
 EventCallback = Callable[[ClosedMotionEvent, np.ndarray | None], Awaitable[None]]
+EventStartCallback = Callable[[datetime], Awaitable[None]]
 StatusCallback = Callable[
     [str, MotionStream | None, datetime | None, str | None, dict[str, Any] | None],
     None,
@@ -201,6 +202,9 @@ class MotionWorker:
         self.config = config
         self.on_event = on_event
         self.on_status = on_status
+        # The manager attaches this optional callback after worker construction so
+        # existing worker factories and direct tests keep their original signature.
+        self.on_event_started: EventStartCallback | None = None
         self.process: asyncio.subprocess.Process | None = None
 
     async def run(self) -> None:
@@ -294,6 +298,8 @@ class MotionWorker:
                 )
                 if not suppressed and confidence.motion:
                     last_stable_motion_at = timestamp
+
+                was_active = state.active
                 closed = state.update(
                     timestamp,
                     motion=confidence.motion,
@@ -301,6 +307,11 @@ class MotionWorker:
                     zone_id=analysis.primary_zone_id,
                     end_boundary_at=last_stable_motion_at if suppressed else None,
                 )
+                if not was_active and state.active and state.started_at is not None:
+                    callback = self.on_event_started
+                    if callback is not None:
+                        await callback(state.started_at)
+
                 for event in closed:
                     await self.on_event(event, best_frame)
                     best_frame = None
