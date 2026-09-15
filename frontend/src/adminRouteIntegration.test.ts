@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import uploadSource from './UploadManagementView.vue?raw'
 import settingsWorkspaceSource from './SystemSettingsWorkspace.vue?raw'
-import settingsSource from './SystemSettingsView.vue?raw'
 import workspaceRouteSource from './WorkspaceRoute.vue?raw'
 
 describe('admin route integration', () => {
@@ -12,15 +11,15 @@ describe('admin route integration', () => {
     expect(uploadSource).toContain('useCameraStore')
   })
 
-  it('routes upload settings directly to the archive settings section', () => {
+  it('keeps legacy upload settings links compatible with the OpenList section', () => {
     expect(workspaceRouteSource).toContain("@open-settings=\"go('/settings?section=archive')\"")
-    expect(settingsWorkspaceSource).toContain("section === 'archive'")
-    expect(settingsWorkspaceSource).toContain("document.getElementById('archive-settings')")
+    expect(settingsWorkspaceSource).toContain('normalizeSettingsSection')
+    expect(settingsWorkspaceSource).toContain("'openlist'")
   })
 
-  it('protects unsaved system settings from accidental navigation and unload', () => {
-    expect(settingsSource).toContain('onBeforeRouteLeave')
-    expect(settingsSource).toContain("window.addEventListener('beforeunload'")
-    expect(settingsSource).toContain('settingsDirty')
+  it('protects unsaved runtime settings from accidental navigation and unload', () => {
+    expect(settingsWorkspaceSource).toContain('onBeforeRouteLeave')
+    expect(settingsWorkspaceSource).toContain("window.addEventListener('beforeunload'")
+    expect(settingsWorkspaceSource).toContain('dirtyCount')
   })
 })
