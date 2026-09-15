@@ -1,9 +1,8 @@
-import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const routerSource = readFileSync(new URL('./router.ts', import.meta.url), 'utf8')
-const rootSource = readFileSync(new URL('./Root.vue', import.meta.url), 'utf8')
-const workspaceSource = readFileSync(new URL('./WorkspaceRoute.vue', import.meta.url), 'utf8')
+import rootSource from './Root.vue?raw'
+import routerSource from './router.ts?raw'
+import workspaceSource from './WorkspaceRoute.vue?raw'
 
 describe('event detection platform shell contract', () => {
   it('keeps the legacy event center while adding a dedicated detection route', () => {
