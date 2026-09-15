@@ -39,7 +39,8 @@ describe('health reliability store', () => {
 
   it('caches 24h and 72h reports independently and force refresh bypasses cache', async () => {
     const get = vi.spyOn(axios, 'get').mockImplementation(async (_url, config) => {
-      const hours = Number(config?.params?.hours) as 24 | 72
+      const params = config?.params as { hours?: number } | undefined
+      const hours = Number(params?.hours) as 24 | 72
       return { data: report(hours) }
     })
     const store = useHealthReliabilityStore()
