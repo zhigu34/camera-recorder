@@ -10,6 +10,11 @@ describe('activity center v2.1 semantics', () => {
     expect(eventCenterSource).toContain('mergeActivityEvent')
   })
 
+  it('starts direct motion-event playback two seconds before detection begins', () => {
+    expect(eventCenterSource).toContain('motionPlaybackStartSeconds')
+    expect(eventCenterSource).toContain('motionPlaybackStartSeconds(event.started_at)')
+  })
+
   it('offers padded event playback and direct event clip export from activity detail', () => {
     expect(eventCenterSource).toContain('播放前后 10 秒')
     expect(eventCenterSource).toContain('导出事件片段')
