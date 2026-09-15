@@ -1,7 +1,6 @@
 import asyncio
-from typing import Literal
 
-from fastapi import APIRouter, Query, WebSocket
+from fastapi import APIRouter, HTTPException, Query, WebSocket
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
@@ -137,8 +136,10 @@ async def get_realtime_health() -> dict:
 
 @router.get("/api/health/reliability")
 async def get_health_reliability(
-    hours: Literal[24, 72] = Query(default=24),
+    hours: int = Query(default=24),
 ) -> dict:
+    if hours not in {24, 72}:
+        raise HTTPException(status_code=422, detail="hours must be 24 or 72")
     return await health_reliability(hours=hours)
 
 
