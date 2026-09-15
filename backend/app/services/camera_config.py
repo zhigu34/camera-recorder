@@ -1,6 +1,6 @@
-from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.services.ffmpeg_builder import CameraRuntimeConfig
+from app.services.stream_resolver import resolve_stream
 
 
 def runtime_config(
@@ -8,14 +8,11 @@ def runtime_config(
     *,
     align_segments_to_clock: bool | None = None,
 ) -> CameraRuntimeConfig:
+    stream = resolve_stream(camera, "recording")
     return CameraRuntimeConfig(
         id=camera.id,
         name=camera.name,
-        ip=camera.ip,
-        rtsp_port=camera.rtsp_port,
-        username=camera.username,
-        password=decrypt_secret(camera.password_encrypted),
-        rtsp_path=camera.rtsp_path,
+        stream_uri=stream.uri,
         timestamp_mode=camera.timestamp_mode,
         fps_num=camera.fps_num,
         fps_den=camera.fps_den,

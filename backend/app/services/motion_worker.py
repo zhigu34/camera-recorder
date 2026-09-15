@@ -13,7 +13,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.services.camera_preview import infer_substream_path
-from app.services.camera_probe import build_rtsp_url, probe_camera
+from app.services.camera_probe import build_rtsp_url, probe_camera, probe_stream_uri
 from app.services.motion_analysis import MotionAnalysisResult, MotionFrameAnalyzer
 from app.services.motion_detection import (
     ClosedMotionEvent,
@@ -56,9 +56,13 @@ class MotionWorkerConfig:
     merge_gap_ms: int
     zones: list[dict[str, Any]]
     event_min_interval_ms: int = 60_000
+    stream_uri: str | None = None
+    stream: MotionStream | None = None
 
 
 def select_motion_path(main_path: str, sub_path: str | None) -> tuple[str, MotionStream]:
+    """Compatibility helper; production stream selection belongs to stream_resolver."""
+
     configured = sub_path.strip() if sub_path else None
     if configured:
         return configured, "sub"
@@ -85,16 +89,22 @@ def scaled_dimensions(source_width: int, source_height: int, max_width: int) -> 
 
 def build_motion_command(
     *,
-    ip: str,
-    port: int,
-    username: str,
-    password: str,
-    rtsp_path: str,
     rtsp_timeout_us: int,
     fps: int,
     width: int,
+    stream_uri: str | None = None,
+    ip: str | None = None,
+    port: int | None = None,
+    username: str | None = None,
+    password: str | None = None,
+    rtsp_path: str | None = None,
 ) -> list[str]:
-    url = build_rtsp_url(ip, port, username, password, rtsp_path)
+    if stream_uri is None:
+        if None in {ip, port, username, password, rtsp_path}:
+            raise ValueError("stream_uri or complete legacy RTSP fields are required")
+        stream_uri = build_rtsp_url(
+            str(ip), int(port), str(username), str(password), str(rtsp_path)
+        )
     return [
         settings.ffmpeg_bin,
         "-nostdin",
@@ -110,7 +120,7 @@ def build_motion_command(
         "-flags",
         "low_delay",
         "-i",
-        url,
+        stream_uri,
         "-map",
         "0:v:0",
         "-an",
@@ -194,21 +204,41 @@ class MotionWorker:
         self.process: asyncio.subprocess.Process | None = None
 
     async def run(self) -> None:
-        path, stream = select_motion_path(self.config.main_path, self.config.sub_path)
+        legacy_path: str | None = None
+        if self.config.stream_uri is not None and self.config.stream is not None:
+            stream_uri = self.config.stream_uri
+            stream = self.config.stream
+        else:
+            legacy_path, stream = select_motion_path(self.config.main_path, self.config.sub_path)
+            stream_uri = build_rtsp_url(
+                self.config.ip,
+                self.config.port,
+                self.config.username,
+                self.config.password,
+                legacy_path,
+            )
+
         state: MotionEventStateMachine | None = None
         best_frame: np.ndarray | None = None
         best_quality: tuple[float, float] | None = None
         last_stable_motion_at: datetime | None = None
         self.on_status("starting", stream, None, None, None)
         try:
-            probe = await probe_camera(
-                ip=self.config.ip,
-                port=self.config.port,
-                username=self.config.username,
-                password=self.config.password,
-                rtsp_path=path,
-                rtsp_timeout_us=self.config.rtsp_timeout_us,
-            )
+            if self.config.stream_uri is not None:
+                probe = await probe_stream_uri(
+                    stream_uri=stream_uri,
+                    rtsp_timeout_us=self.config.rtsp_timeout_us,
+                )
+            else:
+                assert legacy_path is not None
+                probe = await probe_camera(
+                    ip=self.config.ip,
+                    port=self.config.port,
+                    username=self.config.username,
+                    password=self.config.password,
+                    rtsp_path=legacy_path,
+                    rtsp_timeout_us=self.config.rtsp_timeout_us,
+                )
             source_width = int(probe.get("width") or 0)
             source_height = int(probe.get("height") or 0)
             output_width, output_height = scaled_dimensions(
@@ -217,11 +247,7 @@ class MotionWorker:
                 self.config.analysis_width,
             )
             command = build_motion_command(
-                ip=self.config.ip,
-                port=self.config.port,
-                username=self.config.username,
-                password=self.config.password,
-                rtsp_path=path,
+                stream_uri=stream_uri,
                 rtsp_timeout_us=self.config.rtsp_timeout_us,
                 fps=self.config.analysis_fps,
                 width=self.config.analysis_width,

@@ -24,6 +24,9 @@ class Camera(Base):
     manufacturer: Mapped[str | None] = mapped_column(String(128), nullable=True)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     form_factor: Mapped[str] = mapped_column(String(32), default="unknown")
+    connection_type: Mapped[str] = mapped_column(
+        String(32), default="manual_rtsp", server_default="manual_rtsp", nullable=False
+    )
     ip: Mapped[str] = mapped_column(String(255), index=True)
     rtsp_port: Mapped[int] = mapped_column(Integer, default=554)
     username: Mapped[str] = mapped_column(String(128), default="admin")

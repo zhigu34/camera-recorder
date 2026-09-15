@@ -9,17 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings as app_settings
 from app.core.database import get_db
 from app.models.camera import Camera
-from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
+from app.models.motion import MotionEvent, MotionZone
 from app.schemas.motion import (
     MotionDetectionRead,
     MotionDetectionUpdate,
     MotionEventRead,
-    MotionRuntimeRead,
     MotionZoneCreate,
     MotionZoneRead,
     MotionZoneUpdate,
 )
 from app.services.motion_manager import motion_detection_manager
+from app.services.motion_settings import read_motion_detection, update_motion_detection_settings
 
 router = APIRouter(tags=["motion-detection"])
 
@@ -31,47 +31,13 @@ async def _camera_or_404(camera_id: int, db: AsyncSession) -> Camera:
     return camera
 
 
-async def _zones(camera_id: int, db: AsyncSession) -> list[MotionZone]:
-    result = await db.scalars(
-        select(MotionZone).where(MotionZone.camera_id == camera_id).order_by(MotionZone.id)
-    )
-    return list(result)
-
-
-def _runtime(
-    camera_id: int,
-    settings: MotionDetectionSettings | None,
-) -> MotionRuntimeRead:
-    if settings is None or not settings.enabled:
-        return MotionRuntimeRead(state="disabled")
-    return MotionRuntimeRead(**motion_detection_manager.status(camera_id))
-
-
-async def _read_settings(camera_id: int, db: AsyncSession) -> MotionDetectionRead:
-    settings = await db.get(MotionDetectionSettings, camera_id)
-    zones = await _zones(camera_id, db)
-    if settings is None:
-        return MotionDetectionRead(runtime=_runtime(camera_id, None), zones=zones)
-    return MotionDetectionRead(
-        enabled=settings.enabled,
-        sensitivity=settings.sensitivity,
-        analysis_fps=settings.analysis_fps,
-        analysis_width=settings.analysis_width,
-        min_duration_ms=settings.min_duration_ms,
-        merge_gap_ms=settings.merge_gap_ms,
-        event_min_interval_ms=settings.event_min_interval_ms,
-        runtime=_runtime(camera_id, settings),
-        zones=zones,
-    )
-
-
 @router.get(
     "/api/cameras/{camera_id}/motion-detection",
     response_model=MotionDetectionRead,
 )
 async def get_motion_detection(camera_id: int, db: AsyncSession = Depends(get_db)):
     await _camera_or_404(camera_id, db)
-    return await _read_settings(camera_id, db)
+    return await read_motion_detection(camera_id, db)
 
 
 @router.put(
@@ -84,17 +50,7 @@ async def update_motion_detection(
     db: AsyncSession = Depends(get_db),
 ):
     await _camera_or_404(camera_id, db)
-    settings = await db.get(MotionDetectionSettings, camera_id)
-    if settings is None:
-        settings = MotionDetectionSettings(camera_id=camera_id)
-        db.add(settings)
-
-    for field, value in payload.model_dump().items():
-        setattr(settings, field, value)
-    await db.commit()
-    await db.refresh(settings)
-    await motion_detection_manager.restart_camera(camera_id)
-    return await _read_settings(camera_id, db)
+    return await update_motion_detection_settings(camera_id, payload, db)
 
 
 @router.post(

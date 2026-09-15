@@ -8,11 +8,7 @@ def make_camera(**overrides) -> CameraRuntimeConfig:
     values = {
         "id": 1,
         "name": "test",
-        "ip": "192.0.2.10",
-        "rtsp_port": 554,
-        "username": "admin",
-        "password": "secret",
-        "rtsp_path": "/ch1/main",
+        "stream_uri": "rtsp://admin:secret@192.0.2.10:554/ch1/main",
         "timestamp_mode": "reconstruct",
         "fps_num": 20,
         "fps_den": 1,
@@ -43,6 +39,7 @@ def test_reconstruct_command_uses_detected_media_clock(tmp_path: Path):
     assert "-c:a copy" in joined
     assert "-segment_time 600" in joined
     assert "-segment_atclocktime 1" in joined
+    assert command[command.index("-i") + 1] == camera.stream_uri
 
 
 def test_wallclock_command_combines_timestamp_and_corrupt_packet_flags(tmp_path: Path):

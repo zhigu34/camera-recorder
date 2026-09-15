@@ -16,7 +16,7 @@ interface ZoneOverlay {
 }
 
 const props = defineProps<{
-  cameraId: number
+  cameraId: number | null
   modelValue: NormalizedPoint[]
   zones?: ZoneOverlay[]
 }>()
@@ -25,7 +25,9 @@ const emit = defineEmits<{
   (event: 'update:modelValue', value: NormalizedPoint[]): void
 }>()
 
-const previewSrc = computed(() => `/api/cameras/${props.cameraId}/preview.mjpeg?stream=auto&fps=1&width=960`)
+const previewSrc = computed(() => props.cameraId
+  ? `/api/cameras/${props.cameraId}/preview.mjpeg?stream=auto&fps=1&width=960`
+  : '')
 const draftPoints = computed(() => polygonToSvgPoints(props.modelValue))
 const draggingPointIndex = ref<number | null>(null)
 const activePointerId = ref<number | null>(null)
@@ -94,7 +96,7 @@ function clear() {
 <template>
   <div class="motion-zone-editor">
     <div class="motion-zone-canvas">
-      <img :src="previewSrc" :alt="`摄像头 ${cameraId} 检测区域背景`" />
+      <img v-if="previewSrc" :src="previewSrc" :alt="`摄像头 ${cameraId} 检测区域背景`" />
       <svg
         viewBox="0 0 100 100"
         preserveAspectRatio="none"

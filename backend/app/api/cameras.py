@@ -21,16 +21,12 @@ from app.schemas.camera import (
 )
 from app.services.camera_config import runtime_config
 from app.services.camera_identity import infer_camera_form_factor
-from app.services.camera_preview import (
-    CameraPreviewError,
-    PreviewStream,
-    open_mjpeg_preview,
-    resolve_preview_path,
-)
+from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
 from app.services.camera_probe import CameraProbeError, probe_camera
 from app.services.event_log import add_audit_event, add_event
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
+from app.services.stream_resolver import UnsupportedDeviceAdapter, resolve_stream
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
@@ -58,6 +54,7 @@ def _new_camera(payload: CameraCreate) -> Camera:
         manufacturer=payload.manufacturer,
         model=payload.model,
         form_factor=_resolved_form_factor(payload.manufacturer, payload.model, payload.form_factor),
+        connection_type=payload.connection_type,
         ip=payload.ip,
         rtsp_port=payload.rtsp_port,
         username=payload.username,
@@ -88,7 +85,7 @@ def _runtime_config_or_409(camera: Camera):
     except Exception as exc:
         raise HTTPException(
             status_code=409,
-            detail="摄像头密码无法解密，请编辑该摄像头并重新输入密码后保存",
+            detail="摄像头流配置不可用，请检查连接类型、账号和码流设置",
         ) from exc
 
 
@@ -255,36 +252,35 @@ async def preview_camera(
     async with SessionLocal() as db:
         camera = await _camera_or_404(camera_id, db)
         runtime = await load_runtime_settings(db)
-        password = _camera_password(camera)
-        main_rtsp_path = camera.rtsp_path
         try:
-            rtsp_path, selected_stream = resolve_preview_path(
-                main_path=main_rtsp_path,
-                sub_path=camera.sub_rtsp_path,
-                stream=stream,
+            resolved = resolve_stream(camera, "preview", preferred=stream)
+            fallback = (
+                resolve_stream(camera, "preview", preferred="main")
+                if stream == "auto" and resolved.role == "sub"
+                else None
             )
-        except CameraPreviewError as exc:
+        except (ValueError, UnsupportedDeviceAdapter, Exception) as exc:
+            # Resolver errors include credential decryption failures. Keep the
+            # existing configuration-error semantics rather than returning a 500.
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         preview_args = {
-            "ip": camera.ip,
-            "port": camera.rtsp_port,
-            "username": camera.username,
-            "password": password,
-            "rtsp_path": rtsp_path,
+            "stream_uri": resolved.uri,
             "rtsp_timeout_us": runtime.rtsp_timeout_us,
             "fps": fps,
             "width": width,
         }
+        selected_stream = resolved.role
+        fallback_uri = fallback.uri if fallback is not None else None
 
     try:
         session = await open_mjpeg_preview(**preview_args)
     except CameraPreviewError as exc:
-        if stream != "auto" or selected_stream != "sub":
+        if stream != "auto" or selected_stream != "sub" or fallback_uri is None:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
         # AUTO is a policy, not a hard dependency on the sub stream. A stale or
         # unsupported sub-stream path should not make detail preview unusable.
-        preview_args["rtsp_path"] = main_rtsp_path
+        preview_args["stream_uri"] = fallback_uri
         try:
             session = await open_mjpeg_preview(**preview_args)
         except CameraPreviewError as fallback_exc:

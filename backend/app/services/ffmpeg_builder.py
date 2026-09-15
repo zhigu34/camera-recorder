@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.camera_probe import build_rtsp_url
 from app.services.system_settings import RuntimeSettings
 
 
@@ -10,11 +9,7 @@ from app.services.system_settings import RuntimeSettings
 class CameraRuntimeConfig:
     id: int
     name: str
-    ip: str
-    rtsp_port: int
-    username: str
-    password: str
-    rtsp_path: str
+    stream_uri: str
     timestamp_mode: str
     fps_num: int | None
     fps_den: int | None
@@ -57,13 +52,6 @@ def build_record_command(
     runtime: RuntimeSettings,
 ) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    rtsp_url = build_rtsp_url(
-        camera.ip,
-        camera.rtsp_port,
-        camera.username,
-        camera.password,
-        camera.rtsp_path,
-    )
 
     input_fflags = "+discardcorrupt"
     if camera.timestamp_mode == "wallclock":
@@ -88,7 +76,7 @@ def build_record_command(
 
     command += [
         "-i",
-        rtsp_url,
+        camera.stream_uri,
         "-map",
         "0:v:0",
         "-map",

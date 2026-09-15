@@ -19,6 +19,7 @@ from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.recording import Recording
 from app.services.motion_detection import ClosedMotionEvent
 from app.services.motion_worker import MotionWorker, MotionWorkerConfig
+from app.services.stream_resolver import resolve_stream
 from app.services.system_settings import load_runtime_settings
 
 EnabledCameraLoader = Callable[[], Awaitable[list[int]]]
@@ -66,8 +67,11 @@ async def _default_config_loader(camera_id: int) -> MotionWorkerConfig | None:
             }
             for zone in zones_result
         ]
+        resolved = resolve_stream(camera, "detection")
         return MotionWorkerConfig(
             camera_id=camera.id,
+            # Legacy discrete fields remain on the config for compatibility with
+            # direct worker tests. Production execution uses stream_uri/stream below.
             ip=camera.ip,
             port=camera.rtsp_port,
             username=camera.username,
@@ -82,6 +86,8 @@ async def _default_config_loader(camera_id: int) -> MotionWorkerConfig | None:
             merge_gap_ms=motion.merge_gap_ms,
             zones=zones,
             event_min_interval_ms=motion.event_min_interval_ms,
+            stream_uri=resolved.uri,
+            stream=resolved.role,
         )
 
 

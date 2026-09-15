@@ -29,13 +29,10 @@ def test_preview_auto_prefers_configured_or_inferred_substream() -> None:
     ) == ("/Streaming/Channels/101", "main")
 
 
-def test_preview_command_uses_tcp_and_resource_limits() -> None:
+def test_preview_command_uses_resolved_uri_tcp_and_resource_limits() -> None:
+    stream_uri = "rtsp://admin:p%40ss%20word@192.0.2.10:554/ch1/sub"
     command = build_preview_command(
-        ip="192.0.2.10",
-        port=554,
-        username="admin",
-        password="p@ss word",
-        rtsp_path="/ch1/sub",
+        stream_uri=stream_uri,
         rtsp_timeout_us=5_000_000,
         fps=8,
         width=960,
@@ -47,4 +44,4 @@ def test_preview_command_uses_tcp_and_resource_limits() -> None:
     assert command[command.index("-vf") + 1] == "fps=8,scale='min(960,iw)':-2"
     assert command[command.index("-c:v") + 1] == "mjpeg"
     assert command[-2:] == ["mpjpeg", "pipe:1"]
-    assert "rtsp://admin:p%40ss%20word@192.0.2.10:554/ch1/sub" in command
+    assert command[command.index("-i") + 1] == stream_uri

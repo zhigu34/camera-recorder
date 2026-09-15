@@ -4,6 +4,11 @@ export function cameraRoute(cameraId: number): RouteLocationRaw {
   return { path: '/cameras', query: { camera_id: String(cameraId) } }
 }
 
+export function eventDetectionRoute(cameraId?: number | null): RouteLocationRaw {
+  if (!cameraId) return { path: '/event-detection' }
+  return { path: '/event-detection', query: { camera_id: String(cameraId) } }
+}
+
 export function eventRoute(eventId: number): RouteLocationRaw {
   return { path: '/events', query: { event_id: String(eventId) } }
 }
