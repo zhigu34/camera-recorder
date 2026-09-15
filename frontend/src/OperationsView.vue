@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Refresh, UploadFilled } from '@element-plus/icons-vue'
+import { formatDateTime } from './utils/dateTime'
 
 interface LogEntry {
   name: string
@@ -81,9 +82,7 @@ function formatBytes(value: number) {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return '尚无记录'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return value ? formatDateTime(value) : '尚无记录'
 }
 
 async function loadStatus() {
