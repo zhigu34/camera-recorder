@@ -99,6 +99,13 @@ export function wallClockSeconds(value?: string | null) {
   return Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) + fraction
 }
 
+export function motionPlaybackStartSeconds(value?: string | null, prerollSeconds = 2) {
+  const start = wallClockSeconds(value)
+  if (start === null) return null
+  const preroll = Number.isFinite(prerollSeconds) ? Math.max(0, prerollSeconds) : 0
+  return clampDay(start - preroll)
+}
+
 export function clampViewport(start: number, span: number) {
   const safeSpan = Math.max(1, Math.min(86400, span))
   return Math.max(0, Math.min(86400 - safeSpan, start))
@@ -172,8 +179,7 @@ export function findRecordingAtWallTime<T extends TimelineRecording>(recordings:
 }
 
 export function recordingSeekOffset(recording: TimelineRecording, wallSeconds: number) {
-  const start = wallClockSeconds(recording.started_at)
-  if (start === null) return 0
-  const duration = Math.max(0, Number(recording.duration || 0))
-  return Math.max(0, Math.min(duration, wallSeconds - start))
+  const range = recordingRange(recording)
+  if (!range) return 0
+  return Math.max(0, Math.min(range.end - range.start, wallSeconds - range.start))
 }

@@ -4,9 +4,11 @@ import {
   clampViewport,
   findRecordingAtWallTime,
   motionEventOverlapsRecordings,
+  motionPlaybackStartSeconds,
   moveTimelineRange,
   normalizeTimelineRange,
   rangePercent,
+  recordingSeekOffset,
   resizeTimelineRange,
   timeAtPointer,
   timeAtTrackPointer,
@@ -32,6 +34,16 @@ describe('timeAtPointer', () => {
     expect(timeAtPointer(3600, 3600, 0)).toBe(3600)
     expect(timeAtPointer(3600, 3600, 0.5)).toBe(5400)
     expect(timeAtPointer(3600, 3600, 1)).toBe(7200)
+  })
+})
+
+describe('motion event playback target', () => {
+  it('starts two seconds before the detected motion', () => {
+    expect(motionPlaybackStartSeconds('2026-09-13T10:00:05+08:00')).toBe(10 * 3600 + 3)
+  })
+
+  it('clamps preroll at the beginning of the day', () => {
+    expect(motionPlaybackStartSeconds('2026-09-13T00:00:01+08:00')).toBe(0)
   })
 })
 
@@ -111,6 +123,17 @@ describe('findRecordingAtWallTime', () => {
 
   it('returns null for a recording gap', () => {
     expect(findRecordingAtWallTime(recordings, 10 * 3600 + 15 * 60)).toBeNull()
+  })
+})
+
+describe('recordingSeekOffset', () => {
+  it('uses the actual recording range when duration metadata is missing or zero', () => {
+    expect(recordingSeekOffset({
+      id: 7,
+      started_at: '2026-09-13T10:00:00+08:00',
+      ended_at: '2026-09-13T10:10:00+08:00',
+      duration: 0,
+    }, 10 * 3600 + 30)).toBe(30)
   })
 })
 
