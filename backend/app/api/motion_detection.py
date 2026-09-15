@@ -148,7 +148,7 @@ async def list_motion_events(
         statement = statement.where(MotionEvent.camera_id == camera_id)
     if zone_id is not None:
         statement = statement.where(MotionEvent.zone_id == zone_id)
-    statement = statement.order_by(MotionEvent.started_at, MotionEvent.id).limit(limit)
+    statement = statement.order_by(MotionEvent.started_at.desc(), MotionEvent.id.desc()).limit(limit)
     result = await db.scalars(statement)
     return list(result)
 
