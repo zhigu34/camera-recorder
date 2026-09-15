@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RealtimeHealthSnapshot, SystemStatus } from '../../stores/runtime'
 
-const props = defineProps<{
+defineProps<{
   realtime: RealtimeHealthSnapshot | null
   system: SystemStatus | null
 }>()
