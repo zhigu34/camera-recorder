@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import axios from 'axios'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+
 import type { RealtimeHealthSnapshot, SystemStatus } from '../../stores/runtime'
 
 defineProps<{
@@ -10,10 +13,72 @@ const emit = defineEmits<{
   playback: []
 }>()
 
+interface LatencySummary {
+  p95_ms: number | null
+}
+
+interface PlaybackMetrics {
+  client: {
+    events: {
+      first_frame: LatencySummary & { count: number }
+      startup_error: { count: number }
+    }
+    compatibility: Array<{ success_rate: number | null }>
+  }
+}
+
+const PLAYBACK_REFRESH_MS = 60_000
+const playbackMetrics = ref<PlaybackMetrics | null>(null)
+let playbackTimer: number | null = null
+
+const startupAttempts = computed(() => {
+  if (!playbackMetrics.value) return 0
+  return playbackMetrics.value.client.events.first_frame.count + playbackMetrics.value.client.events.startup_error.count
+})
+const startupSuccessRate = computed(() => {
+  if (!playbackMetrics.value || startupAttempts.value === 0) return null
+  return playbackMetrics.value.client.events.first_frame.count / startupAttempts.value * 100
+})
+const compatibilityProblems = computed(() =>
+  (playbackMetrics.value?.client.compatibility || []).filter((item) => (item.success_rate ?? 100) < 98).length,
+)
+const playbackHealthy = computed(() => {
+  if (startupSuccessRate.value === null) return null
+  return startupSuccessRate.value >= 98 && compatibilityProblems.value === 0
+})
+
 function statusClass(ok: boolean | null) {
   if (ok === null) return 'unknown'
   return ok ? 'healthy' : 'attention'
 }
+
+function formatRate(value: number | null) {
+  return value === null ? '-' : `${value.toFixed(1)}%`
+}
+
+function formatMs(value: number | null | undefined) {
+  if (value === null || value === undefined) return '-'
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} s`
+  return `${Math.round(value)} ms`
+}
+
+async function loadPlaybackMetrics() {
+  try {
+    playbackMetrics.value = (await axios.get<PlaybackMetrics>('/api/playback/metrics')).data
+  } catch {
+    // Health remains usable when playback metrics are temporarily unavailable.
+  }
+}
+
+onMounted(() => {
+  void loadPlaybackMetrics()
+  playbackTimer = window.setInterval(() => void loadPlaybackMetrics(), PLAYBACK_REFRESH_MS)
+})
+
+onBeforeUnmount(() => {
+  if (playbackTimer !== null) window.clearInterval(playbackTimer)
+  playbackTimer = null
+})
 </script>
 
 <template>
@@ -37,8 +102,13 @@ function statusClass(ok: boolean | null) {
         <span><strong>FFmpeg / setts</strong><small>{{ system?.ffmpeg?.ffmpeg_version || '检测运行环境' }}</small></span><b>›</b>
       </button>
       <button type="button" @click="emit('playback')">
-        <i class="unknown"></i>
-        <span><strong>Web 回放</strong><small>打开兼容性诊断摘要</small></span><b>›</b>
+        <i :class="statusClass(playbackHealthy)"></i>
+        <span>
+          <strong>Web 回放</strong>
+          <small v-if="playbackMetrics">首帧成功率 {{ formatRate(startupSuccessRate) }} · 首帧 P95 {{ formatMs(playbackMetrics.client.events.first_frame.p95_ms) }} · 启动失败 {{ playbackMetrics.client.events.startup_error.count }} · 兼容异常组 {{ compatibilityProblems }}</small>
+          <small v-else>回放指标暂不可用</small>
+        </span>
+        <b>›</b>
       </button>
     </div>
   </section>
