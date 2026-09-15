@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Bell, CircleCheckFilled, Message, Monitor, Plus, Delete, WarningFilled } from '@element-plus/icons-vue'
+import { formatDateTime } from './utils/dateTime'
 
 interface EmailRecipient { name: string; address: string }
 interface EmailSettings {
@@ -176,10 +177,7 @@ function incidentLabel(value: string) {
   return value
 }
 function lastCheckText() {
-  const value = status.value?.alerts?.monitor?.last_check_at
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return formatDateTime(status.value?.alerts?.monitor?.last_check_at)
 }
 
 onMounted(() => { void load(); statusTimer = window.setInterval(loadStatus, 15000) })

@@ -27,6 +27,7 @@ import './styles/protect-admin-convergence.css'
 
 import Root from './Root.vue'
 import { router } from './router'
+import { bootstrapApplicationTimeZone } from './utils/applicationBootstrap'
 
 type ThemeMode = 'light' | 'dark'
 
@@ -40,10 +41,15 @@ const theme = initialTheme()
 document.documentElement.dataset.theme = theme
 document.documentElement.classList.toggle('dark', theme === 'dark')
 
-const app = createApp(Root)
-const pinia = createPinia()
+async function bootstrap() {
+  await bootstrapApplicationTimeZone()
+  const app = createApp(Root)
+  const pinia = createPinia()
 
-app.use(pinia)
-app.use(router)
-app.use(ElementPlus)
-app.mount('#app')
+  app.use(pinia)
+  app.use(router)
+  app.use(ElementPlus)
+  app.mount('#app')
+}
+
+void bootstrap()

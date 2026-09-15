@@ -6,6 +6,7 @@ import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useCameraStore, type RecordingWindow, type SharedCamera } from './stores/cameras'
 import { useRuntimeStore } from './stores/runtime'
+import { formatDateTime } from './utils/dateTime'
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
 const WORK_DAYS = [0, 1, 2, 3, 4]
@@ -271,7 +272,7 @@ onMounted(() => void load(false))
       <div class="manager-state">
         <span class="state-dot" :class="{ ok: managerHealthy }"></span>
         <span>{{ managerHealthy ? '调度器运行中' : '调度器需要关注' }}</span>
-        <small v-if="systemStatus?.recording_schedule?.last_check_at">最近校准 {{ new Date(systemStatus.recording_schedule.last_check_at).toLocaleString() }}</small>
+        <small v-if="systemStatus?.recording_schedule?.last_check_at">最近校准 {{ formatDateTime(systemStatus.recording_schedule.last_check_at) }}</small>
       </div>
       <div class="toolbar-actions">
         <span class="selected-note">已选择 {{ selectedIds.length }} 路</span>

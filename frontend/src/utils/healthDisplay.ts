@@ -1,4 +1,5 @@
 import type { ReliabilityConfidence, ReliabilityVerdict } from '../stores/healthReliability'
+import { formatDateTime } from './dateTime'
 
 export function formatBytes(value?: number | null) {
   const bytes = Math.max(0, Number(value || 0))
@@ -21,9 +22,7 @@ export function formatDuration(value?: number | null) {
 }
 
 export function formatTime(value?: string | null) {
-  if (!value) return '-'
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  return formatDateTime(value)
 }
 
 export function formatRate(value?: number | null) {

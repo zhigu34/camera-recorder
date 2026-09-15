@@ -234,6 +234,21 @@ jobs:
           done
           docker compose logs frontend
           exit 1
+      - name: Verify runtime timezone and frontend routes
+        run: |
+          curl -fsS http://127.0.0.1:8080/api/settings/runtime > /tmp/runtime-settings.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path('/tmp/runtime-settings.json').read_text())
+          assert payload.get('timezone') == 'Asia/Shanghai', payload
+          PY
+          curl -fsS http://127.0.0.1:8080/ >/dev/null
+          curl -fsS http://127.0.0.1:8080/cameras >/dev/null
+          curl -fsS http://127.0.0.1:8080/events >/dev/null
+          curl -fsS 'http://127.0.0.1:8080/settings?section=operations' >/dev/null
+          curl -fsS http://127.0.0.1:8080/uploads >/dev/null
       - name: Verify event detection deep link
         run: curl -fsS http://127.0.0.1:8080/event-detection >/dev/null
       - name: Verify frontend proxies backend health

@@ -1,6 +1,8 @@
 import pytest
+from fastapi.testclient import TestClient
 
 from app.core.database import Base
+from app.main import app
 from app.models.system_settings import SystemSettings
 from app.services.system_settings import load_runtime_settings, update_webdav_password
 
@@ -29,3 +31,13 @@ async def test_webdav_password_is_encrypted_and_loaded(monkeypatch, tmp_path):
         assert runtime.webdav_password == "super-secret"
 
     await engine.dispose()
+
+
+def test_runtime_settings_exposes_deployment_timezone(monkeypatch) -> None:
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+
+    with TestClient(app) as client:
+        response = client.get("/api/settings/runtime")
+
+    assert response.status_code == 200
+    assert response.json()["timezone"] == "Asia/Shanghai"

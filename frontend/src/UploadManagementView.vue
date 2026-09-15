@@ -7,6 +7,7 @@ import { ElMessage } from 'element-plus'
 import { Cloudy, Refresh, Search, Setting, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
 import { parsePositiveQueryId, uploadTaskLocation } from './utils/adminDeepLinks'
+import { formatDateTime } from './utils/dateTime'
 
 interface UploadTask {
   id: number
@@ -133,10 +134,7 @@ function fileName(task: UploadTask) {
 }
 
 function formatTime(value?: string | null) {
-  if (!value) return '-'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('zh-CN', { hour12: false })
+  return formatDateTime(value)
 }
 
 function formatBytes(bytes?: number | null) {

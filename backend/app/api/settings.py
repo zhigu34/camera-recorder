@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.timezone import configured_timezone_name
 from app.models.system_settings import SystemSettings
 from app.schemas.system_settings import SystemSettingsRead, SystemSettingsUpdate
 from app.services.event_log import add_audit_event, add_event
@@ -92,4 +93,5 @@ async def runtime_settings(db: AsyncSession = Depends(get_db)) -> dict:
         "upload_enabled": cfg.upload_enabled,
         "webdav_configured": cfg.webdav_configured,
         "segment_duration_seconds": cfg.segment_duration_seconds,
+        "timezone": configured_timezone_name(),
     }
