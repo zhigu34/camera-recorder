@@ -72,6 +72,14 @@ class OnvifCameraCreate(OnvifProbeRequest):
     timestamp_mode: TimestampMode = "reconstruct"
 
 
+class OnvifCameraUpdate(OnvifProbeRequest):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    form_factor: CameraFormFactor | None = None
+    enabled: bool | None = None
+    auto_record: bool | None = None
+    timestamp_mode: TimestampMode | None = None
+
+
 class OnvifProfileRead(BaseModel):
     token: str
     name: str
