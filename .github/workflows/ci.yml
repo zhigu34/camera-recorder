@@ -21,6 +21,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      - name: Check diff whitespace
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: git diff --check "$BASE_SHA...HEAD"
       - id: filter
         name: Classify changed paths
         shell: bash
@@ -155,10 +160,45 @@ jobs:
           done
           docker compose logs backend
           exit 1
-      - name: Verify database migration head
+      - name: Verify database migration compatibility
         run: |
           docker compose exec -T backend alembic current | tee /tmp/alembic-current
           grep -q '20260915_0017' /tmp/alembic-current
+          docker compose exec -T backend python - <<'PY'
+          import asyncio
+          from sqlalchemy import inspect
+          from app.core.database import engine
+
+          async def main():
+              async with engine.connect() as connection:
+                  tables = await connection.run_sync(
+                      lambda sync_connection: set(inspect(sync_connection).get_table_names())
+                  )
+                  required = {
+                      'cameras',
+                      'motion_detection_settings',
+                      'motion_zones',
+                      'motion_events',
+                  }
+                  missing = required - tables
+                  if missing:
+                      raise SystemExit(f'missing legacy tables after migration: {sorted(missing)}')
+                  columns = await connection.run_sync(
+                      lambda sync_connection: inspect(sync_connection).get_columns('cameras')
+                  )
+                  connection_type = next(
+                      (column for column in columns if column['name'] == 'connection_type'),
+                      None,
+                  )
+                  if connection_type is None:
+                      raise SystemExit('cameras.connection_type is missing')
+                  if 'manual_rtsp' not in str(connection_type.get('default') or ''):
+                      raise SystemExit(
+                          f"unexpected connection_type default: {connection_type.get('default')}"
+                      )
+
+          asyncio.run(main())
+          PY
       - name: Verify backend is internal only
         run: |
           python - <<'PY'
