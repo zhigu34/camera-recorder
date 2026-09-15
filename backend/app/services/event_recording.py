@@ -101,16 +101,31 @@ def select_buffer_segments(
     clip_start: datetime,
     clip_end: datetime,
 ) -> list[Path]:
-    selected: list[tuple[datetime, Path]] = []
+    """Select finalized segments beginning at/before clip_start through clip_end.
+
+    FFmpeg's segment muxer only cuts stream-copy input on suitable packet/keyframe
+    boundaries, so `segment_time=1` is a target rather than a guaranteed duration.
+    Choosing the closest segment whose start is not later than the requested window
+    protects the five-second pre-roll even with a long camera GOP. The clip may carry
+    a little extra leading video, but it must never lose requested pre-roll frames.
+    """
+
+    ordered: list[tuple[datetime, Path]] = []
     for path in paths:
         started_at = parse_segment_time(path)
-        if started_at is None:
-            continue
-        segment_end = started_at + timedelta(seconds=_BUFFER_SEGMENT_SECONDS)
-        if started_at <= clip_end and segment_end > clip_start:
-            selected.append((started_at, path))
-    selected.sort(key=lambda item: (item[0], item[1].name))
-    return [path for _, path in selected]
+        if started_at is not None and started_at <= clip_end:
+            ordered.append((started_at, path))
+    ordered.sort(key=lambda item: (item[0], item[1].name))
+    if not ordered:
+        return []
+
+    start_index = 0
+    for index, (started_at, _path) in enumerate(ordered):
+        if started_at <= clip_start:
+            start_index = index
+        else:
+            break
+    return [path for _started_at, path in ordered[start_index:]]
 
 
 def _concat_line(path: Path) -> str:
@@ -196,6 +211,7 @@ class EventRecordingManager:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._capture_locks: dict[int, asyncio.Lock] = {}
+        self._worker_lock = asyncio.Lock()
         self.buffer_root = settings.data_dir / "event-buffer"
 
     async def start(self) -> None:
@@ -214,8 +230,9 @@ class EventRecordingManager:
             with suppress(asyncio.CancelledError):
                 await task
         self._task = None
-        for camera_id in list(self._workers):
-            await self.stop_camera(camera_id)
+        async with self._worker_lock:
+            for camera_id in list(self._workers):
+                await self._stop_camera_unlocked(camera_id)
 
     async def _run(self) -> None:
         while not self._stop.is_set():
@@ -230,10 +247,14 @@ class EventRecordingManager:
             except TimeoutError:
                 pass
 
-    async def stop_camera(self, camera_id: int) -> None:
+    async def _stop_camera_unlocked(self, camera_id: int) -> None:
         worker = self._workers.pop(camera_id, None)
         if worker is not None:
             await worker.stop()
+
+    async def stop_camera(self, camera_id: int) -> None:
+        async with self._worker_lock:
+            await self._stop_camera_unlocked(camera_id)
 
     async def reconcile_once(self) -> int:
         async with SessionLocal() as db:
@@ -264,22 +285,23 @@ class EventRecordingManager:
                 continue
             eligible[camera.id] = (camera, stream_uri)
 
-        for camera_id in list(self._workers):
-            if camera_id not in eligible:
-                await self.stop_camera(camera_id)
+        async with self._worker_lock:
+            for camera_id in list(self._workers):
+                if camera_id not in eligible:
+                    await self._stop_camera_unlocked(camera_id)
 
-        for camera_id, (_camera, stream_uri) in eligible.items():
-            worker = self._workers.get(camera_id)
-            if worker is not None and worker.running and worker.stream_uri == stream_uri:
-                self._cleanup_ring(worker.output_dir)
-                continue
-            if worker is not None:
-                await self.stop_camera(camera_id)
-            output_dir = self.buffer_root / f"camera-{camera_id}"
-            worker = EventBufferWorker(camera_id, stream_uri, output_dir, runtime.rtsp_timeout_us)
-            self._workers[camera_id] = worker
-            await worker.start()
-            self._cleanup_ring(output_dir)
+            for camera_id, (_camera, stream_uri) in eligible.items():
+                worker = self._workers.get(camera_id)
+                if worker is not None and worker.running and worker.stream_uri == stream_uri:
+                    self._cleanup_ring(worker.output_dir)
+                    continue
+                if worker is not None:
+                    await self._stop_camera_unlocked(camera_id)
+                output_dir = self.buffer_root / f"camera-{camera_id}"
+                worker = EventBufferWorker(camera_id, stream_uri, output_dir, runtime.rtsp_timeout_us)
+                self._workers[camera_id] = worker
+                await worker.start()
+                self._cleanup_ring(output_dir)
         return len(eligible)
 
     def _cleanup_ring(self, output_dir: Path) -> None:
@@ -302,15 +324,30 @@ class EventRecordingManager:
     ) -> int | None:
         if recorder_manager.is_running(camera_id):
             return None
-        worker = self._workers.get(camera_id)
-        if worker is None or not worker.running:
-            return None
         lock = self._capture_locks.setdefault(camera_id, asyncio.Lock())
         async with lock:
             if recorder_manager.is_running(camera_id):
                 return None
-            clip_start, clip_end = event_clip_window(started_at, ended_at)
-            segments = select_buffer_segments(list(worker.output_dir.glob("*.mkv")), clip_start, clip_end)
+
+            # Gracefully stop the ring FFmpeg long enough to finalize its current MKV.
+            # Reading the active file directly can truncate the event tail. Restart it
+            # immediately after taking the immutable segment snapshot, before remuxing.
+            async with self._worker_lock:
+                worker = self._workers.get(camera_id)
+                if worker is None or not worker.running:
+                    return None
+                await worker.stop()
+                try:
+                    clip_start, clip_end = event_clip_window(started_at, ended_at)
+                    segments = select_buffer_segments(
+                        list(worker.output_dir.glob("*.mkv")),
+                        clip_start,
+                        clip_end,
+                    )
+                finally:
+                    if not recorder_manager.is_running(camera_id) and not self._stop.is_set():
+                        await worker.start()
+
             if not segments:
                 return None
             first_start = parse_segment_time(segments[0])
@@ -347,7 +384,7 @@ class EventRecordingManager:
 
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary = target.with_name(f".{target.name}.part.mp4")
-        concat_file = worker_list = self.buffer_root / f"camera-{camera_id}" / (
+        concat_file = self.buffer_root / f"camera-{camera_id}" / (
             f".concat-{started_at.strftime('%Y%m%d%H%M%S%f')}.txt"
         )
         temporary.unlink(missing_ok=True)
@@ -377,7 +414,14 @@ class EventRecordingManager:
         ]
         if video_codec == "hevc":
             command += ["-tag:v", "hvc1"]
-        command += ["-avoid_negative_ts", "make_zero", "-movflags", "+faststart", "-y", str(temporary)]
+        command += [
+            "-avoid_negative_ts",
+            "make_zero",
+            "-movflags",
+            "+faststart",
+            "-y",
+            str(temporary),
+        ]
         try:
             process = await asyncio.create_subprocess_exec(
                 *command,
@@ -392,7 +436,6 @@ class EventRecordingManager:
             if not media["has_video"]:
                 raise RuntimeError("event clip has no video stream")
             packet_ok, _packet_error = await scan_media_packets(target)
-            decode_ok = True
             warning_count = 0
             health = "healthy"
             if not packet_ok:
