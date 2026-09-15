@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.cameras import router as cameras_router
+from app.api.event_detection import router as event_detection_router
 from app.api.events import router as events_router
 from app.api.exports import router as exports_router
 from app.api.health import router as health_router
@@ -156,6 +157,7 @@ app.include_router(settings_router)
 app.include_router(health_router)
 app.include_router(preview_wall_router)
 app.include_router(motion_detection_router)
+app.include_router(event_detection_router)
 app.include_router(exports_router)
 app.include_router(operations_router)
 
