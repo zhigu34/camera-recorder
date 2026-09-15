@@ -212,7 +212,19 @@ class EventRecordingManager:
         self._stop = asyncio.Event()
         self._capture_locks: dict[int, asyncio.Lock] = {}
         self._worker_lock = asyncio.Lock()
+        self._pinned_since: dict[int, datetime] = {}
         self.buffer_root = settings.data_dir / "event-buffer"
+
+    def begin_event(self, camera_id: int, started_at: datetime) -> None:
+        """Pin the ring from five seconds before a confirmed event begins."""
+
+        pinned_at, _ = event_clip_window(started_at, started_at)
+        existing = self._pinned_since.get(camera_id)
+        if existing is None or pinned_at < existing:
+            self._pinned_since[camera_id] = pinned_at
+
+    def end_event(self, camera_id: int) -> None:
+        self._pinned_since.pop(camera_id, None)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -233,6 +245,7 @@ class EventRecordingManager:
         async with self._worker_lock:
             for camera_id in list(self._workers):
                 await self._stop_camera_unlocked(camera_id)
+        self._pinned_since.clear()
 
     async def _run(self) -> None:
         while not self._stop.is_set():
@@ -293,7 +306,7 @@ class EventRecordingManager:
             for camera_id, (_camera, stream_uri) in eligible.items():
                 worker = self._workers.get(camera_id)
                 if worker is not None and worker.running and worker.stream_uri == stream_uri:
-                    self._cleanup_ring(worker.output_dir)
+                    self._cleanup_ring(camera_id, worker.output_dir)
                     continue
                 if worker is not None:
                     await self._stop_camera_unlocked(camera_id)
@@ -301,16 +314,39 @@ class EventRecordingManager:
                 worker = EventBufferWorker(camera_id, stream_uri, output_dir, runtime.rtsp_timeout_us)
                 self._workers[camera_id] = worker
                 await worker.start()
-                self._cleanup_ring(output_dir)
+                self._cleanup_ring(camera_id, output_dir)
         return len(eligible)
 
-    def _cleanup_ring(self, output_dir: Path) -> None:
+    def _cleanup_ring(self, camera_id: int, output_dir: Path) -> None:
         files = sorted(output_dir.glob("*.mkv"), key=lambda path: path.stat().st_mtime)
         if len(files) <= 1:
             return
         cutoff = time.time() - _BUFFER_RETENTION_SECONDS
+        pinned_since = self._pinned_since.get(camera_id)
+
+        preserve_from: datetime | None = None
+        if pinned_since is not None:
+            parsed = sorted(
+                (
+                    (started_at, path)
+                    for path in files
+                    if (started_at := parse_segment_time(path)) is not None
+                ),
+                key=lambda item: (item[0], item[1].name),
+            )
+            if parsed:
+                preserve_from = parsed[0][0]
+                for started_at, _path in parsed:
+                    if started_at <= pinned_since:
+                        preserve_from = started_at
+                    else:
+                        break
+
         for path in files[:-1]:
             try:
+                started_at = parse_segment_time(path)
+                if preserve_from is not None and started_at is not None and started_at >= preserve_from:
+                    continue
                 if path.stat().st_mtime < cutoff:
                     path.unlink(missing_ok=True)
             except OSError:
@@ -485,6 +521,7 @@ class EventRecordingManager:
             "active_camera_ids": sorted(
                 camera_id for camera_id, worker in self._workers.items() if worker.running
             ),
+            "pinned_camera_ids": sorted(self._pinned_since),
             "pre_roll_seconds": _EVENT_PRE_ROLL_SECONDS,
             "retention_seconds": _BUFFER_RETENTION_SECONDS,
         }
