@@ -1,7 +1,7 @@
 # Settings Console V2 Design
 
 Date: 2026-09-15
-Status: Approved direction, pending written-spec review
+Status: Approved
 
 ## Goal
 
