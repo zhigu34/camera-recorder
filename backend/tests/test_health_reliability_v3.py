@@ -35,6 +35,14 @@ def test_reliability_builder_is_not_nested_on_legacy_reports() -> None:
     assert "stability_report(" not in source
 
 
+def test_compatibility_stability_reuses_unified_reliability_builder() -> None:
+    from app.services import stability_report as module
+
+    source = inspect.getsource(module.stability_report)
+    assert "health_trends(" not in source
+    assert "build_health_reliability_report(" in source
+
+
 def test_reliability_camera_contract_exposes_diagnostics_when_present() -> None:
     from app.services.health_reliability import camera_reliability_row
 
