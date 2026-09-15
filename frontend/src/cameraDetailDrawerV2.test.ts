@@ -18,12 +18,15 @@ describe('camera detail drawer v2', () => {
     expect(workspaceSource).toContain("camera_id: String(selectedCameraId.value)")
   })
 
-  it('keeps only an event detection summary and deep link in the drawer', () => {
+  it('keeps only an aggregate event detection summary and deep link in the drawer', () => {
     expect(workspaceSource).toContain('事件检测')
     expect(workspaceSource).toContain('本地移动检测')
     expect(workspaceSource).toContain('前往配置')
-    expect(workspaceSource).toContain('/event-detection/sources/local.motion')
+    expect(workspaceSource).toContain('axios.get<EventDetectionOverview>')
+    expect(workspaceSource).toContain('`/api/cameras/${cameraId}/event-detection`')
+    expect(workspaceSource).toContain("enabled_source_ids.includes('local.motion')")
     expect(workspaceSource).toContain('eventDetectionRoute(selectedCameraId.value)')
+    expect(workspaceSource).not.toContain('/event-detection/sources/local.motion')
     expect(workspaceSource).not.toContain('<MotionDetectionPanel')
   })
 })

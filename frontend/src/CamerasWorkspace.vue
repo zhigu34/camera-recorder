@@ -4,7 +4,7 @@ import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasView from './CamerasView.vue'
-import type { EventSourceRead } from './event-detection/types'
+import type { EventDetectionOverview } from './event-detection/types'
 import { eventDetectionRoute } from './navigation'
 import { cameraIdFromRouteQuery } from './utils/cameraMotionPortal'
 
@@ -18,19 +18,26 @@ const batchVisible = ref(false)
 const cameraViewKey = ref(0)
 const motionPortalReady = ref(false)
 const selectedCameraId = computed(() => cameraIdFromRouteQuery(route.query.camera_id))
-const detectionSource = ref<EventSourceRead | null>(null)
+const detectionOverview = ref<EventDetectionOverview | null>(null)
 const detectionLoading = ref(false)
 const detectionError = ref('')
 let portalObserver: MutationObserver | null = null
 let detectionRequestId = 0
 
-const motionEnabled = computed(() => detectionSource.value?.config.enabled === true)
+const motionSource = computed(() =>
+  detectionOverview.value?.sources.find((source) => source.id === 'local.motion') || null,
+)
+const motionEnabled = computed(() =>
+  detectionOverview.value?.enabled_source_ids.includes('local.motion') ?? false,
+)
 const motionRuntimeLabel = computed(() => {
   if (detectionLoading.value) return '读取中'
   if (detectionError.value) return '状态不可用'
-  if (!detectionSource.value) return '未读取'
-  if (!motionEnabled.value) return '未启用'
-  const state = detectionSource.value.descriptor.runtime_state
+  if (!motionSource.value) return '不可用'
+  if (motionSource.value.status === 'error') return '检测异常'
+  if (motionSource.value.status !== 'available') return '不可用'
+  if (!motionEnabled.value) return '已关闭'
+  const state = motionSource.value.runtime_state
   if (state === 'warming_up') return '背景学习中'
   if (state === 'stabilizing') return '画面稳定中'
   if (state === 'running') return '检测中'
@@ -40,10 +47,11 @@ const motionRuntimeLabel = computed(() => {
   if (state === 'stopped') return '等待启动'
   return '已启用'
 })
-const motionZoneSummary = computed(() => {
-  if (!detectionSource.value) return '区域状态未知'
-  const enabledZones = detectionSource.value.zones.filter((zone) => zone.enabled).length
-  return enabledZones ? `${enabledZones} 个启用区域` : '检测整个画面'
+const motionStatusSummary = computed(() => {
+  if (detectionError.value) return detectionError.value
+  if (!motionSource.value) return '当前摄像头没有可用的本地移动检测来源'
+  if (motionSource.value.reason) return motionSource.value.reason
+  return motionEnabled.value ? '配置已启用' : '当前未启用'
 })
 
 function todayString() {
@@ -62,7 +70,7 @@ function refreshMotionPortalTarget() {
 async function loadDetectionSummary() {
   const cameraId = selectedCameraId.value
   const requestId = ++detectionRequestId
-  detectionSource.value = null
+  detectionOverview.value = null
   detectionError.value = ''
   if (!cameraId) {
     detectionLoading.value = false
@@ -70,12 +78,12 @@ async function loadDetectionSummary() {
   }
   detectionLoading.value = true
   try {
-    const response = await axios.get<EventSourceRead>(
-      `/api/cameras/${cameraId}/event-detection/sources/local.motion`,
+    const response = await axios.get<EventDetectionOverview>(
+      `/api/cameras/${cameraId}/event-detection`,
     )
-    if (requestId === detectionRequestId) detectionSource.value = response.data
+    if (requestId === detectionRequestId) detectionOverview.value = response.data
   } catch {
-    if (requestId === detectionRequestId) detectionError.value = '移动检测状态读取失败'
+    if (requestId === detectionRequestId) detectionError.value = '事件检测状态读取失败'
   } finally {
     if (requestId === detectionRequestId) detectionLoading.value = false
   }
@@ -170,7 +178,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="event-detection-portal-status">
         <span class="portal-status-pill" :class="{ active: motionEnabled, error: detectionError }">{{ motionRuntimeLabel }}</span>
-        <small>{{ motionZoneSummary }}</small>
+        <small>{{ motionStatusSummary }}</small>
         <el-button text type="primary" :disabled="detectionLoading" @click="openEventDetection">前往配置</el-button>
       </div>
     </section>
