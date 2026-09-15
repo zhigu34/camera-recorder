@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,12 @@ def _recording(start: datetime, end: datetime):
 
 
 def _sample(at: datetime, *, expected: bool = True, state: str = "RECORDING"):
-    return SimpleNamespace(sampled_at=at, expected_recording=expected, state=state)
+    return SimpleNamespace(
+        sampled_at=at,
+        expected_recording=expected,
+        state=state,
+        recorder_ok=state == "RECORDING",
+    )
 
 
 def _event(code: str, created_at: datetime, metadata: dict | None = None):
