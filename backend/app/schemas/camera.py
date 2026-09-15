@@ -43,6 +43,71 @@ class RecordingWindow(BaseModel):
         return self
 
 
+class OnvifProbeRequest(BaseModel):
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(default=80, ge=1, le=65535)
+    username: str = Field(default="admin", max_length=128)
+    password: str = Field(min_length=1, max_length=512)
+
+    @field_validator("host")
+    @classmethod
+    def normalize_host(cls, value: str) -> str:
+        host = value.strip()
+        if not host or "://" in host or "/" in host:
+            raise ValueError("host must be a hostname or IP address")
+        return host
+
+    @property
+    def device_service_url(self) -> str:
+        authority = f"[{self.host}]" if ":" in self.host and not self.host.startswith("[") else self.host
+        return f"http://{authority}:{self.port}/onvif/device_service"
+
+
+class OnvifCameraCreate(OnvifProbeRequest):
+    name: str = Field(min_length=1, max_length=128)
+    form_factor: CameraFormFactor = "unknown"
+    connection_type: Literal["onvif"] = "onvif"
+    enabled: bool = True
+    auto_record: bool = False
+    timestamp_mode: TimestampMode = "reconstruct"
+
+
+class OnvifCameraUpdate(OnvifProbeRequest):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    form_factor: CameraFormFactor | None = None
+    enabled: bool | None = None
+    auto_record: bool | None = None
+    timestamp_mode: TimestampMode | None = None
+
+
+class OnvifProfileRead(BaseModel):
+    token: str
+    name: str
+    encoding: str | None = None
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+    uri: str
+
+
+class OnvifProbeResult(BaseModel):
+    manufacturer: str | None = None
+    model: str | None = None
+    firmware_version: str | None = None
+    serial_number: str | None = None
+    hardware_id: str | None = None
+    device_uuid: str | None = None
+    device_service_url: str
+    capabilities: dict[str, str | None]
+    profiles: list[OnvifProfileRead]
+    recording_profile_token: str
+    preview_profile_token: str
+    detection_profile_token: str
+    recording_uri: str
+    preview_uri: str
+    detection_uri: str
+
+
 class CameraBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     manufacturer: str | None = Field(default=None, max_length=128)
@@ -75,12 +140,9 @@ class CameraCreate(CameraBase):
     @model_validator(mode="after")
     def validate_schedule(self):
         if self.connection_type != "manual_rtsp":
-            raise ValueError("ONVIF camera creation is not available yet")
+            raise ValueError("use the dedicated ONVIF camera endpoint")
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
-        # A weekly recording schedule is an automatic-recording policy. Treating
-        # schedule_enabled=true together with auto_record=false as valid creates a
-        # contradictory state where configured windows can never start recording.
         if self.recording_schedule_enabled:
             self.auto_record = True
         return self
@@ -157,7 +219,7 @@ class CameraUpdate(BaseModel):
     @model_validator(mode="after")
     def normalize_schedule_policy(self):
         if self.connection_type not in {None, "manual_rtsp"}:
-            raise ValueError("ONVIF camera updates are not available yet")
+            raise ValueError("use the dedicated ONVIF camera endpoint")
         if self.recording_schedule_enabled is True:
             if self.recording_schedule == []:
                 raise ValueError("recording schedule requires at least one time window")
@@ -189,9 +251,6 @@ class CameraRead(CameraBase):
     channels: int | None = None
     audio_frame_samples: int | None = None
 
-    # status remains as a compatibility alias for connectivity_status. New
-    # clients should use the explicit fields below and never infer one state
-    # dimension from another.
     status: str
     connectivity_status: str = "unknown"
     connectivity_failures: int = 0
@@ -205,8 +264,6 @@ class CameraRead(CameraBase):
     @field_validator("recording_schedule", mode="before")
     @classmethod
     def normalize_legacy_schedule(cls, value: Any):
-        # Historical rows may contain NULL or malformed schedule JSON. Reading the
-        # camera list must never become a 500 because one old row is incomplete.
         if not isinstance(value, list):
             return []
         normalized: list[dict[str, Any]] = []
@@ -239,7 +296,6 @@ class CameraProbeResult(BaseModel):
     pixel_format: str | None = None
     has_b_frames: int | None = None
     video_time_base: str | None = None
-
     audio_codec: str | None = None
     audio_profile: str | None = None
     sample_rate: int | None = None

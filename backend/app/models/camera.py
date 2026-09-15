@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.onvif import OnvifDeviceMetadata
     from app.models.recording import Recording
 
 
@@ -56,18 +57,11 @@ class Camera(Base):
     channels: Mapped[int | None] = mapped_column(Integer, nullable=True)
     audio_frame_samples: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    # Kept for API/database compatibility. Connectivity observations own this field
-    # and represent unknown/online/offline. Recorder and schedule state are exposed
-    # independently through the properties below.
     status: Mapped[str] = mapped_column(String(32), default="unknown")
     last_probe_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_online_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     _connectivity_failures: Mapped[int] = mapped_column(
-        "connectivity_failures",
-        Integer,
-        default=0,
-        server_default="0",
-        nullable=False,
+        "connectivity_failures", Integer, default=0, server_default="0", nullable=False
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -80,6 +74,12 @@ class Camera(Base):
     recordings: Mapped[list["Recording"]] = relationship(
         back_populates="camera", cascade="all, delete-orphan"
     )
+    onvif_metadata: Mapped["OnvifDeviceMetadata | None"] = relationship(
+        back_populates="camera",
+        cascade="all, delete-orphan",
+        uselist=False,
+        lazy="joined",
+    )
 
     @property
     def connectivity_failures(self) -> int:
@@ -91,14 +91,6 @@ class Camera(Base):
 
     @validates("status")
     def _sync_explicit_connectivity_status(self, _key: str, value: str) -> str:
-        """Keep manual Probe writes and monitor hysteresis on one persisted streak.
-
-        The API already writes `status` for explicit Probe results. Synchronizing the
-        failure counter here keeps those results durable without making Probe a second
-        owner of connectivity state. The monitor overwrites the same counter with its
-        resolved hysteresis value during background cycles.
-        """
-
         if value == "online":
             self.connectivity_failures = 0
         elif value in {"offline", "probe_failed"}:
@@ -110,11 +102,9 @@ class Camera(Base):
                 from app.services.camera_connectivity_monitor import camera_connectivity_monitor
 
                 camera_connectivity_monitor.reconcile_manual_probe(
-                    int(camera_id),
-                    success=value == "online",
+                    int(camera_id), success=value == "online"
                 )
             except (ImportError, AttributeError):
-                # Model writes can occur while modules are still importing during startup/tests.
                 pass
         return value
 
@@ -128,19 +118,15 @@ class Camera(Base):
 
     @property
     def connectivity_status(self) -> str:
-        """Return fresh connectivity independently of recording/schedule state."""
-
         probed_at = self._utc(self.last_probe_at)
         if probed_at is not None:
             age = (datetime.now(timezone.utc) - probed_at).total_seconds()
             if age > _CONNECTIVITY_STALE_SECONDS:
                 return "unknown"
-
         if self.status == "online":
             return "online"
         if self.status in {"offline", "probe_failed"}:
             return "offline"
-
         if probed_at is None:
             return "unknown"
         online_at = self._utc(self.last_online_at)
