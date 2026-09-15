@@ -25,7 +25,7 @@ export interface MotionZoneRead {
   camera_id: number
   name: string
   enabled: boolean
-  polygon: number[][]
+  polygon: [number, number][]
   created_at?: string
   updated_at?: string
 }
