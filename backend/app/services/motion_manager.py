@@ -17,8 +17,10 @@ from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.recording import Recording
+from app.services.event_recording import event_recording_manager
 from app.services.motion_detection import ClosedMotionEvent
 from app.services.motion_worker import MotionWorker, MotionWorkerConfig
+from app.services.recorder_manager import recorder_manager
 from app.services.stream_resolver import resolve_stream
 from app.services.system_settings import load_runtime_settings
 
@@ -99,11 +101,7 @@ def _write_snapshot(path: Path, frame: np.ndarray) -> None:
     path.write_bytes(encoded.tobytes())
 
 
-async def _default_event_sink(
-    camera_id: int,
-    event: ClosedMotionEvent,
-    frame: np.ndarray | None,
-) -> None:
+async def _recording_for_event(camera_id: int, event: ClosedMotionEvent) -> int | None:
     async with SessionLocal() as db:
         recording = await db.scalar(
             select(Recording)
@@ -116,10 +114,27 @@ async def _default_event_sink(
             .order_by(Recording.started_at.desc())
             .limit(1)
         )
+        if recording is not None:
+            return int(recording.id)
+
+    # An active regular recorder owns the primary recording path. Its current segment
+    # may not be persisted yet, so never start a duplicate event recorder in that case.
+    if recorder_manager.is_running(camera_id):
+        return None
+    return await event_recording_manager.capture(camera_id, event.started_at, event.ended_at)
+
+
+async def _default_event_sink(
+    camera_id: int,
+    event: ClosedMotionEvent,
+    frame: np.ndarray | None,
+) -> None:
+    recording_id = await _recording_for_event(camera_id, event)
+    async with SessionLocal() as db:
         row = MotionEvent(
             camera_id=camera_id,
             zone_id=event.zone_id,
-            recording_id=recording.id if recording is not None else None,
+            recording_id=recording_id,
             started_at=event.started_at,
             ended_at=event.ended_at,
             peak_score=event.peak_score,
