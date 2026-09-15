@@ -14,10 +14,17 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.models.recording import Recording
+from app.services.event_log import add_event
 from app.services.recorder_manager import recorder_manager
 from app.services.system_settings import load_runtime_settings
 
 logger = logging.getLogger(__name__)
+
+
+class SegmentProcessingError(RuntimeError):
+    def __init__(self, stage: str, message: str) -> None:
+        super().__init__(message)
+        self.stage = stage
 
 
 def safe_camera_name(name: str) -> str:
@@ -276,6 +283,39 @@ class SegmentProcessor:
         if tasks:
             await asyncio.gather(*tasks)
 
+    async def _record_processing_failure(
+        self,
+        camera_id: int,
+        original: Path,
+        failed_path: Path,
+        exc: Exception,
+    ) -> None:
+        stage = str(getattr(exc, "stage", "process") or "process")
+        reason = str(exc).strip()[-1000:] or exc.__class__.__name__
+        segment_started_at = parse_segment_time(original)
+        if segment_started_at is None and failed_path.exists():
+            segment_started_at = datetime.fromtimestamp(failed_path.stat().st_mtime).astimezone()
+
+        async with SessionLocal() as session:
+            camera = await session.get(Camera, camera_id)
+            add_event(
+                session,
+                level="error",
+                category="recording",
+                code="recording.segment_processing_failed",
+                message="录像片段处理失败",
+                camera_id=camera_id if camera is not None else None,
+                metadata={
+                    "camera_id": camera_id,
+                    "segment_started_at": segment_started_at.isoformat() if segment_started_at else None,
+                    "source_path": str(original),
+                    "failed_path": str(failed_path),
+                    "stage": stage,
+                    "reason": reason,
+                },
+            )
+            await session.commit()
+
     async def _process_guarded(
         self, camera_id: int, path: Path, semaphore: asyncio.Semaphore
     ) -> None:
@@ -286,9 +326,14 @@ class SegmentProcessor:
             logger.exception("failed to process segment %s: %s", path, exc)
             failed_dir = settings.failed_dir / f"camera-{camera_id}"
             failed_dir.mkdir(parents=True, exist_ok=True)
+            destination = path
             if path.exists():
                 destination = failed_dir / path.name
                 await asyncio.to_thread(shutil.move, str(path), str(destination))
+            try:
+                await self._record_processing_failure(camera_id, path, destination, exc)
+            except Exception:
+                logger.exception("failed to persist processing failure for segment %s", path)
         finally:
             self._in_progress.discard(path)
 
@@ -296,11 +341,14 @@ class SegmentProcessor:
         async with SessionLocal() as session:
             camera = await session.get(Camera, camera_id)
             if camera is None:
-                raise RuntimeError(f"camera {camera_id} no longer exists")
+                raise SegmentProcessingError("camera_lookup", f"camera {camera_id} no longer exists")
 
-            started_at = parse_segment_time(source) or datetime.fromtimestamp(
-                source.stat().st_mtime
-            ).astimezone()
+            try:
+                started_at = parse_segment_time(source) or datetime.fromtimestamp(
+                    source.stat().st_mtime
+                ).astimezone()
+            except Exception as exc:
+                raise SegmentProcessingError("source", str(exc)) from exc
             safe_name = safe_camera_name(camera.name)
             date_dir = started_at.strftime("%Y-%m-%d")
             file_name = f"{safe_name}_{started_at.strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
@@ -311,13 +359,23 @@ class SegmentProcessor:
                 source.unlink(missing_ok=True)
                 return
 
-            await remux_to_mp4(source, target, camera.video_codec)
-            media = await probe_media(target)
+            try:
+                await remux_to_mp4(source, target, camera.video_codec)
+            except Exception as exc:
+                raise SegmentProcessingError("remux", str(exc)) from exc
+            try:
+                media = await probe_media(target)
+            except Exception as exc:
+                target.unlink(missing_ok=True)
+                raise SegmentProcessingError("probe", str(exc)) from exc
             if not media["has_video"]:
                 target.unlink(missing_ok=True)
-                raise RuntimeError("final MP4 has no video stream")
+                raise SegmentProcessingError("validate", "final MP4 has no video stream")
 
-            packet_ok, packet_error = await scan_media_packets(target)
+            try:
+                packet_ok, packet_error = await scan_media_packets(target)
+            except Exception as exc:
+                raise SegmentProcessingError("validate", str(exc)) from exc
             decode_ok = True
             decode_error: str | None = None
             health = "healthy"
@@ -331,7 +389,10 @@ class SegmentProcessor:
                 health = "warning"
                 warning_increment += 1
                 logger.warning("recording packet scan warning for %s: %s", target, packet_error)
-                decode_ok, decode_error = await decode_media_video(target)
+                try:
+                    decode_ok, decode_error = await decode_media_video(target)
+                except Exception as exc:
+                    raise SegmentProcessingError("decode", str(exc)) from exc
                 if not decode_ok:
                     health = "unhealthy"
                     warning_increment += 1
@@ -350,27 +411,30 @@ class SegmentProcessor:
             duration = media["duration"]
             ended_at = started_at + timedelta(seconds=duration) if duration else None
             recording = existing or Recording(camera_id=camera_id, mp4_path=str(target))
-            recording.started_at = started_at
-            recording.ended_at = ended_at
-            recording.duration = duration
-            recording.source_mkv_path = str(source)
-            recording.file_size = target.stat().st_size
-            recording.video_codec = media["video_codec"]
-            recording.audio_codec = media["audio_codec"]
-            recording.width = media["width"]
-            recording.height = media["height"]
-            recording.fps = media["fps"]
-            recording.status = "ready"
-            recording.health_status = health
-            recording.ffprobe_ok = 1
-            recording.has_video = int(media["has_video"])
-            recording.has_audio = int(media["has_audio"])
-            if warning_increment:
-                recording.warning_count = int(recording.warning_count or 0) + warning_increment
+            try:
+                recording.started_at = started_at
+                recording.ended_at = ended_at
+                recording.duration = duration
+                recording.source_mkv_path = str(source)
+                recording.file_size = target.stat().st_size
+                recording.video_codec = media["video_codec"]
+                recording.audio_codec = media["audio_codec"]
+                recording.width = media["width"]
+                recording.height = media["height"]
+                recording.fps = media["fps"]
+                recording.status = "ready"
+                recording.health_status = health
+                recording.ffprobe_ok = 1
+                recording.has_video = int(media["has_video"])
+                recording.has_audio = int(media["has_audio"])
+                if warning_increment:
+                    recording.warning_count = int(recording.warning_count or 0) + warning_increment
 
-            if existing is None:
-                session.add(recording)
-            await session.commit()
+                if existing is None:
+                    session.add(recording)
+                await session.commit()
+            except Exception as exc:
+                raise SegmentProcessingError("persist", str(exc)) from exc
             source.unlink(missing_ok=True)
 
 
