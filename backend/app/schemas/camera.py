@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
+CameraConnectionType = Literal["manual_rtsp", "onvif"]
 CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor", "panoramic"]
 
 
@@ -47,6 +48,7 @@ class CameraBase(BaseModel):
     manufacturer: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=128)
     form_factor: CameraFormFactor = "unknown"
+    connection_type: CameraConnectionType = "manual_rtsp"
     ip: str = Field(min_length=1, max_length=255)
     rtsp_port: int = Field(default=554, ge=1, le=65535)
     username: str = Field(default="admin", max_length=128)
@@ -72,6 +74,8 @@ class CameraCreate(CameraBase):
 
     @model_validator(mode="after")
     def validate_schedule(self):
+        if self.connection_type != "manual_rtsp":
+            raise ValueError("ONVIF camera creation is not available yet")
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
         # A weekly recording schedule is an automatic-recording policy. Treating
@@ -129,6 +133,7 @@ class CameraUpdate(BaseModel):
     manufacturer: str | None = Field(default=None, max_length=128)
     model: str | None = Field(default=None, max_length=128)
     form_factor: CameraFormFactor | None = None
+    connection_type: CameraConnectionType | None = None
     ip: str | None = Field(default=None, min_length=1, max_length=255)
     rtsp_port: int | None = Field(default=None, ge=1, le=65535)
     username: str | None = Field(default=None, max_length=128)
@@ -151,6 +156,8 @@ class CameraUpdate(BaseModel):
 
     @model_validator(mode="after")
     def normalize_schedule_policy(self):
+        if self.connection_type not in {None, "manual_rtsp"}:
+            raise ValueError("ONVIF camera updates are not available yet")
         if self.recording_schedule_enabled is True:
             if self.recording_schedule == []:
                 raise ValueError("recording schedule requires at least one time window")
