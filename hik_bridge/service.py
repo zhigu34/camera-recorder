@@ -4,6 +4,7 @@ import asyncio
 import queue
 import secrets
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -38,13 +39,16 @@ class StreamRequest:
     stream_type: int = 0
 
 
+_CLOSE_SENTINEL = object()
+
+
 @dataclass(slots=True)
 class _Session:
     stream_id: str
     user_id: int
     play_handle: int
     callback: Any
-    chunks: queue.Queue[bytes]
+    chunks: queue.Queue[bytes | object]
     overflowed: bool = False
     closed: bool = False
 
@@ -105,7 +109,7 @@ class HikBridgeService:
                 request.username,
                 request.password,
             )
-            chunks: queue.Queue[bytes] = queue.Queue(maxsize=self.queue_size)
+            chunks: queue.Queue[bytes | object] = queue.Queue(maxsize=self.queue_size)
             state: dict[str, Any] = {"session": None}
 
             def on_data(data: bytes) -> None:
@@ -145,6 +149,8 @@ class HikBridgeService:
         try:
             while not session.closed:
                 chunk = await asyncio.to_thread(session.chunks.get)
+                if chunk is _CLOSE_SENTINEL:
+                    break
                 if chunk:
                     yield chunk
                 if session.overflowed:
@@ -157,6 +163,16 @@ class HikBridgeService:
         if session is None or session.closed:
             return
         session.closed = True
+        # Wake a consumer that may currently be blocked waiting for SDK bytes.
+        # If the queue is full, discard one stale chunk to guarantee room for
+        # the close marker; on shutdown preserving every queued byte is not useful.
+        try:
+            session.chunks.put_nowait(_CLOSE_SENTINEL)
+        except queue.Full:
+            with suppress(queue.Empty):
+                session.chunks.get_nowait()
+            with suppress(queue.Full):
+                session.chunks.put_nowait(_CLOSE_SENTINEL)
         try:
             await asyncio.to_thread(self.sdk.stop_realplay, session.play_handle)
         finally:
