@@ -9,6 +9,7 @@ def runtime_config(
     align_segments_to_clock: bool | None = None,
 ) -> CameraRuntimeConfig:
     source = resolve_media_source(camera, "recording")
+    connection = getattr(camera, "connection", None)
     return CameraRuntimeConfig(
         id=camera.id,
         name=camera.name,
@@ -21,4 +22,5 @@ def runtime_config(
         audio_frame_samples=camera.audio_frame_samples,
         media_source=source,
         align_segments_to_clock=align_segments_to_clock,
+        connection_revision=(connection.revision if connection is not None else None),
     )
