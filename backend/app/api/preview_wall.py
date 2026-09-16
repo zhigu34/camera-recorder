@@ -94,6 +94,7 @@ async def preview_wall(websocket: WebSocket) -> None:
         except asyncio.CancelledError:
             raise
         except Exception as primary_exc:
+            error_detail = str(primary_exc)
             if fallback is not None:
                 active_stream = "main"
                 with suppress(Exception):
@@ -111,14 +112,12 @@ async def preview_wall(websocket: WebSocket) -> None:
                 except asyncio.CancelledError:
                     raise
                 except Exception as fallback_exc:
-                    primary_exc = RuntimeError(
-                        f"子码流与主码流均无法预览: {fallback_exc}"
-                    )
+                    error_detail = f"子码流与主码流均无法预览: {fallback_exc}"
             with suppress(Exception):
                 await send_json({
                     "type": "slot_error",
                     "slot": slot.index,
-                    "detail": str(primary_exc),
+                    "detail": error_detail,
                 })
 
     try:
