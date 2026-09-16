@@ -181,7 +181,7 @@ jobs:
       - name: Verify database migration compatibility
         run: |
           docker compose exec -T backend alembic current | tee /tmp/alembic-current
-          grep -q '20260916_0019' /tmp/alembic-current
+          grep -q '(head)' /tmp/alembic-current
           docker compose exec -T backend python - <<'PY'
           import asyncio
           from sqlalchemy import inspect
@@ -194,6 +194,8 @@ jobs:
                   )
                   required = {
                       'cameras',
+                      'camera_connections',
+                      'rtsp_connection_configs',
                       'motion_detection_settings',
                       'motion_zones',
                       'motion_events',
