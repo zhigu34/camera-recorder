@@ -14,6 +14,25 @@ def _sqlite_path() -> Path:
     return Path(settings.database_url.removeprefix(prefix))
 
 
+def _remove_camera_recordings(camera_id: int) -> None:
+    connection = sqlite3.connect(_sqlite_path())
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            """
+            DELETE FROM upload_tasks
+            WHERE recording_id IN (
+                SELECT id FROM recordings WHERE camera_id = ?
+            )
+            """,
+            (camera_id,),
+        )
+        connection.execute("DELETE FROM recordings WHERE camera_id = ?", (camera_id,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def test_adjacent_recording_crosses_days_and_skips_unavailable(tmp_path):
     camera_name = f"pytest-nav-{uuid.uuid4().hex[:10]}"
     current_path = tmp_path / "current.mp4"
@@ -134,6 +153,7 @@ def test_adjacent_recording_crosses_days_and_skips_unavailable(tmp_path):
         assert reverse_body["date"] == "2026-09-11"
         assert reverse_body["item"]["id"] == current_id
 
+        _remove_camera_recordings(camera_id)
         delete_response = client.delete(f"/api/cameras/{camera_id}")
         assert delete_response.status_code == 204
 
