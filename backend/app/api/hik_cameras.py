@@ -26,6 +26,13 @@ from app.services.system_settings import load_runtime_settings
 router = APIRouter(prefix="/api/cameras/hik", tags=["hik-cameras"])
 
 
+def _bridge_http_status(exc: HikBridgeClientError) -> int:
+    code = exc.status_code
+    if code is not None and 400 <= code < 600:
+        return code
+    return 502
+
+
 async def _probe_hik(payload: HikProbeRequest) -> HikProbeResult:
     client = HikBridgeClient()
     try:
@@ -36,7 +43,7 @@ async def _probe_hik(payload: HikProbeRequest) -> HikProbeResult:
             password=payload.password,
         )
     except HikBridgeClientError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=_bridge_http_status(exc), detail=str(exc)) from exc
     value = dict(value)
     value["channel"] = payload.channel
     return HikProbeResult.model_validate(value)
@@ -61,7 +68,7 @@ async def _validate_main_stream(payload: HikProbeRequest, db: AsyncSession) -> d
             rtsp_timeout_us=runtime.rtsp_timeout_us,
         )
     except HikBridgeClientError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=_bridge_http_status(exc), detail=str(exc)) from exc
     except CameraProbeError as exc:
         raise HTTPException(
             status_code=502,
