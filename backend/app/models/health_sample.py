@@ -16,7 +16,7 @@ class CameraHealthSample(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     camera_id: Mapped[int] = mapped_column(
-        ForeignKey("cameras.id", ondelete="CASCADE"), index=True, nullable=False
+        ForeignKey("cameras.id", ondelete="RESTRICT"), index=True, nullable=False
     )
     sampled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), index=True, nullable=False

@@ -57,7 +57,7 @@ class MotionEvent(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     camera_id: Mapped[int] = mapped_column(
-        ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False, index=True
+        ForeignKey("cameras.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     zone_id: Mapped[int | None] = mapped_column(
         ForeignKey("motion_zones.id", ondelete="SET NULL"), nullable=True, index=True

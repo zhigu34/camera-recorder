@@ -81,7 +81,7 @@ class Camera(Base):
         lazy="joined",
     )
     recordings: Mapped[list["Recording"]] = relationship(
-        back_populates="camera", cascade="all, delete-orphan"
+        back_populates="camera", passive_deletes="all"
     )
     onvif_metadata: Mapped["OnvifDeviceMetadata | None"] = relationship(
         back_populates="camera",
