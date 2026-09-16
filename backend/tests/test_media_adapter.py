@@ -43,6 +43,22 @@ def test_registry_selects_strictly_by_connection_type() -> None:
     assert source.bridge_stream_id == "opaque-session"
 
 
+def test_registry_prefers_current_connection_adapter_over_legacy_shadow() -> None:
+    registry = MediaAdapterRegistry()
+    registry.register("manual_rtsp", FakeAdapter("manual_rtsp"))
+    registry.register("hik_sdk", FakeAdapter("hik_sdk", transport="hik_bridge"))
+
+    camera = SimpleNamespace(
+        connection_type="hik_sdk",
+        ip="10.0.0.9",
+        connection=SimpleNamespace(adapter="manual_rtsp"),
+    )
+    source = registry.resolve(camera, "preview")
+
+    assert source.adapter == "manual_rtsp"
+    assert source.transport == "rtsp"
+
+
 def test_registry_never_falls_back_for_unknown_type() -> None:
     registry = MediaAdapterRegistry()
     registry.register("manual_rtsp", FakeAdapter("manual_rtsp"))
