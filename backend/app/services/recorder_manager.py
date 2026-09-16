@@ -7,6 +7,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.services.camera_connection_revision import connection_revision_state
 from app.services.email_notifier import email_notifier
 from app.services.event_log import add_event
 from app.services.ffmpeg_builder import CameraRuntimeConfig, build_record_command, redact_command
@@ -144,6 +145,21 @@ class CameraWorker:
 
         while not self.stop_requested:
             self.state = "STARTING" if attempt == 0 else "RECONNECTING"
+            revision_state = await connection_revision_state(
+                self.camera.id,
+                self.camera.connection_revision,
+            )
+            if revision_state == "stale":
+                await self._log(
+                    "connection revision stale; stopping worker "
+                    f"(expected={self.camera.connection_revision})"
+                )
+                break
+            if revision_state == "unknown":
+                await self._log(
+                    "connection revision check unavailable; continuing worker "
+                    f"(expected={self.camera.connection_revision})"
+                )
             try:
                 async with SessionLocal() as session:
                     runtime = await load_runtime_settings(session)
