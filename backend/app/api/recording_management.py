@@ -161,6 +161,7 @@ async def _delete_recordings(ids: list[int], db: AsyncSession) -> RecordingDelet
                     "cloud_available": cloud_available,
                     "reason": "manual",
                 },
+                blocks_camera_delete=True,
             )
 
             if cloud_available:

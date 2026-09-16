@@ -15,6 +15,25 @@ def _sqlite_path() -> Path:
     return Path(settings.database_url.removeprefix(prefix))
 
 
+def _remove_camera_recordings(camera_id: int) -> None:
+    connection = sqlite3.connect(_sqlite_path())
+    try:
+        connection.execute("PRAGMA foreign_keys=ON")
+        connection.execute(
+            """
+            DELETE FROM upload_tasks
+            WHERE recording_id IN (
+                SELECT id FROM recordings WHERE camera_id = ?
+            )
+            """,
+            (camera_id,),
+        )
+        connection.execute("DELETE FROM recordings WHERE camera_id = ?", (camera_id,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def test_recording_browser_empty_day_shape(monkeypatch):
     monkeypatch.setenv("TZ", "Asia/Shanghai")
     with TestClient(app) as client:
@@ -120,6 +139,7 @@ def test_recording_browser_includes_evening_local_timestamp(monkeypatch):
             }
         ]
 
+        _remove_camera_recordings(camera_id)
         delete_response = client.delete(f"/api/cameras/{camera_id}")
         assert delete_response.status_code == 204
 
@@ -229,6 +249,7 @@ def test_cloud_playback_uses_openlist_stream_without_predownload(monkeypatch):
         assert stream.status_code == 307
         assert stream.headers["location"] == f"/api/recordings/{recording_id}/cloud-stream"
 
+        _remove_camera_recordings(camera_id)
         delete_response = client.delete(f"/api/cameras/{camera_id}")
         assert delete_response.status_code == 204
 

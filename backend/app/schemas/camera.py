@@ -312,3 +312,13 @@ class CameraRuntimeStatus(BaseModel):
     timestamp_warning_count: int = 0
     network_warning_count: int = 0
     last_error: str | None = None
+
+
+class CameraDeletionImpact(BaseModel):
+    camera_id: int
+    recordings: int = 0
+    motion_events: int = 0
+    health_samples: int = 0
+    blocking_events: int = 0
+    pending_uploads: int = 0
+    can_delete: bool

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.camera_connection import CameraConnection
     from app.models.hikvision import HikDeviceMetadata
     from app.models.onvif import OnvifDeviceMetadata
     from app.models.recording import Recording
@@ -72,8 +73,15 @@ class Camera(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    connection: Mapped["CameraConnection | None"] = relationship(
+        back_populates="camera",
+        cascade="all, delete-orphan",
+        uselist=False,
+        single_parent=True,
+        lazy="joined",
+    )
     recordings: Mapped[list["Recording"]] = relationship(
-        back_populates="camera", cascade="all, delete-orphan"
+        back_populates="camera", passive_deletes="all"
     )
     onvif_metadata: Mapped["OnvifDeviceMetadata | None"] = relationship(
         back_populates="camera",

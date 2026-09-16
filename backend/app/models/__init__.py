@@ -1,4 +1,5 @@
 from app.models.camera import Camera
+from app.models.camera_connection import CameraConnection, RtspConnectionConfig
 from app.models.event import Event
 from app.models.health_sample import CameraHealthSample
 from app.models.hikvision import HikDeviceMetadata
@@ -12,6 +13,8 @@ from app.models.upload import UploadTask
 
 __all__ = [
     "Camera",
+    "CameraConnection",
+    "RtspConnectionConfig",
     "OnvifDeviceMetadata",
     "HikDeviceMetadata",
     "Recording",
