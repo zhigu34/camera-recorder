@@ -33,12 +33,23 @@ async def _event_sink(_camera_id, _event, _frame) -> None:
 
 @pytest.mark.asyncio
 async def test_stale_revision_stops_before_first_motion_worker(monkeypatch) -> None:
-    worker_calls: list[int] = []
+    worker_calls = 0
     checks: list[tuple[int, int | None]] = []
+
+    class StopWorker:
+        def __init__(self, _config, *, on_event, on_status):
+            nonlocal worker_calls
+            worker_calls += 1
+            self.on_event = on_event
+            self.on_status = on_status
+            self.on_event_started = None
+
+        async def run(self) -> None:
+            manager._running = False
 
     manager = MotionDetectionManager(
         event_sink=_event_sink,
-        worker_factory=lambda *_args, **_kwargs: worker_calls.append(1),
+        worker_factory=StopWorker,
         reconnect_delays=(0.0,),
     )
     manager._running = True
@@ -57,7 +68,7 @@ async def test_stale_revision_stops_before_first_motion_worker(monkeypatch) -> N
     await manager._supervise(_config())
 
     assert checks == [(31, 11)]
-    assert worker_calls == []
+    assert worker_calls == 0
     assert manager.status(31)["state"] == "stopped"
     assert manager.status(31)["last_error"] is None
 
@@ -68,20 +79,23 @@ async def test_stale_revision_prevents_motion_reconnect(monkeypatch) -> None:
     worker_calls = 0
     states = iter(("current", "stale"))
 
-    class FailWorker:
+    class FailThenStopWorker:
         def __init__(self, _config, *, on_event, on_status):
             nonlocal worker_calls
             worker_calls += 1
             self.on_event = on_event
             self.on_status = on_status
             self.on_event_started = None
+            self.attempt = worker_calls
 
         async def run(self) -> None:
-            raise RuntimeError("stream failed")
+            if self.attempt == 1:
+                raise RuntimeError("stream failed")
+            manager._running = False
 
     manager = MotionDetectionManager(
         event_sink=_event_sink,
-        worker_factory=FailWorker,
+        worker_factory=FailThenStopWorker,
         reconnect_delays=(0.0,),
     )
     manager._running = True
