@@ -1,18 +1,9 @@
-from app.services.device_adapter import (
-    ManualRtspDeviceAdapter,
-    ResolvedStream,
-    StreamPreference,
-    StreamPurpose,
-)
-from app.services.onvif_device_adapter import OnvifDeviceAdapter
+from app.services.device_adapter import ResolvedStream
+from app.services.media_adapter import UnsupportedMediaAdapter, resolve_media_source
+from app.services.media_source import StreamPreference, StreamPurpose
 
 
-class UnsupportedDeviceAdapter(RuntimeError):
-    pass
-
-
-_manual_rtsp = ManualRtspDeviceAdapter()
-_onvif = OnvifDeviceAdapter()
+UnsupportedDeviceAdapter = UnsupportedMediaAdapter
 
 
 def resolve_stream(
@@ -21,9 +12,9 @@ def resolve_stream(
     *,
     preferred: StreamPreference = "auto",
 ) -> ResolvedStream:
-    connection_type = getattr(camera, "connection_type", "manual_rtsp")
-    if connection_type == "manual_rtsp":
-        return _manual_rtsp.resolve_stream(camera, purpose, preferred=preferred)
-    if connection_type == "onvif":
-        return _onvif.resolve_stream(camera, purpose, preferred=preferred)
-    raise UnsupportedDeviceAdapter(f"connection type {connection_type} is not implemented")
+    source = resolve_media_source(camera, purpose, preferred=preferred)
+    if source.transport != "rtsp" or not source.uri:
+        raise UnsupportedDeviceAdapter(
+            f"media adapter {source.adapter} does not expose a URI stream; use resolve_media_source"
+        )
+    return ResolvedStream(uri=source.uri, role=source.role, purpose=source.purpose)

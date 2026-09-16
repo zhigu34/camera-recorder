@@ -1,16 +1,17 @@
 from app.core.security import decrypt_secret
-from app.services.device_adapter import ResolvedStream, StreamPreference, StreamPurpose
+from app.services.device_adapter import ResolvedStream
+from app.services.media_source import MediaSource, StreamPreference, StreamPurpose
 from app.services.onvif_client import inject_uri_credentials
 
 
 class OnvifDeviceAdapter:
-    def resolve_stream(
+    def resolve_media_source(
         self,
         camera,
         purpose: StreamPurpose,
         *,
         preferred: StreamPreference = "auto",
-    ) -> ResolvedStream:
+    ) -> MediaSource:
         metadata = getattr(camera, "onvif_metadata", None)
         if metadata is None:
             raise ValueError("ONVIF metadata is missing; re-add or repair the camera")
@@ -59,4 +60,24 @@ class OnvifDeviceAdapter:
             str(camera.username),
             decrypt_secret(str(camera.password_encrypted)),
         )
-        return ResolvedStream(uri=uri, role=role, purpose=purpose)
+        return MediaSource(
+            adapter="onvif",
+            transport="rtsp",
+            uri=uri,
+            role=role,
+            purpose=purpose,
+        )
+
+    def resolve_stream(
+        self,
+        camera,
+        purpose: StreamPurpose,
+        *,
+        preferred: StreamPreference = "auto",
+    ) -> ResolvedStream:
+        source = self.resolve_media_source(camera, purpose, preferred=preferred)
+        assert source.uri is not None
+        return ResolvedStream(uri=source.uri, role=source.role, purpose=source.purpose)
+
+
+OnvifMediaAdapter = OnvifDeviceAdapter
