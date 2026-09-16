@@ -8,8 +8,12 @@ def _compose_config() -> dict:
     return yaml.safe_load(compose_path.read_text(encoding="utf-8"))
 
 
+def _deploy_script() -> str:
+    return (Path(__file__).resolve().parents[2] / "deploy.sh").read_text(encoding="utf-8")
+
+
 def test_deploy_tracks_hik_bridge_and_private_runtime_changes() -> None:
-    script = (Path(__file__).resolve().parents[2] / "deploy.sh").read_text(encoding="utf-8")
+    script = _deploy_script()
 
     assert "UPDATE_HIK" in script
     assert "hik_sdk_hash=" in script
@@ -21,7 +25,7 @@ def test_deploy_tracks_hik_bridge_and_private_runtime_changes() -> None:
 
 
 def test_deploy_classifies_hik_runtime_paths_without_full_deploy() -> None:
-    script = (Path(__file__).resolve().parents[2] / "deploy.sh").read_text(encoding="utf-8")
+    script = _deploy_script()
 
     assert "hik-sdk-runtime/.gitkeep) ;;" in script
     assert "hik-sdk-runtime/*) UPDATE_HIK=1 ;;" in script
@@ -40,3 +44,10 @@ def test_backend_does_not_require_hik_bridge_health() -> None:
     dependency = compose["services"]["backend"]["depends_on"]["hik-bridge"]
 
     assert dependency["condition"] == "service_started"
+
+
+def test_hik_bridge_health_failure_is_non_fatal_for_deployment() -> None:
+    script = _deploy_script()
+
+    assert 'fail "HIK bridge 未通过健康检查"' not in script
+    assert 'warn "HIK bridge 未通过健康检查；HIK SDK 设备暂不可用，继续检查主系统"' in script
