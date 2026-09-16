@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from app.core.config import settings
+from app.services.media_input import media_input_from_uri
 
 PreviewStream = Literal["auto", "main", "sub"]
 
@@ -58,22 +59,20 @@ def build_preview_command(
     fps: int,
     width: int,
 ) -> list[str]:
+    media_input = media_input_from_uri(stream_uri, timeout_us=rtsp_timeout_us)
     return [
         settings.ffmpeg_bin,
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        str(rtsp_timeout_us),
+        *media_input.transport_args,
         "-fflags",
         "nobuffer",
         "-flags",
         "low_delay",
         "-i",
-        stream_uri,
+        media_input.uri,
         "-map",
         "0:v:0",
         "-an",
@@ -155,6 +154,6 @@ async def open_mjpeg_preview(
 
     if not first_chunk:
         await _stop_process(process)
-        raise CameraPreviewError("无法打开实时预览码流，请检查 RTSP 路径、账号和网络")
+        raise CameraPreviewError("无法打开实时预览码流，请检查媒体源配置、账号和网络")
 
     return PreviewSession(process=process, first_chunk=first_chunk)
