@@ -6,8 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 LEGACY_REVISION = "20260916_0019"
 CONNECTION_REVISION = "20260916_0020"
