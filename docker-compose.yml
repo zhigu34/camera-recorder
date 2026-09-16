@@ -1,13 +1,39 @@
 name: camera-recorder
 
 services:
+  hik-bridge:
+    image: camera-recorder-core:local
+    container_name: camera-recorder-hik-bridge
+    init: true
+    restart: unless-stopped
+    working_dir: /app
+    command: ["/app/backend/.venv/bin/uvicorn", "hik_bridge.app:app", "--host", "0.0.0.0", "--port", "8100"]
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      HIK_SDK_PATH: /opt/hikvision/runtime
+      LD_LIBRARY_PATH: /opt/hikvision/runtime:/opt/hikvision/runtime/HCNetSDKCom
+    volumes:
+      - ${HIK_SDK_DIR:-./hik-sdk-runtime}:/opt/hikvision/runtime:ro
+    expose:
+      - "8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
   backend:
+    image: camera-recorder-core:local
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: camera-recorder-backend
     init: true
     restart: unless-stopped
+    depends_on:
+      hik-bridge:
+        condition: service_healthy
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CAMREC_SECRET_KEY: ${CAMREC_SECRET_KEY:-camera-recorder-local-change-me}
@@ -18,6 +44,8 @@ services:
       CAMREC_FAILED_DIR: /app/failed
       CAMREC_LOGS_DIR: /app/logs
       CAMREC_OPENLIST_PUBLIC_PORT: ${OPENLIST_PORT:-5244}
+      CAMREC_HIK_BRIDGE_URL: http://hik-bridge:8100
+      CAMREC_INTERNAL_MEDIA_URL: http://127.0.0.1:8000
     volumes:
       - ./data:/app/data
       - ./recordings:/app/recordings
