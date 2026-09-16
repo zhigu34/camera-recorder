@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from hik_bridge.service import HikBridgeError, HikBridgeService, StreamRequest
@@ -105,6 +107,27 @@ async def test_stop_stream_is_idempotent():
     )
     await service.stop_stream(stream_id)
     await service.stop_stream(stream_id)
+    assert sdk.stopped == [9]
+    assert sdk.logouts == [7]
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_stop_stream_unblocks_idle_media_iterator():
+    sdk = FakeSdk()
+    service = HikBridgeService(sdk)
+    await service.start()
+    stream_id = await service.create_stream(
+        StreamRequest("10.0.0.8", 8000, "admin", "secret", 1, 0)
+    )
+    iterator = service.iter_stream(stream_id)
+    waiting = asyncio.create_task(anext(iterator))
+    await asyncio.sleep(0)
+
+    await service.stop_stream(stream_id)
+
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(waiting, timeout=1.0)
     assert sdk.stopped == [9]
     assert sdk.logouts == [7]
     await service.stop()
