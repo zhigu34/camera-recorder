@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote
 
@@ -27,6 +28,17 @@ class HikBridgeClient:
         self.timeout = timeout
         self.transport = transport
 
+    @staticmethod
+    def _error_from_response(response: httpx.Response) -> HikBridgeClientError:
+        detail = "HIK bridge request failed"
+        try:
+            body = response.json()
+            if isinstance(body, dict) and body.get("detail"):
+                detail = str(body["detail"])
+        except (ValueError, TypeError):
+            pass
+        return HikBridgeClientError(detail, status_code=response.status_code)
+
     async def _request(
         self,
         method: str,
@@ -46,17 +58,12 @@ class HikBridgeClient:
             raise HikBridgeClientError("HIK bridge request failed") from exc
 
         if response.status_code >= 400:
-            detail = "HIK bridge request failed"
-            try:
-                body = response.json()
-                if isinstance(body, dict) and body.get("detail"):
-                    detail = str(body["detail"])
-            except (ValueError, TypeError):
-                pass
+            error = self._error_from_response(response)
+            message = str(error)
             for secret in secrets:
                 if secret:
-                    detail = detail.replace(secret, "***")
-            raise HikBridgeClientError(detail, status_code=response.status_code)
+                    message = message.replace(secret, "***")
+            raise HikBridgeClientError(message, status_code=response.status_code)
         return response
 
     async def probe(
@@ -102,6 +109,26 @@ class HikBridgeClient:
 
     def media_url(self, stream_id: str) -> str:
         return f"{self.base_url}/streams/{quote(stream_id, safe='')}/media"
+
+    async def iter_media(self, stream_id: str) -> AsyncIterator[bytes]:
+        path = f"/streams/{quote(stream_id, safe='')}/media"
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                timeout=None,
+                transport=self.transport,
+            ) as client:
+                async with client.stream("GET", path) as response:
+                    if response.status_code >= 400:
+                        await response.aread()
+                        raise self._error_from_response(response)
+                    async for chunk in response.aiter_bytes():
+                        if chunk:
+                            yield chunk
+        except HikBridgeClientError:
+            raise
+        except httpx.HTTPError as exc:
+            raise HikBridgeClientError("HIK bridge media stream failed") from exc
 
     async def stop_stream(self, stream_id: str) -> None:
         await self._request("DELETE", f"/streams/{quote(stream_id, safe='')}")
