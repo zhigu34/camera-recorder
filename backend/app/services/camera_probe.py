@@ -126,6 +126,22 @@ async def probe_stream_uri(*, stream_uri: str, rtsp_timeout_us: int) -> dict:
     }
 
 
+async def probe_camera_media(camera, *, rtsp_timeout_us: int) -> dict:
+    """Probe a camera through its registered media adapter."""
+
+    # Local import avoids a module cycle: the manual adapter reuses build_rtsp_url.
+    from app.services.stream_resolver import resolve_stream
+
+    try:
+        resolved = resolve_stream(camera, "recording", preferred="main")
+    except Exception as exc:
+        raise CameraProbeError(f"media source resolution failed: {exc}") from exc
+    return await probe_stream_uri(
+        stream_uri=resolved.uri,
+        rtsp_timeout_us=rtsp_timeout_us,
+    )
+
+
 async def probe_camera(
     *,
     ip: str,
