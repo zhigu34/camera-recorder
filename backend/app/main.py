@@ -9,6 +9,7 @@ from app.api.event_detection import router as event_detection_router
 from app.api.events import router as events_router
 from app.api.exports import router as exports_router
 from app.api.health import router as health_router
+from app.api.hik_media import router as hik_media_router
 from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
 from app.api.onvif_cameras import router as onvif_cameras_router
@@ -150,6 +151,8 @@ app.add_middleware(
 )
 app.add_middleware(PlaybackPrefetchMiddleware)
 
+# HIK media is backend-internal and is never proxied by the frontend container.
+app.include_router(hik_media_router)
 # Keep the static ONVIF endpoints before /api/cameras/{camera_id} routes.
 app.include_router(onvif_cameras_router)
 app.include_router(cameras_router)
