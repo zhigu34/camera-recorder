@@ -234,6 +234,8 @@ classify_path() {
     frontend/*) BUILD_FRONTEND=1; UPDATE_FRONTEND=1 ;;
     backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1; UPDATE_HIK=1 ;;
     hik_bridge/*) BUILD_BACKEND=1; UPDATE_HIK=1 ;;
+    hik-sdk-runtime/.gitkeep) ;;
+    hik-sdk-runtime/*) UPDATE_HIK=1 ;;
     .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1 ;;
     docker-compose.yml) mark_full ;;
     .env.example) CONFIG_ALL=1; UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1 ;;
