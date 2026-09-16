@@ -449,9 +449,9 @@ UPDATE_SERVICES=()
 if [ "${#UPDATE_SERVICES[@]}" -gt 0 ]; then
   info "启动/更新服务:${UPDATE_LABELS}"
   if [ "$CONFIG_ALL" = "1" ]; then
-    compose_up_with_network_recovery || fail "docker compose up 失败，日志: $UP_LOG"
+    compose_up_with_network_recovery --force-recreate || fail "docker compose up 失败，日志: $UP_LOG"
   else
-    compose_up_with_network_recovery --no-deps "${UPDATE_SERVICES[@]}" || fail "docker compose up 失败，日志: $UP_LOG"
+    compose_up_with_network_recovery --no-deps --force-recreate "${UPDATE_SERVICES[@]}" || fail "docker compose up 失败，日志: $UP_LOG"
   fi
 else
   ok "代码与服务状态均无需更新，跳过容器重建"
