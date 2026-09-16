@@ -15,7 +15,9 @@ class MediaSource:
     purpose: StreamPurpose
     uri: str | None = None
     bridge_stream_id: str | None = None
-    bridge_target: Any | None = field(default=None, repr=False, compare=False)
+    # Keep credentials out of repr/logging, but include the target in equality so
+    # an IP, channel, stream-type, username, or password change restarts workers.
+    bridge_target: Any | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.transport == "rtsp":
