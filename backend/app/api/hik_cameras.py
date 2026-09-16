@@ -14,6 +14,7 @@ from app.schemas.hikvision import HikCameraCreate, HikCameraUpdate, HikProbeRequ
 from app.services.camera_config import runtime_config
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
 from app.services.event_log import add_audit_event, add_event
+from app.services.event_recording import event_recording_manager
 from app.services.hik_bridge_client import HikBridgeClient, HikBridgeClientError
 from app.services.hik_media_adapter import HikBridgeTarget
 from app.services.motion_manager import motion_detection_manager
@@ -246,6 +247,9 @@ async def update_hik_camera(
     await db.refresh(camera)
     if was_recording:
         await recorder_manager.stop(camera.id)
+    # HIK worker URIs are stable backend-proxy URLs; force the event ring to
+    # disconnect so a credential/channel change cannot keep the old SDK session.
+    await event_recording_manager.stop_camera(camera.id)
     await motion_detection_manager.restart_camera(camera.id)
     if schedule_changed:
         recording_schedule_manager.reset_for_schedule_change(camera.id)
