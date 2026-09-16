@@ -26,9 +26,8 @@ from app.services.camera_deletion import camera_deletion_impact
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
 from app.services.camera_probe import CameraProbeError, probe_camera_media
+from app.services.camera_runtime_coordinator import camera_runtime_coordinator
 from app.services.event_log import add_audit_event, add_event
-from app.services.event_recording import event_recording_manager
-from app.services.motion_manager import motion_detection_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.stream_resolver import UnsupportedDeviceAdapter, resolve_stream
@@ -348,6 +347,7 @@ async def update_camera(
             detail=f"{current_adapter} camera must be updated through its dedicated adapter endpoint",
         )
 
+    previous_connection_revision = connection.revision if connection is not None else None
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
     values.pop("connection_type", None)
@@ -407,7 +407,7 @@ async def update_camera(
         raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
 
     try:
-        upsert_manual_rtsp_connection(
+        current_connection = upsert_manual_rtsp_connection(
             camera,
             host=desired_host,
             port=desired_port,
@@ -418,6 +418,7 @@ async def update_camera(
         )
     except ConnectionAdapterMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    connection_changed = current_connection.revision != previous_connection_revision
 
     add_event(
         db,
@@ -439,9 +440,8 @@ async def update_camera(
         await db.rollback()
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     await db.refresh(camera)
-    if schedule_changed:
-        recording_schedule_manager.reset_for_schedule_change(camera.id)
-        await recording_schedule_manager.reconcile()
+    if connection_changed or schedule_changed:
+        await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
     return camera
 
 
@@ -452,11 +452,7 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     if not impact.can_delete:
         raise HTTPException(status_code=409, detail=impact.model_dump())
 
-    await motion_detection_manager.stop_camera(camera_id)
-    await event_recording_manager.stop_camera(camera_id)
-    if recorder_manager.is_running(camera_id):
-        await recorder_manager.stop(camera_id)
-    recording_schedule_manager.forget(camera_id)
+    await camera_runtime_coordinator.stop_all(camera_id, forget_schedule=True)
     camera_name = camera.name
     add_audit_event(
         db,
