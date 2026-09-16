@@ -26,11 +26,11 @@ from app.services.camera_deletion import camera_deletion_impact
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
 from app.services.camera_probe import CameraProbeError, probe_camera_media
+from app.services.camera_runtime_coordinator import camera_runtime_coordinator
 from app.services.event_log import add_audit_event, add_event
-from app.services.event_recording import event_recording_manager
-from app.services.motion_manager import motion_detection_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
+from app.services.recording_start import start_regular_recorder
 from app.services.stream_resolver import UnsupportedDeviceAdapter, resolve_stream
 from app.services.system_settings import load_runtime_settings
 
@@ -104,6 +104,11 @@ def _runtime_config_or_409(camera: Camera):
             status_code=409,
             detail="摄像头流配置不可用，请检查连接类型、账号和码流设置",
         ) from exc
+
+
+def _require_runtime_enabled(camera: Camera) -> None:
+    if not camera.enabled:
+        raise HTTPException(status_code=409, detail="camera is disabled")
 
 
 @router.get("", response_model=list[CameraRead])
@@ -268,6 +273,7 @@ async def preview_camera(
     # Do not keep an SQLite session open for the lifetime of a streaming response.
     async with SessionLocal() as db:
         camera = await _camera_or_404(camera_id, db)
+        _require_runtime_enabled(camera)
         runtime = await load_runtime_settings(db)
         try:
             resolved = resolve_stream(camera, "preview", preferred=stream)
@@ -348,6 +354,7 @@ async def update_camera(
             detail=f"{current_adapter} camera must be updated through its dedicated adapter endpoint",
         )
 
+    previous_connection_revision = connection.revision if connection is not None else None
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
     values.pop("connection_type", None)
@@ -407,7 +414,7 @@ async def update_camera(
         raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
 
     try:
-        upsert_manual_rtsp_connection(
+        current_connection = upsert_manual_rtsp_connection(
             camera,
             host=desired_host,
             port=desired_port,
@@ -418,6 +425,7 @@ async def update_camera(
         )
     except ConnectionAdapterMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    connection_changed = current_connection.revision != previous_connection_revision
 
     add_event(
         db,
@@ -439,9 +447,8 @@ async def update_camera(
         await db.rollback()
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     await db.refresh(camera)
-    if schedule_changed:
-        recording_schedule_manager.reset_for_schedule_change(camera.id)
-        await recording_schedule_manager.reconcile()
+    if connection_changed or schedule_changed:
+        await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
     return camera
 
 
@@ -452,11 +459,7 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     if not impact.can_delete:
         raise HTTPException(status_code=409, detail=impact.model_dump())
 
-    await motion_detection_manager.stop_camera(camera_id)
-    await event_recording_manager.stop_camera(camera_id)
-    if recorder_manager.is_running(camera_id):
-        await recorder_manager.stop(camera_id)
-    recording_schedule_manager.forget(camera_id)
+    await camera_runtime_coordinator.stop_all(camera_id, forget_schedule=True)
     camera_name = camera.name
     add_audit_event(
         db,
@@ -538,9 +541,10 @@ async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/{camera_id}/start")
 async def start_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
+    _require_runtime_enabled(camera)
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
-    runtime = await recorder_manager.start(_runtime_config_or_409(camera))
+    runtime = await start_regular_recorder(_runtime_config_or_409(camera))
     recording_schedule_manager.note_manual_start(camera_id)
     add_event(
         db,
@@ -574,6 +578,7 @@ async def stop_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/{camera_id}/restart")
 async def restart_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
+    _require_runtime_enabled(camera)
     if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
         raise HTTPException(status_code=409, detail="run camera Probe before reconstruct recording")
     runtime = await recorder_manager.restart(_runtime_config_or_409(camera))

@@ -27,18 +27,12 @@ async def resolve_event_recording(
     started_at: datetime,
     ended_at: datetime,
 ) -> int | None:
-    """Resolve the recording source that owned the event when it began.
+    """Resolve an existing regular recording or materialize an event-only clip.
 
-    If the event ring owned the camera at event start, materialize that full
-    pre-roll clip first even when a regular recorder started during the event.
-    Otherwise reuse an overlapping regular recording when available.
+    This bridge is the only detection-facing component allowed to inspect regular
+    recorder ownership. Motion detection itself remains independent from recorder
+    lifecycle and can fail/reconnect without starting or stopping the main recorder.
     """
-
-    capture_required = event_recording_manager.event_capture_required(camera_id)
-    if capture_required:
-        recording_id = await event_recording_manager.capture(camera_id, started_at, ended_at)
-        if recording_id is not None:
-            return recording_id
 
     async with SessionLocal() as db:
         recording = await db.scalar(
@@ -55,10 +49,8 @@ async def resolve_event_recording(
         if recording is not None:
             return int(recording.id)
 
-    # A running regular recorder owns the camera when the event ring did not own
-    # this event at its start. Its current segment may not have reached the table yet.
+    # A running regular recorder owns the camera even when its current segment has
+    # not reached the recordings table yet. Never create a duplicate event clip then.
     if recorder_manager.is_running(camera_id):
-        return None
-    if capture_required:
         return None
     return await event_recording_manager.capture(camera_id, started_at, ended_at)

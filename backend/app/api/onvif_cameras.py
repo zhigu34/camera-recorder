@@ -16,16 +16,13 @@ from app.schemas.camera import (
     OnvifProbeRequest,
     OnvifProbeResult,
 )
-from app.services.camera_config import runtime_config
 from app.services.camera_connection import ConnectionAdapterMismatch, upsert_onvif_connection
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
+from app.services.camera_runtime_coordinator import camera_runtime_coordinator
 from app.services.event_log import add_audit_event, add_event
-from app.services.motion_manager import motion_detection_manager
 from app.services.onvif_client import OnvifClient, OnvifError, inject_uri_credentials
-from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
-from app.services.recording_start import start_regular_recorder
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(prefix="/api/cameras/onvif", tags=["onvif-cameras"])
@@ -278,7 +275,6 @@ async def update_onvif_camera(
     if current_adapter != "onvif":
         raise HTTPException(status_code=409, detail="camera is not an ONVIF device")
 
-    was_recording = recorder_manager.is_running(camera.id)
     (
         discovered,
         media,
@@ -352,12 +348,5 @@ async def update_onvif_camera(
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
 
     await db.refresh(camera)
-    if was_recording:
-        await recorder_manager.stop(camera.id)
-    await motion_detection_manager.restart_camera(camera.id)
-    if schedule_changed:
-        recording_schedule_manager.reset_for_schedule_change(camera.id)
-        await recording_schedule_manager.reconcile()
-    elif was_recording:
-        await start_regular_recorder(runtime_config(camera))
+    await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
     return camera

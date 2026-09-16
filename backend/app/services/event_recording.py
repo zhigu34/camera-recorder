@@ -48,9 +48,8 @@ def should_buffer_event_camera(
     camera_enabled: bool,
     detection_enabled: bool,
     recorder_running: bool,
-    event_capture_active: bool = False,
 ) -> bool:
-    return camera_enabled and detection_enabled and (not recorder_running or event_capture_active)
+    return camera_enabled and detection_enabled and not recorder_running
 
 
 def build_event_buffer_command(
@@ -213,27 +212,18 @@ class EventRecordingManager:
         self._capture_locks: dict[int, asyncio.Lock] = {}
         self._worker_lock = asyncio.Lock()
         self._pinned_since: dict[int, datetime] = {}
-        self._capture_required: set[int] = set()
         self.buffer_root = settings.data_dir / "event-buffer"
 
     def begin_event(self, camera_id: int, started_at: datetime) -> None:
-        """Pin pre-roll and remember when this buffer owns the event recording."""
+        """Pin the ring from five seconds before a confirmed event begins."""
 
         pinned_at, _ = event_clip_window(started_at, started_at)
         existing = self._pinned_since.get(camera_id)
         if existing is None or pinned_at < existing:
             self._pinned_since[camera_id] = pinned_at
 
-        worker = self._workers.get(camera_id)
-        if worker is not None and worker.running and not recorder_manager.is_running(camera_id):
-            self._capture_required.add(camera_id)
-
-    def event_capture_required(self, camera_id: int) -> bool:
-        return camera_id in self._capture_required
-
     def end_event(self, camera_id: int) -> None:
         self._pinned_since.pop(camera_id, None)
-        self._capture_required.discard(camera_id)
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -255,7 +245,6 @@ class EventRecordingManager:
             for camera_id in list(self._workers):
                 await self._stop_camera_unlocked(camera_id)
         self._pinned_since.clear()
-        self._capture_required.clear()
 
     async def _run(self) -> None:
         while not self._stop.is_set():
@@ -300,7 +289,6 @@ class EventRecordingManager:
                 camera_enabled=camera.enabled,
                 detection_enabled=True,
                 recorder_running=recorder_manager.is_running(camera.id),
-                event_capture_active=self.event_capture_required(camera.id),
             ):
                 continue
             try:
@@ -369,13 +357,11 @@ class EventRecordingManager:
         started_at: datetime,
         ended_at: datetime,
     ) -> int | None:
-        capture_required = self.event_capture_required(camera_id)
-        if recorder_manager.is_running(camera_id) and not capture_required:
+        if recorder_manager.is_running(camera_id):
             return None
         lock = self._capture_locks.setdefault(camera_id, asyncio.Lock())
         async with lock:
-            capture_required = self.event_capture_required(camera_id)
-            if recorder_manager.is_running(camera_id) and not capture_required:
+            if recorder_manager.is_running(camera_id):
                 return None
 
             # Gracefully stop the ring FFmpeg long enough to finalize its current MKV.

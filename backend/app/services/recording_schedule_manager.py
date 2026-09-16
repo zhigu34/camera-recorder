@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 
@@ -16,6 +16,8 @@ from app.services.recording_start import start_regular_recorder
 from app.services.system_settings import load_runtime_settings
 
 _POLL_INTERVAL_SECONDS = 10.0
+
+RecordingOwner = Literal["manual", "schedule"]
 
 
 class RecordingScheduleManager:
@@ -70,6 +72,17 @@ class RecordingScheduleManager:
                 raise
             except Exception as exc:
                 self._last_error = str(exc)[-1000:]
+
+    def recording_owner(self, camera_id: int) -> RecordingOwner | None:
+        if camera_id in self._manual_running:
+            return "manual"
+        if camera_id in self._managed:
+            return "schedule"
+        return None
+
+    def detach_for_runtime_reload(self, camera_id: int) -> None:
+        self._managed.discard(camera_id)
+        self._camera_status.pop(camera_id, None)
 
     def note_manual_start(self, camera_id: int) -> None:
         self._managed.discard(camera_id)
