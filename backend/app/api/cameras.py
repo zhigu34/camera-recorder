@@ -13,6 +13,7 @@ from app.schemas.camera import (
     CameraBatchCreate,
     CameraBatchResult,
     CameraCreate,
+    CameraDeletionImpact,
     CameraProbeResult,
     CameraRead,
     CameraUpdate,
@@ -20,10 +21,13 @@ from app.schemas.camera import (
     RecordingScheduleBatchResult,
 )
 from app.services.camera_config import runtime_config
+from app.services.camera_deletion import camera_deletion_impact
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
 from app.services.camera_probe import CameraProbeError, probe_camera_media
 from app.services.event_log import add_audit_event, add_event
+from app.services.event_recording import event_recording_manager
+from app.services.motion_manager import motion_detection_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
 from app.services.stream_resolver import UnsupportedDeviceAdapter, resolve_stream
@@ -302,6 +306,15 @@ async def preview_camera(
     )
 
 
+@router.get("/{camera_id}/deletion-impact", response_model=CameraDeletionImpact)
+async def get_camera_deletion_impact(
+    camera_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> CameraDeletionImpact:
+    await _camera_or_404(camera_id, db)
+    return await camera_deletion_impact(db, camera_id)
+
+
 @router.get("/{camera_id}", response_model=CameraRead)
 async def get_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     return await _camera_or_404(camera_id, db)
@@ -383,6 +396,12 @@ async def update_camera(
 @router.delete("/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
+    impact = await camera_deletion_impact(db, camera_id)
+    if not impact.can_delete:
+        raise HTTPException(status_code=409, detail=impact.model_dump())
+
+    await motion_detection_manager.stop_camera(camera_id)
+    await event_recording_manager.stop_camera(camera_id)
     if recorder_manager.is_running(camera_id):
         await recorder_manager.stop(camera_id)
     recording_schedule_manager.forget(camera_id)
