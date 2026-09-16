@@ -6,6 +6,7 @@ from app.models.hikvision import HikDeviceMetadata
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.notification_settings import NotificationSettings
 from app.models.onvif import OnvifDeviceMetadata
+from app.models.onvif_connection import OnvifConnectionConfig
 from app.models.recording import Recording
 from app.models.recording_export import ExportArtifact, ExportJob
 from app.models.system_settings import SystemSettings
@@ -15,6 +16,7 @@ __all__ = [
     "Camera",
     "CameraConnection",
     "RtspConnectionConfig",
+    "OnvifConnectionConfig",
     "OnvifDeviceMetadata",
     "HikDeviceMetadata",
     "Recording",

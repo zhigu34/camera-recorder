@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import encrypt_secret
 from app.models.camera import Camera
-from app.models.onvif import OnvifDeviceMetadata
 from app.schemas.camera import (
     CameraRead,
     OnvifCameraCreate,
@@ -18,6 +17,7 @@ from app.schemas.camera import (
     OnvifProbeResult,
 )
 from app.services.camera_config import runtime_config
+from app.services.camera_connection import ConnectionAdapterMismatch, upsert_onvif_connection
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
 from app.services.event_log import add_audit_event, add_event
@@ -147,21 +147,31 @@ def _apply_media_fields(camera: Camera, media: dict, main_profile) -> None:
     camera.audio_frame_samples = media.get("audio_frame_samples")
 
 
-def _apply_onvif_metadata(camera: Camera, discovered: OnvifProbeResult) -> None:
-    metadata = camera.onvif_metadata
-    if metadata is None:
-        metadata = OnvifDeviceMetadata()
-        camera.onvif_metadata = metadata
-    metadata.device_service_url = discovered.device_service_url
-    metadata.device_uuid = discovered.device_uuid
-    metadata.capabilities_json = discovered.capabilities
-    metadata.profiles_json = [item.model_dump() for item in discovered.profiles]
-    metadata.recording_profile_token = discovered.recording_profile_token
-    metadata.preview_profile_token = discovered.preview_profile_token
-    metadata.detection_profile_token = discovered.detection_profile_token
-    metadata.recording_uri = discovered.recording_uri
-    metadata.preview_uri = discovered.preview_uri
-    metadata.detection_uri = discovered.detection_uri
+def _write_current_connection(
+    camera: Camera,
+    payload: OnvifProbeRequest,
+    discovered: OnvifProbeResult,
+    *,
+    password_encrypted: str,
+    verified_at: datetime,
+) -> None:
+    upsert_onvif_connection(
+        camera,
+        host=payload.host,
+        username=payload.username,
+        password_encrypted=password_encrypted,
+        device_service_url=discovered.device_service_url,
+        device_uuid=discovered.device_uuid,
+        capabilities=discovered.capabilities,
+        profiles=[item.model_dump() for item in discovered.profiles],
+        recording_profile_token=discovered.recording_profile_token,
+        preview_profile_token=discovered.preview_profile_token,
+        detection_profile_token=discovered.detection_profile_token,
+        recording_uri=discovered.recording_uri,
+        preview_uri=discovered.preview_uri,
+        detection_uri=discovered.detection_uri,
+        verified_at=verified_at,
+    )
 
 
 @router.post("/probe", response_model=OnvifProbeResult)
@@ -184,6 +194,7 @@ async def create_onvif_camera(
         sub_rtsp_path,
     ) = await _validated_discovery(payload, db)
 
+    password_encrypted = encrypt_secret(payload.password)
     camera = Camera(
         name=payload.name,
         manufacturer=discovered.manufacturer,
@@ -197,7 +208,7 @@ async def create_onvif_camera(
         ip=host,
         rtsp_port=rtsp_port,
         username=payload.username,
-        password_encrypted=encrypt_secret(payload.password),
+        password_encrypted=password_encrypted,
         rtsp_path=rtsp_path,
         sub_rtsp_path=sub_rtsp_path,
         enabled=payload.enabled,
@@ -211,7 +222,13 @@ async def create_onvif_camera(
     now = datetime.now(timezone.utc)
     camera.last_probe_at = now
     camera.last_online_at = now
-    _apply_onvif_metadata(camera, discovered)
+    _write_current_connection(
+        camera,
+        payload,
+        discovered,
+        password_encrypted=password_encrypted,
+        verified_at=now,
+    )
     db.add(camera)
     try:
         await db.flush()
@@ -256,7 +273,9 @@ async def update_onvif_camera(
     camera = await db.get(Camera, camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
-    if camera.connection_type != "onvif":
+    connection = camera.connection
+    current_adapter = connection.adapter if connection is not None else camera.connection_type
+    if current_adapter != "onvif":
         raise HTTPException(status_code=409, detail="camera is not an ONVIF device")
 
     was_recording = recorder_manager.is_running(camera.id)
@@ -264,10 +283,10 @@ async def update_onvif_camera(
         discovered,
         media,
         main_profile,
-        host,
-        rtsp_port,
-        rtsp_path,
-        sub_rtsp_path,
+        _host,
+        _rtsp_port,
+        _rtsp_path,
+        _sub_rtsp_path,
     ) = await _validated_discovery(payload, db)
 
     schedule_changed = False
@@ -281,12 +300,6 @@ async def update_onvif_camera(
         discovered.model,
         requested_form_factor,
     )
-    camera.ip = host
-    camera.rtsp_port = rtsp_port
-    camera.username = payload.username
-    camera.password_encrypted = encrypt_secret(payload.password)
-    camera.rtsp_path = rtsp_path
-    camera.sub_rtsp_path = sub_rtsp_path
     if payload.enabled is not None:
         schedule_changed = schedule_changed or payload.enabled != camera.enabled
         camera.enabled = payload.enabled
@@ -296,8 +309,17 @@ async def update_onvif_camera(
     if payload.timestamp_mode is not None:
         camera.timestamp_mode = payload.timestamp_mode
     _apply_media_fields(camera, media, main_profile)
-    _apply_onvif_metadata(camera, discovered)
     now = datetime.now(timezone.utc)
+    try:
+        _write_current_connection(
+            camera,
+            payload,
+            discovered,
+            password_encrypted=encrypt_secret(payload.password),
+            verified_at=now,
+        )
+    except ConnectionAdapterMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     camera.status = "online"
     camera.last_probe_at = now
     camera.last_online_at = now

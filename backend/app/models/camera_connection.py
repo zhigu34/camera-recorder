@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.camera import Camera
+    from app.models.onvif_connection import OnvifConnectionConfig
 
 
 class CameraConnection(Base):
@@ -41,6 +42,12 @@ class CameraConnection(Base):
 
     camera: Mapped["Camera"] = relationship(back_populates="connection")
     rtsp_config: Mapped["RtspConnectionConfig | None"] = relationship(
+        back_populates="connection",
+        cascade="all, delete-orphan",
+        uselist=False,
+        lazy="joined",
+    )
+    onvif_config: Mapped["OnvifConnectionConfig | None"] = relationship(
         back_populates="connection",
         cascade="all, delete-orphan",
         uselist=False,

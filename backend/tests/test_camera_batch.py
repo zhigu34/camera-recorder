@@ -1,6 +1,32 @@
-from fastapi.testclient import TestClient
+import asyncio
 
+from fastapi.testclient import TestClient
+from sqlalchemy import func, select
+
+from app.core.database import SessionLocal
 from app.main import app
+from app.models import Camera, CameraConnection
+
+
+async def _batch_connection_snapshot(camera_id: int) -> dict:
+    async with SessionLocal() as db:
+        camera = await db.get(Camera, camera_id)
+        assert camera is not None
+        connection = camera.connection
+        assert connection is not None
+        assert connection.rtsp_config is not None
+        connection_count = await db.scalar(
+            select(func.count(CameraConnection.id)).where(CameraConnection.camera_id == camera_id)
+        )
+        return {
+            "adapter": connection.adapter,
+            "revision": connection.revision,
+            "count": int(connection_count or 0),
+            "host": connection.host,
+            "port": connection.rtsp_config.port,
+            "main_path": connection.rtsp_config.main_path,
+            "sub_path": connection.rtsp_config.sub_path,
+        }
 
 
 def test_batch_camera_create_and_skip_existing() -> None:
@@ -37,6 +63,27 @@ def test_batch_camera_create_and_skip_existing() -> None:
         created_camera = client.get(f"/api/cameras/{first_body['created_ids'][0]}")
         assert created_camera.status_code == 200
         assert created_camera.json()["sub_rtsp_path"] == "/ch1/sub"
+
+        first_connection = asyncio.run(_batch_connection_snapshot(first_body["created_ids"][0]))
+        second_connection = asyncio.run(_batch_connection_snapshot(first_body["created_ids"][1]))
+        assert first_connection == {
+            "adapter": "manual_rtsp",
+            "revision": 1,
+            "count": 1,
+            "host": "192.0.2.10",
+            "port": 554,
+            "main_path": "/ch1/main",
+            "sub_path": "/ch1/sub",
+        }
+        assert second_connection == {
+            "adapter": "manual_rtsp",
+            "revision": 1,
+            "count": 1,
+            "host": "192.0.2.11",
+            "port": 554,
+            "main_path": "/ch1/main",
+            "sub_path": None,
+        }
 
         second = client.post("/api/cameras/batch", json=payload)
         assert second.status_code == 201

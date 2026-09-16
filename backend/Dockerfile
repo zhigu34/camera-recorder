@@ -1,9 +1,9 @@
 FROM python:3.12-slim
 
 ARG TARGETARCH
-ARG DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
-ARG DEBIAN_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
-ARG PYPI_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+ARG DEBIAN_MIRROR=http://deb.debian.org/debian
+ARG DEBIAN_SECURITY_MIRROR=http://deb.debian.org/debian-security
+ARG PYPI_INDEX_URL=https://pypi.org/simple
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -11,10 +11,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_INDEX_URL=${PYPI_INDEX_URL} \
     UV_DEFAULT_INDEX=${PYPI_INDEX_URL}
 
-# Prefer mainland China mirrors during image builds. Keep the original Debian
-# sources as an automatic fallback so a temporary mirror outage/403 cannot make
-# deployments fail. Debian 12+ images normally use DEB822 sources, while older
-# variants may still use sources.list.
+# Official package sources are the portable default (including CI). Local
+# deployments may override them through docker-compose/.env. Keep the original
+# Debian sources as an automatic fallback so an unavailable override mirror
+# cannot make deployments fail. Debian 12+ images normally use DEB822 sources,
+# while older variants may still use sources.list.
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig; \

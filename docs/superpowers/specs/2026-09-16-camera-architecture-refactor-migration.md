@@ -1,6 +1,6 @@
 # Camera Architecture Refactor — Migration Notes
 
-Status: **Confirmed migration constraint**
+Status: **Switch slice complete for manual RTSP + ONVIF**
 
 Date: 2026-09-16
 
@@ -16,13 +16,14 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
-Phase 1 completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the Phase 1 RTSP connection-domain migration.
+Phase 1 and the manual-RTSP/ONVIF Switch slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slice.
 
 ### Expand
 
 - [x] Create `camera_connections`.
 - [x] Create `rtsp_connection_configs`.
-- [ ] Create empty ONVIF/HIK connection-config tables for the new architecture; do not backfill them from legacy rows.
+- [x] Create an empty ONVIF connection-config table for the new architecture; do not backfill it from legacy rows.
+- [ ] Create the HIK connection-config table for the new architecture; do not backfill it from legacy rows.
 - [x] For every existing Camera, create exactly one `CameraConnection` with `adapter=manual_rtsp`.
 - [x] Copy existing `Camera.ip` -> `CameraConnection.host`.
 - [x] Copy existing `Camera.username` -> `CameraConnection.username`.
@@ -40,13 +41,18 @@ Phase 1 completed items are checked below. Unchecked items remain deliberate fol
 
 ### Switch
 
-- [ ] Make `CameraConnection` + adapter config the canonical read/write source.
-- [ ] Keep legacy Camera RTSP fields temporarily as compatibility shadow fields for one rollback window.
-- [ ] During the rollback window, writes through the new connection service mirror compatible RTSP endpoint/auth fields back to legacy Camera columns.
-- [ ] Existing RTSP cameras continue using the same Camera IDs and history after the switch.
-- [ ] New ONVIF/HIK connections are created only in the new connection model.
+- [x] Make `CameraConnection` + adapter config the canonical persisted/runtime source for manual RTSP and ONVIF reads/writes.
+- [ ] Move HIK persistence/runtime reads to `CameraConnection` + an HIK adapter config.
+- [x] Keep legacy Camera RTSP/auth fields temporarily as compatibility shadow fields for one rollback window.
+- [x] During the rollback window, writes through the connection service mirror compatible RTSP endpoint/auth fields back to legacy Camera columns.
+- [x] Existing RTSP cameras continue using the same Camera IDs and history after the switch.
+- [x] New manual RTSP and ONVIF cameras are created with exactly one current connection.
+- [x] New/updated ONVIF cameras persist connection-scoped profile/capability/credential-free URI caches and no longer write new `OnvifDeviceMetadata` state.
+- [ ] New HIK connections are created only in the new connection model.
 - [ ] Adapter switching (`manual_rtsp -> onvif/hik_sdk`) updates the same Camera ID.
-- [ ] Existing dedicated ONVIF/HIK API routes, if temporarily retained, become wrappers over the unified connection service rather than independent persistence paths.
+- [x] The dedicated ONVIF API routes remain temporary wrappers over the current connection service rather than an independent persistence path.
+- [ ] Convert dedicated HIK API/persistence paths into wrappers over the current connection service.
+- [ ] Introduce `CameraRuntimeCoordinator` lifecycle/revision coordination and stale-worker invalidation.
 
 ### Contract
 
@@ -72,8 +78,14 @@ The following conditions are mandatory before a deployment is considered success
 9. Existing encrypted passwords are copied byte-for-byte; migration does not decrypt credentials.
 10. Runtime workers start only after Alembic migration and consistency checks succeed.
 
+## Switch-slice verification
+
+The manual RTSP + ONVIF Switch slice was verified in CI run `#1182` (`35109383963`): all four backend pytest shards, backend quality/Ruff, frontend, Docker smoke, database migration compatibility, and the aggregate backend job completed successfully.
+
+The verified behavior includes current-connection precedence over legacy shadows, legacy fallback only when no current connection exists, manual RTSP and ONVIF current-connection writes, ONVIF connection-scoped runtime resolution, credential-free cached ONVIF URIs, stable Camera/connection identity on updates, and rollback-window shadow-field synchronization.
+
 ## Why this is simpler than the generic migration
 
-Because there is no legacy ONVIF/HIK production data to preserve, the migration does not need to reconcile existing `onvif_device_metadata` or `hik_device_metadata` into active connections. Those models can be replaced/refactored as part of the new adapter implementation without risking existing camera history.
+Because there is no legacy ONVIF/HIK production data to preserve, the migration does not need to reconcile existing `onvif_device_metadata` or `hik_device_metadata` into active connections. ONVIF can be switched to the new adapter implementation without risking existing camera history, while HIK remains explicit follow-up work.
 
-The migration concern is therefore narrow: preserve Camera IDs/history and move the existing RTSP connection data out of `Camera` into the new connection layer safely.
+The migration concern therefore remains narrow: preserve Camera IDs/history, move existing RTSP connection data out of `Camera` safely, and make new manual RTSP/ONVIF state canonical in the current connection layer without inferring historical adapter state.

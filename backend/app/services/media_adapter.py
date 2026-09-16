@@ -34,7 +34,12 @@ class MediaAdapterRegistry:
         *,
         preferred: StreamPreference = "auto",
     ) -> MediaSource:
-        connection_type = str(getattr(camera, "connection_type", "manual_rtsp"))
+        connection = getattr(camera, "connection", None)
+        connection_type = (
+            str(connection.adapter)
+            if connection is not None
+            else str(getattr(camera, "connection_type", "manual_rtsp"))
+        )
         adapter = self._adapters.get(connection_type)
         if adapter is None:
             raise UnsupportedMediaAdapter(f"unsupported media adapter: {connection_type}")

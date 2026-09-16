@@ -12,9 +12,23 @@ class OnvifDeviceAdapter:
         *,
         preferred: StreamPreference = "auto",
     ) -> MediaSource:
-        metadata = getattr(camera, "onvif_metadata", None)
-        if metadata is None:
-            raise ValueError("ONVIF metadata is missing; re-add or repair the camera")
+        connection = getattr(camera, "connection", None)
+        if connection is not None:
+            if str(connection.adapter) != "onvif":
+                raise ValueError(
+                    f"current connection adapter is {connection.adapter}, expected onvif"
+                )
+            metadata = getattr(connection, "onvif_config", None)
+            if metadata is None:
+                raise ValueError("ONVIF current connection config is missing")
+            username = str(connection.username)
+            password_encrypted = str(connection.password_encrypted)
+        else:
+            metadata = getattr(camera, "onvif_metadata", None)
+            if metadata is None:
+                raise ValueError("ONVIF metadata is missing; re-add or repair the camera")
+            username = str(camera.username)
+            password_encrypted = str(camera.password_encrypted)
 
         main_uri = str(getattr(metadata, "recording_uri", None) or "").strip()
         if not main_uri:
@@ -57,8 +71,8 @@ class OnvifDeviceAdapter:
 
         uri = inject_uri_credentials(
             selected_uri,
-            str(camera.username),
-            decrypt_secret(str(camera.password_encrypted)),
+            username,
+            decrypt_secret(password_encrypted),
         )
         return MediaSource(
             adapter="onvif",

@@ -21,6 +21,7 @@ from app.schemas.camera import (
     RecordingScheduleBatchResult,
 )
 from app.services.camera_config import runtime_config
+from app.services.camera_connection import ConnectionAdapterMismatch, upsert_manual_rtsp_connection
 from app.services.camera_deletion import camera_deletion_impact
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
@@ -53,7 +54,9 @@ def _resolved_form_factor(manufacturer: str | None, model: str | None, requested
 
 
 def _new_camera(payload: CameraCreate) -> Camera:
-    return Camera(
+    password_encrypted = encrypt_secret(payload.password)
+    sub_rtsp_path = payload.sub_rtsp_path.strip() if payload.sub_rtsp_path else None
+    camera = Camera(
         name=payload.name,
         manufacturer=payload.manufacturer,
         model=payload.model,
@@ -62,15 +65,25 @@ def _new_camera(payload: CameraCreate) -> Camera:
         ip=payload.ip,
         rtsp_port=payload.rtsp_port,
         username=payload.username,
-        password_encrypted=encrypt_secret(payload.password),
+        password_encrypted=password_encrypted,
         rtsp_path=payload.rtsp_path,
-        sub_rtsp_path=payload.sub_rtsp_path.strip() if payload.sub_rtsp_path else None,
+        sub_rtsp_path=sub_rtsp_path,
         enabled=payload.enabled,
         auto_record=payload.auto_record,
         recording_schedule_enabled=payload.recording_schedule_enabled,
         recording_schedule=[item.model_dump() for item in payload.recording_schedule],
         timestamp_mode=payload.timestamp_mode,
     )
+    upsert_manual_rtsp_connection(
+        camera,
+        host=payload.ip,
+        port=payload.rtsp_port,
+        username=payload.username,
+        password_encrypted=password_encrypted,
+        main_path=payload.rtsp_path,
+        sub_path=sub_rtsp_path,
+    )
+    return camera
 
 
 def _camera_password(camera: Camera) -> str:
@@ -327,15 +340,45 @@ async def update_camera(
     db: AsyncSession = Depends(get_db),
 ):
     camera = await _camera_or_404(camera_id, db)
-    if camera.connection_type != "manual_rtsp":
+    connection = camera.connection
+    current_adapter = connection.adapter if connection is not None else camera.connection_type
+    if current_adapter != "manual_rtsp":
         raise HTTPException(
             status_code=409,
-            detail=f"{camera.connection_type} camera must be updated through its dedicated adapter endpoint",
+            detail=f"{current_adapter} camera must be updated through its dedicated adapter endpoint",
         )
+
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
+    values.pop("connection_type", None)
+
+    rtsp_config = connection.rtsp_config if connection is not None else None
+    host = values.pop("ip", None)
+    port = values.pop("rtsp_port", None)
+    username = values.pop("username", None)
+    main_path = values.pop("rtsp_path", None)
     sub_rtsp_path_present = "sub_rtsp_path" in values
     sub_rtsp_path = values.pop("sub_rtsp_path", None)
+
+    desired_host = host if host is not None else (connection.host if connection else camera.ip)
+    desired_port = port if port is not None else (rtsp_config.port if rtsp_config else camera.rtsp_port)
+    desired_username = (
+        username if username is not None else (connection.username if connection else camera.username)
+    )
+    desired_password_encrypted = (
+        encrypt_secret(password)
+        if password is not None
+        else (connection.password_encrypted if connection else camera.password_encrypted)
+    )
+    desired_main_path = (
+        main_path if main_path is not None else (rtsp_config.main_path if rtsp_config else camera.rtsp_path)
+    )
+    desired_sub_path = (
+        sub_rtsp_path
+        if sub_rtsp_path_present
+        else (rtsp_config.sub_path if rtsp_config else camera.sub_rtsp_path)
+    )
+
     nullable_identity = {
         key: values.pop(key)
         for key in ("manufacturer", "model")
@@ -350,10 +393,6 @@ async def update_camera(
             setattr(camera, key, value)
     for key, value in nullable_identity.items():
         setattr(camera, key, value)
-    if sub_rtsp_path_present:
-        camera.sub_rtsp_path = sub_rtsp_path.strip() if sub_rtsp_path else None
-    if password is not None:
-        camera.password_encrypted = encrypt_secret(password)
 
     # Only infer while the device is still unspecified. Once a user has chosen a
     # physical form factor, later manufacturer/model edits must not override it.
@@ -366,6 +405,19 @@ async def update_camera(
 
     if camera.recording_schedule_enabled and not camera.recording_schedule:
         raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
+
+    try:
+        upsert_manual_rtsp_connection(
+            camera,
+            host=desired_host,
+            port=desired_port,
+            username=desired_username,
+            password_encrypted=desired_password_encrypted,
+            main_path=desired_main_path,
+            sub_path=desired_sub_path,
+        )
+    except ConnectionAdapterMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     add_event(
         db,

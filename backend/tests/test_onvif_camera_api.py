@@ -4,8 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.api import onvif_cameras as onvif_api
 from app.core.database import SessionLocal
+from app.core.security import decrypt_secret
 from app.main import app
-from app.models.onvif import OnvifDeviceMetadata
+from app.models import Camera, OnvifDeviceMetadata
 from app.schemas.camera import OnvifProbeResult
 
 
@@ -92,9 +93,48 @@ UPDATED_DISCOVERED = OnvifProbeResult.model_validate(
 )
 
 
-async def _metadata(camera_id: int) -> OnvifDeviceMetadata | None:
+async def _connection_snapshot(camera_id: int) -> dict:
     async with SessionLocal() as db:
-        return await db.get(OnvifDeviceMetadata, camera_id)
+        camera = await db.get(Camera, camera_id)
+        assert camera is not None
+        connection = camera.connection
+        assert connection is not None
+        config = connection.onvif_config
+        assert config is not None
+        metadata = await db.get(OnvifDeviceMetadata, camera_id)
+        return {
+            "camera_id": camera.id,
+            "connection_id": connection.id,
+            "adapter": connection.adapter,
+            "host": connection.host,
+            "username": connection.username,
+            "password_encrypted": connection.password_encrypted,
+            "revision": connection.revision,
+            "verification_status": connection.verification_status,
+            "verified_at": connection.verified_at,
+            "config": {
+                "device_service_url": config.device_service_url,
+                "device_uuid": config.device_uuid,
+                "capabilities_json": config.capabilities_json,
+                "profiles_json": config.profiles_json,
+                "recording_profile_token": config.recording_profile_token,
+                "preview_profile_token": config.preview_profile_token,
+                "detection_profile_token": config.detection_profile_token,
+                "recording_uri": config.recording_uri,
+                "preview_uri": config.preview_uri,
+                "detection_uri": config.detection_uri,
+            },
+            "legacy_metadata_present": metadata is not None,
+            "legacy": {
+                "connection_type": camera.connection_type,
+                "ip": camera.ip,
+                "rtsp_port": camera.rtsp_port,
+                "username": camera.username,
+                "password_encrypted": camera.password_encrypted,
+                "rtsp_path": camera.rtsp_path,
+                "sub_rtsp_path": camera.sub_rtsp_path,
+            },
+        }
 
 
 def _media_probe_result(*, codec: str = "h264", fps: int = 20) -> dict:
@@ -118,7 +158,7 @@ def _media_probe_result(*, codec: str = "h264", fps: int = 20) -> dict:
     }
 
 
-def test_onvif_camera_creation_revalidates_media_and_persists_safe_metadata(monkeypatch) -> None:
+def test_onvif_camera_creation_persists_current_connection_without_legacy_metadata(monkeypatch) -> None:
     probe_calls = 0
     stream_calls: list[str] = []
 
@@ -168,16 +208,43 @@ def test_onvif_camera_creation_revalidates_media_and_persists_safe_metadata(monk
             "rtsp://operator%40site:p%3Ass%2Fword@10.0.0.20:554/main"
         ]
 
-        metadata = asyncio.run(_metadata(camera_id))
-        assert metadata is not None
-        assert metadata.recording_profile_token == "main"
-        assert metadata.preview_profile_token == "sub"
-        assert metadata.recording_uri == "rtsp://10.0.0.20:554/main"
-        assert "operator" not in metadata.recording_uri
-        assert "word" not in metadata.recording_uri
+        snapshot = asyncio.run(_connection_snapshot(camera_id))
+        assert snapshot["camera_id"] == camera_id
+        assert snapshot["adapter"] == "onvif"
+        assert snapshot["host"] == "10.0.0.20"
+        assert snapshot["username"] == "operator@site"
+        assert decrypt_secret(snapshot["password_encrypted"]) == "p:ss/word"
+        assert snapshot["revision"] == 1
+        assert snapshot["verification_status"] == "verified"
+        assert snapshot["verified_at"] is not None
+        assert snapshot["legacy_metadata_present"] is False
+        assert snapshot["config"]["device_service_url"] == DISCOVERED.device_service_url
+        assert snapshot["config"]["capabilities_json"] == DISCOVERED.capabilities
+        assert snapshot["config"]["recording_profile_token"] == "main"
+        assert snapshot["config"]["preview_profile_token"] == "sub"
+        assert snapshot["config"]["recording_uri"] == "rtsp://10.0.0.20:554/main"
+        assert snapshot["config"]["preview_uri"] == "rtsp://10.0.0.20:554/sub"
+        assert all(
+            "@" not in uri
+            for uri in (
+                snapshot["config"]["recording_uri"],
+                snapshot["config"]["preview_uri"],
+                snapshot["config"]["detection_uri"],
+            )
+            if uri
+        )
+        assert snapshot["legacy"] == {
+            "connection_type": "onvif",
+            "ip": "10.0.0.20",
+            "rtsp_port": 554,
+            "username": "operator@site",
+            "password_encrypted": snapshot["password_encrypted"],
+            "rtsp_path": "/main",
+            "sub_rtsp_path": "/sub",
+        }
 
 
-def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkeypatch) -> None:
+def test_onvif_camera_update_reuses_connection_and_replaces_current_config(monkeypatch) -> None:
     discoveries = [DISCOVERED, UPDATED_DISCOVERED]
     stream_calls: list[str] = []
     recorder_calls: list[tuple[str, int]] = []
@@ -231,6 +298,8 @@ def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkey
         )
         assert created.status_code == 201, created.text
         camera_id = int(created.json()["id"])
+        before = asyncio.run(_connection_snapshot(camera_id))
+        assert before["revision"] == 1
 
         response = client.put(
             f"/api/cameras/onvif/{camera_id}",
@@ -247,6 +316,7 @@ def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkey
         )
         assert response.status_code == 200, response.text
         body = response.json()
+        assert body["id"] == camera_id
         assert body["name"] == "onvif-update-camera-renamed"
         assert body["model"] == "DoorCam 4K Rev B"
         assert body["ip"] == "10.0.0.21"
@@ -257,11 +327,28 @@ def test_onvif_camera_update_reprobes_profiles_and_replaces_safe_metadata(monkey
         assert stream_calls[-1] == "rtsp://operator:new-secret@10.0.0.21:8554/main-v2"
         assert recorder_calls == [("stop", camera_id), ("start", camera_id)]
 
-        metadata = asyncio.run(_metadata(camera_id))
-        assert metadata is not None
-        assert metadata.device_service_url == "http://10.0.0.21:8080/onvif/device_service"
-        assert metadata.recording_profile_token == "main-v2"
-        assert metadata.preview_profile_token == "sub-v2"
-        assert metadata.recording_uri == "rtsp://10.0.0.21:8554/main-v2"
-        assert "operator" not in metadata.recording_uri
-        assert "secret" not in metadata.recording_uri
+        after = asyncio.run(_connection_snapshot(camera_id))
+        assert after["camera_id"] == camera_id
+        assert after["connection_id"] == before["connection_id"]
+        assert after["adapter"] == "onvif"
+        assert after["host"] == "10.0.0.21"
+        assert after["username"] == "operator"
+        assert decrypt_secret(after["password_encrypted"]) == "new-secret"
+        assert after["revision"] == 2
+        assert after["verification_status"] == "verified"
+        assert after["verified_at"] is not None
+        assert after["legacy_metadata_present"] is False
+        assert after["config"]["device_service_url"] == UPDATED_DISCOVERED.device_service_url
+        assert after["config"]["recording_profile_token"] == "main-v2"
+        assert after["config"]["preview_profile_token"] == "sub-v2"
+        assert after["config"]["recording_uri"] == "rtsp://10.0.0.21:8554/main-v2"
+        assert after["config"]["preview_uri"] == "rtsp://10.0.0.21:8554/sub-v2"
+        assert all(
+            "@" not in uri
+            for uri in (
+                after["config"]["recording_uri"],
+                after["config"]["preview_uri"],
+                after["config"]["detection_uri"],
+            )
+            if uri
+        )
