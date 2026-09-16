@@ -10,3 +10,4 @@ def test_deploy_tracks_hik_bridge_and_private_runtime_changes() -> None:
     assert "camera-recorder-hik-bridge" in script
     assert "libhcnetsdk.so" in script
     assert "HCNetSDKCom" in script
+    assert "--force-recreate" in script
