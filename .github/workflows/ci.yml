@@ -89,7 +89,7 @@ jobs:
               output.write(f"docker={'true' if docker else 'false'}\n")
           PY
 
-  backend:
+  backend-quality:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
@@ -103,12 +103,52 @@ jobs:
           python-version: '3.12'
       - run: uv sync --dev
       - run: uv run python -m compileall app
-      - run: uv run ruff check app tests migrations
-      - run: uv run python -m pytest
+      - run: uv run ruff check app tests migrations ci_test_shards.py
       - name: Compile HIK bridge
         run: cd .. && backend/.venv/bin/python -m compileall hik_bridge
       - name: Test HIK bridge
         run: cd .. && backend/.venv/bin/python -m pytest hik_bridge/tests
+
+  backend-tests:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - run: uv sync --dev
+      - name: Run backend pytest shard ${{ matrix.shard }}
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          set -euo pipefail
+          uv run python ci_test_shards.py --shards 4 --index "$SHARD_INDEX" > /tmp/backend-test-files
+          mapfile -t test_files < /tmp/backend-test-files
+          printf 'Shard %s runs %s test files:\n' "$SHARD_INDEX" "${#test_files[@]}"
+          printf '  %s\n' "${test_files[@]}"
+          uv run python -m pytest "${test_files[@]}"
+
+  backend:
+    needs: [changes, backend-quality, backend-tests]
+    if: always() && needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify backend jobs
+        env:
+          QUALITY_RESULT: ${{ needs.backend-quality.result }}
+          TEST_RESULT: ${{ needs.backend-tests.result }}
+        run: |
+          test "$QUALITY_RESULT" = "success"
+          test "$TEST_RESULT" = "success"
 
   frontend:
     needs: changes
