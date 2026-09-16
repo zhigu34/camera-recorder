@@ -18,7 +18,6 @@ from app.schemas.event_detection import (
 )
 from app.services.event_detection import event_source_registry
 from app.services.event_detection.registry import UnknownEventSource
-from app.services.motion_manager import motion_detection_manager
 
 router = APIRouter(tags=["event-detection"])
 
