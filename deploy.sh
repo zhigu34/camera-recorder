@@ -30,6 +30,7 @@ Camera Recorder 智能增量部署脚本
 默认行为:
   自动比较“上次成功部署 -> 当前代码”的文件变化，只重建/更新受影响服务。
   纯 frontend 变化只重建 frontend，并使用 --no-deps，backend 录像不会中断。
+  HIK SDK runtime 变化只重启内部 hik-bridge，不要求把厂商 SDK 提交到 Git。
   纯文档/仓库说明变化不会重建或重启任何容器。
 
 选项:
@@ -121,6 +122,21 @@ hash_stream() {
   else cksum | awk '{print $1 ":" $2}'; fi
 }
 file_hash() { [ -f "$1" ] && hash_stream < "$1" || printf '%s\n' missing; }
+hik_sdk_hash() {
+  local dir="$1" file relative
+  if [ ! -f "$dir/libhcnetsdk.so" ] || [ ! -d "$dir/HCNetSDKCom" ]; then
+    printf '%s\n' missing
+    return 0
+  fi
+  {
+    printf 'libhcnetsdk.so='; file_hash "$dir/libhcnetsdk.so"
+    while IFS= read -r file; do
+      relative="${file#"$dir"/}"
+      printf '%s=' "$relative"
+      file_hash "$file"
+    done < <(find "$dir/HCNetSDKCom" -type f -print 2>/dev/null | LC_ALL=C sort)
+  } | hash_stream
+}
 state_get() { [ -f "$STATE_FILE" ] || return 0; awk -F= -v key="$1" '$1==key{sub(/^[^=]*=/,"");print;exit}' "$STATE_FILE"; }
 git_ready() { command_exists git && git rev-parse --is-inside-work-tree >/dev/null 2>&1; }
 git_worktree_hash() { git status --porcelain=v1 --untracked-files=all 2>/dev/null | hash_stream; }
@@ -194,6 +210,7 @@ compose_up_with_network_recovery() {
 
 BUILD_BACKEND=0
 BUILD_FRONTEND=0
+UPDATE_HIK=0
 UPDATE_BACKEND=0
 UPDATE_FRONTEND=0
 UPDATE_OPENLIST=0
@@ -203,20 +220,23 @@ CHANGED_FILES=""
 CURRENT_COMMIT=""
 CURRENT_WORKTREE_HASH=""
 CURRENT_ENV_HASH=""
+CURRENT_HIK_SDK_HASH=""
+HIK_SDK_HOST_DIR=""
 
 mark_full() {
   BUILD_BACKEND=1; BUILD_FRONTEND=1
-  UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
+  UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
   CONFIG_ALL=1
 }
 classify_path() {
   local path="$1"
   case "$path" in
     frontend/*) BUILD_FRONTEND=1; UPDATE_FRONTEND=1 ;;
-    backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1 ;;
-    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1 ;;
+    backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1; UPDATE_HIK=1 ;;
+    hik_bridge/*) BUILD_BACKEND=1; UPDATE_HIK=1 ;;
+    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1 ;;
     docker-compose.yml) mark_full ;;
-    .env.example) CONFIG_ALL=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1 ;;
+    .env.example) CONFIG_ALL=1; UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1 ;;
     deploy.sh|*.md|docs/*|.github/*|.gitignore|Makefile|scripts/*) ;;
     '') ;;
     *) warn "无法精确归类变更: $path，按完整部署处理"; mark_full ;;
@@ -235,7 +255,7 @@ collect_changed_files() {
 
   if [ -n "$previous_commit" ] && git cat-file -e "${previous_commit}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$previous_commit" "$CURRENT_COMMIT" 2>/dev/null; then
     base="$previous_commit"; PLAN_SOURCE="上次成功部署 ${previous_commit:0:8}"
-  elif container_exists camera-recorder-backend || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
+  elif container_exists camera-recorder-backend || container_exists camera-recorder-hik-bridge || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
     if git rev-parse --verify ORIG_HEAD >/dev/null 2>&1 && git merge-base --is-ancestor ORIG_HEAD "$CURRENT_COMMIT" 2>/dev/null; then
       base="$(git rev-parse ORIG_HEAD)"; PLAN_SOURCE="首次智能部署，使用 pull 前 ${base:0:8} 作为基线"
     else
@@ -259,10 +279,12 @@ save_deploy_state() {
   CURRENT_COMMIT="$(git rev-parse HEAD)"
   CURRENT_WORKTREE_HASH="$(git_worktree_hash)"
   CURRENT_ENV_HASH="$(file_hash "$ENV_FILE")"
+  CURRENT_HIK_SDK_HASH="$(hik_sdk_hash "$HIK_SDK_HOST_DIR")"
   cat > "$STATE_FILE" <<STATE
 commit=$CURRENT_COMMIT
 worktree_hash=$CURRENT_WORKTREE_HASH
 env_hash=$CURRENT_ENV_HASH
+hik_sdk_hash=$CURRENT_HIK_SDK_HASH
 STATE
 }
 
@@ -273,7 +295,7 @@ command_exists docker || fail "未安装 Docker"
 docker version >/dev/null 2>&1 || fail "Docker daemon 不可用"
 docker compose version >/dev/null 2>&1 || fail "需要 Docker Compose v2"
 docker buildx version >/dev/null 2>&1 || fail "需要 Docker Buildx"
-for cmd in awk grep tar tee; do command_exists "$cmd" || fail "缺少 $cmd"; done
+for cmd in awk grep tar tee find sort; do command_exists "$cmd" || fail "缺少 $cmd"; done
 
 DOCKER_ARCH_RAW="$(docker info --format '{{.Architecture}}' 2>/dev/null || true)"
 DOCKER_ARCH="$(normalize_arch "$DOCKER_ARCH_RAW" 2>/dev/null || true)"
@@ -293,7 +315,24 @@ ensure_env_key OPENLIST_PORT 5244
 ensure_env_key TZ Asia/Shanghai
 ensure_env_key OPENLIST_UID 0
 ensure_env_key OPENLIST_GID 0
+ensure_env_key HIK_SDK_DIR ./hik-sdk-runtime
 if grep -q '^CAMREC_API_PORT=' "$ENV_FILE"; then env_delete CAMREC_API_PORT; ok "已移除废弃的 CAMREC_API_PORT；后端 API 仅在 Docker 内网监听"; fi
+
+HIK_SDK_DIR_VALUE="$(env_get HIK_SDK_DIR || true)"
+[ -n "$HIK_SDK_DIR_VALUE" ] || HIK_SDK_DIR_VALUE="./hik-sdk-runtime"
+case "$HIK_SDK_DIR_VALUE" in
+  /*) HIK_SDK_HOST_DIR="$HIK_SDK_DIR_VALUE" ;;
+  *) HIK_SDK_HOST_DIR="$ROOT_DIR/${HIK_SDK_DIR_VALUE#./}" ;;
+esac
+if [ "$HIK_SDK_DIR_VALUE" = "./hik-sdk-runtime" ] || [ "$HIK_SDK_DIR_VALUE" = "hik-sdk-runtime" ]; then
+  mkdir -p "$HIK_SDK_HOST_DIR"
+fi
+if [ -f "$HIK_SDK_HOST_DIR/libhcnetsdk.so" ] && [ -d "$HIK_SDK_HOST_DIR/HCNetSDKCom" ]; then
+  ok "HIK HCNetSDK runtime 已就绪: $HIK_SDK_HOST_DIR"
+else
+  warn "HIK HCNetSDK runtime 未就绪: $HIK_SDK_HOST_DIR（HIK SDK 设备暂不可用；RTSP/ONVIF 不受影响）"
+  warn "首次启用 HIK 时请放入 Linux64 runtime，至少包含 libhcnetsdk.so 与 HCNetSDKCom/；详见 docs/HIK_SDK_RUNTIME.md"
+fi
 
 SECRET_KEY="$(env_get CAMREC_SECRET_KEY || true)"
 if [ -z "$SECRET_KEY" ] || [ "$SECRET_KEY" = "replace-with-a-long-random-secret" ] || [ "$SECRET_KEY" = "camera-recorder-local-change-me" ]; then
@@ -331,13 +370,22 @@ CURRENT_ENV_HASH="$(file_hash "$ENV_FILE")"
 PREVIOUS_ENV_HASH="$(state_get env_hash || true)"
 if [ -n "$PREVIOUS_ENV_HASH" ] && [ "$PREVIOUS_ENV_HASH" != "$CURRENT_ENV_HASH" ]; then
   warn ".env 自上次成功部署后发生变化，将重新协调全部服务"
-  CONFIG_ALL=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
+  CONFIG_ALL=1; UPDATE_HIK=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
 fi
 
+CURRENT_HIK_SDK_HASH="$(hik_sdk_hash "$HIK_SDK_HOST_DIR")"
+PREVIOUS_HIK_SDK_HASH="$(state_get hik_sdk_hash || true)"
+if [ -n "$PREVIOUS_HIK_SDK_HASH" ] && [ "$PREVIOUS_HIK_SDK_HASH" != "$CURRENT_HIK_SDK_HASH" ]; then
+  warn "HIK HCNetSDK runtime 自上次成功部署后发生变化，将重启 hik-bridge 重新加载"
+  UPDATE_HIK=1
+fi
+
+container_running camera-recorder-hik-bridge || UPDATE_HIK=1
 container_running camera-recorder-backend || UPDATE_BACKEND=1
 container_running camera-recorder-web || UPDATE_FRONTEND=1
 container_running camera-recorder-openlist || UPDATE_OPENLIST=1
 
+if [ "$UPDATE_HIK" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q hik-bridge 2>/dev/null || true)" ]; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_BACKEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q backend 2>/dev/null || true)" ]; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_FRONTEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q frontend 2>/dev/null || true)" ]; then BUILD_FRONTEND=1; fi
 
@@ -355,6 +403,7 @@ fi
 BUILD_LABELS=""; UPDATE_LABELS=""
 [ "$BUILD_BACKEND" = "1" ] && BUILD_LABELS="${BUILD_LABELS} backend"
 [ "$BUILD_FRONTEND" = "1" ] && BUILD_LABELS="${BUILD_LABELS} frontend"
+[ "$UPDATE_HIK" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} hik-bridge"
 [ "$UPDATE_BACKEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} backend"
 [ "$UPDATE_FRONTEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} frontend"
 [ "$UPDATE_OPENLIST" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} openlist"
@@ -392,6 +441,7 @@ if [ "${#BUILD_SERVICES[@]}" -gt 0 ]; then
 fi
 
 UPDATE_SERVICES=()
+[ "$UPDATE_HIK" = "1" ] && UPDATE_SERVICES+=(hik-bridge)
 [ "$UPDATE_BACKEND" = "1" ] && UPDATE_SERVICES+=(backend)
 [ "$UPDATE_FRONTEND" = "1" ] && UPDATE_SERVICES+=(frontend)
 [ "$UPDATE_OPENLIST" = "1" ] && UPDATE_SERVICES+=(openlist)
@@ -407,6 +457,16 @@ else
   ok "代码与服务状态均无需更新，跳过容器重建"
 fi
 
+if [ "$UPDATE_HIK" = "1" ] || container_exists camera-recorder-hik-bridge; then
+  info "等待 HIK bridge 健康..."
+  if ! wait_for_health camera-recorder-hik-bridge 90; then "${COMPOSE[@]}" logs --tail=120 hik-bridge || true; fail "HIK bridge 未通过健康检查"; fi
+  HIK_RUNTIME_STATUS="$("${COMPOSE[@]}" exec -T hik-bridge python -c 'import json,urllib.request; print(str(json.load(urllib.request.urlopen("http://127.0.0.1:8100/health", timeout=5)).get("runtime_available", False)).lower())' 2>/dev/null || true)"
+  if [ "$HIK_RUNTIME_STATUS" = "true" ]; then
+    ok "HIK bridge healthy，HCNetSDK runtime 已加载（仅 Docker 内网可达）"
+  else
+    warn "HIK bridge healthy，但 HCNetSDK runtime 未加载；HIK SDK 设备暂不可用"
+  fi
+fi
 if [ "$UPDATE_BACKEND" = "1" ] || container_exists camera-recorder-backend; then
   info "等待 backend 健康..."
   if ! wait_for_health camera-recorder-backend 150; then "${COMPOSE[@]}" logs --tail=120 backend || true; fail "backend 未通过健康检查"; fi
@@ -435,10 +495,12 @@ printf '\n'; "${COMPOSE[@]}" ps; printf '\n'
 ok "部署完成"
 printf 'Camera Recorder Web: http://127.0.0.1:%s\n' "$WEB_PORT"
 printf 'Backend API:        internal only (backend:8000, via Web /api and /ws)\n'
+printf 'HIK Bridge:         internal only (hik-bridge:8100)\n'
 printf 'OpenList:           http://127.0.0.1:%s\n' "$OPENLIST_PORT"
 printf '\n常用命令:\n'
 printf '  智能增量部署: git pull && ./deploy.sh\n'
 printf '  预览部署计划: ./deploy.sh --check-only\n'
 printf '  强制完整部署: ./deploy.sh --full\n'
 printf '  查看后端日志: docker compose logs -f backend\n'
+printf '  查看 HIK 日志: docker compose logs -f hik-bridge\n'
 printf '  查看全部状态: docker compose ps\n'
