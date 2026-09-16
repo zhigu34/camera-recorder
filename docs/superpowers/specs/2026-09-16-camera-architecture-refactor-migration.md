@@ -16,25 +16,27 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
+Phase 1 completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the Phase 1 RTSP connection-domain migration.
+
 ### Expand
 
-- [ ] Create `camera_connections`.
-- [ ] Create `rtsp_connection_configs`.
+- [x] Create `camera_connections`.
+- [x] Create `rtsp_connection_configs`.
 - [ ] Create empty ONVIF/HIK connection-config tables for the new architecture; do not backfill them from legacy rows.
-- [ ] For every existing Camera, create exactly one `CameraConnection` with `adapter=manual_rtsp`.
-- [ ] Copy existing `Camera.ip` -> `CameraConnection.host`.
-- [ ] Copy existing `Camera.username` -> `CameraConnection.username`.
-- [ ] Copy existing `Camera.password_encrypted` -> `CameraConnection.password_encrypted` without decrypting/re-encrypting it.
-- [ ] Set initial `CameraConnection.revision=1`.
-- [ ] Set initial verification state from current persisted connectivity/probe information where it is unambiguous; otherwise use `unverified` rather than guessing.
-- [ ] Copy `Camera.rtsp_port`, `Camera.rtsp_path`, and `Camera.sub_rtsp_path` into `RtspConnectionConfig`.
-- [ ] Preserve every existing `Camera.id` exactly.
-- [ ] Preserve all Recording/Event/Motion/Health references to existing `camera_id` values.
-- [ ] Change historical camera foreign keys from destructive cascade behavior to RESTRICT/NO ACTION-safe behavior.
+- [x] For every existing Camera, create exactly one `CameraConnection` with `adapter=manual_rtsp`.
+- [x] Copy existing `Camera.ip` -> `CameraConnection.host`.
+- [x] Copy existing `Camera.username` -> `CameraConnection.username`.
+- [x] Copy existing `Camera.password_encrypted` -> `CameraConnection.password_encrypted` without decrypting/re-encrypting it.
+- [x] Set initial `CameraConnection.revision=1`.
+- [x] Set initial verification state from current persisted connectivity/probe information where it is unambiguous; otherwise use `unverified` rather than guessing.
+- [x] Copy `Camera.rtsp_port`, `Camera.rtsp_path`, and `Camera.sub_rtsp_path` into `RtspConnectionConfig`.
+- [x] Preserve every existing `Camera.id` exactly.
+- [x] Preserve all Recording/Event/Motion/Health references to existing `camera_id` values.
+- [x] Change historical camera foreign keys from destructive cascade behavior to RESTRICT/NO ACTION-safe behavior.
 - [ ] Before destructive SQLite table rebuild migrations, create a database backup/snapshot.
-- [ ] Add migration verification: every existing Camera must have exactly one current connection after backfill.
-- [ ] Add migration verification: every backfilled connection must be `manual_rtsp` for this installation.
-- [ ] If migration encounters a legacy Camera whose adapter is unexpectedly not `manual_rtsp`, abort migration with a clear error instead of guessing how to transform it.
+- [x] Add migration verification: every existing Camera must have exactly one current connection after backfill.
+- [x] Add migration verification: every backfilled connection must be `manual_rtsp` for this installation.
+- [x] If migration encounters a legacy Camera whose adapter is unexpectedly not `manual_rtsp`, abort migration with a clear error instead of guessing how to transform it.
 
 ### Switch
 
