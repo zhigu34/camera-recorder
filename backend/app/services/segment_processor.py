@@ -313,6 +313,7 @@ class SegmentProcessor:
                     "stage": stage,
                     "reason": reason,
                 },
+                blocks_camera_delete=True,
             )
             await session.commit()
 
