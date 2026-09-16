@@ -74,24 +74,31 @@ def test_camera_delete_uses_coordinator_instead_of_direct_manager_calls(monkeypa
     legacy_calls: list[str] = []
     monkeypatch.setattr(cameras_api, "camera_runtime_coordinator", spy, raising=False)
 
-    async def legacy_motion(camera_id: int) -> None:
-        legacy_calls.append(f"motion:{camera_id}")
+    class LegacyMotion:
+        async def stop_camera(self, camera_id: int) -> None:
+            legacy_calls.append(f"motion:{camera_id}")
 
-    async def legacy_event(camera_id: int) -> None:
-        legacy_calls.append(f"event:{camera_id}")
+    class LegacyEvent:
+        async def stop_camera(self, camera_id: int) -> None:
+            legacy_calls.append(f"event:{camera_id}")
 
-    async def legacy_recorder(camera_id: int):
-        legacy_calls.append(f"recorder:{camera_id}")
-        return {"camera_id": camera_id, "state": "STOPPED"}
+    class LegacyRecorder:
+        def is_running(self, camera_id: int) -> bool:
+            legacy_calls.append(f"recorder-is-running:{camera_id}")
+            return True
 
-    def legacy_forget(camera_id: int) -> None:
-        legacy_calls.append(f"schedule:{camera_id}")
+        async def stop(self, camera_id: int):
+            legacy_calls.append(f"recorder-stop:{camera_id}")
+            return {"camera_id": camera_id, "state": "STOPPED"}
 
-    monkeypatch.setattr(cameras_api.motion_detection_manager, "stop_camera", legacy_motion)
-    monkeypatch.setattr(cameras_api.event_recording_manager, "stop_camera", legacy_event)
-    monkeypatch.setattr(cameras_api.recorder_manager, "is_running", lambda _camera_id: True)
-    monkeypatch.setattr(cameras_api.recorder_manager, "stop", legacy_recorder)
-    monkeypatch.setattr(cameras_api.recording_schedule_manager, "forget", legacy_forget)
+    class LegacySchedule:
+        def forget(self, camera_id: int) -> None:
+            legacy_calls.append(f"schedule:{camera_id}")
+
+    monkeypatch.setattr(cameras_api, "motion_detection_manager", LegacyMotion(), raising=False)
+    monkeypatch.setattr(cameras_api, "event_recording_manager", LegacyEvent(), raising=False)
+    monkeypatch.setattr(cameras_api, "recorder_manager", LegacyRecorder())
+    monkeypatch.setattr(cameras_api, "recording_schedule_manager", LegacySchedule())
 
     with TestClient(app) as client:
         created = client.post("/api/cameras", json=_manual_payload("runtime-coordinator-delete"))
@@ -170,14 +177,24 @@ def test_onvif_update_uses_coordinator_instead_of_direct_runtime_managers(monkey
     async def no_schedule_reconcile() -> None:
         return None
 
-    async def legacy_motion(camera_id: int) -> None:
-        legacy_calls.append(f"motion:{camera_id}")
+    class LegacyMotion:
+        async def restart_camera(self, camera_id: int) -> None:
+            legacy_calls.append(f"motion:{camera_id}")
+
+    class LegacyRecorder:
+        def is_running(self, camera_id: int) -> bool:
+            legacy_calls.append(f"recorder-is-running:{camera_id}")
+            return False
+
+        async def stop(self, camera_id: int):
+            legacy_calls.append(f"recorder-stop:{camera_id}")
+            return {"camera_id": camera_id, "state": "STOPPED"}
 
     monkeypatch.setattr(onvif_api, "_validated_discovery", validated)
     monkeypatch.setattr(onvif_api, "camera_runtime_coordinator", spy, raising=False)
     monkeypatch.setattr(onvif_api.recording_schedule_manager, "reconcile", no_schedule_reconcile)
-    monkeypatch.setattr(onvif_api.motion_detection_manager, "restart_camera", legacy_motion)
-    monkeypatch.setattr(onvif_api.recorder_manager, "is_running", lambda _camera_id: False)
+    monkeypatch.setattr(onvif_api, "motion_detection_manager", LegacyMotion(), raising=False)
+    monkeypatch.setattr(onvif_api, "recorder_manager", LegacyRecorder(), raising=False)
 
     with TestClient(app) as client:
         created = client.post(
