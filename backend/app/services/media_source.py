@@ -27,9 +27,13 @@ class MediaSource:
                 raise ValueError("RTSP source must not include bridge_stream_id or bridge_target")
             return
         if self.transport == "hik_bridge":
-            if self.uri is not None:
-                raise ValueError("bridge source must not include uri")
-            if not self.bridge_stream_id and self.bridge_target is None:
-                raise ValueError("bridge source requires bridge_stream_id or bridge_target")
+            variants = sum(
+                value is not None
+                for value in (self.uri, self.bridge_stream_id, self.bridge_target)
+            )
+            if variants != 1:
+                raise ValueError(
+                    "bridge source requires exactly one of uri, bridge_stream_id, or bridge_target"
+                )
             return
         raise ValueError(f"unsupported media transport: {self.transport}")
