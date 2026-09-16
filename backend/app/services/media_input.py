@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit
 
 from app.services.hik_bridge_client import HikBridgeClient
 from app.services.media_source import MediaSource
@@ -33,25 +34,35 @@ class MediaInputLease:
         await self.close()
 
 
+def media_input_from_uri(uri: str, *, timeout_us: int) -> MediaInput:
+    scheme = urlsplit(uri).scheme.lower()
+    if scheme == "rtsp":
+        return MediaInput(
+            transport_args=(
+                "-rtsp_transport",
+                "tcp",
+                "-timeout",
+                str(timeout_us),
+            ),
+            uri=uri,
+        )
+    if scheme in {"http", "https"}:
+        return MediaInput(
+            transport_args=("-rw_timeout", str(timeout_us)),
+            uri=uri,
+        )
+    raise ValueError(f"unsupported media input URI scheme: {scheme or '<empty>'}")
+
+
 async def open_media_input(
     source: MediaSource,
     *,
     rtsp_timeout_us: int,
     bridge_client: Any | None = None,
 ) -> MediaInputLease:
-    if source.transport == "rtsp":
-        if not source.uri:
-            raise ValueError("RTSP media source has no URI")
+    if source.uri:
         return MediaInputLease(
-            MediaInput(
-                transport_args=(
-                    "-rtsp_transport",
-                    "tcp",
-                    "-timeout",
-                    str(rtsp_timeout_us),
-                ),
-                uri=source.uri,
-            )
+            media_input_from_uri(source.uri, timeout_us=rtsp_timeout_us)
         )
 
     if source.transport != "hik_bridge":
@@ -72,9 +83,6 @@ async def open_media_input(
             await client.stop_stream(stream_id)
 
     return MediaInputLease(
-        MediaInput(
-            transport_args=("-rw_timeout", str(rtsp_timeout_us)),
-            uri=media_url,
-        ),
+        media_input_from_uri(media_url, timeout_us=rtsp_timeout_us),
         _cleanup=cleanup,
     )
