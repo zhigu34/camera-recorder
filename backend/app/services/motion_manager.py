@@ -72,6 +72,7 @@ async def _default_config_loader(camera_id: int) -> MotionWorkerConfig | None:
             for zone in zones_result
         ]
         resolved = resolve_stream(camera, "detection")
+        connection = getattr(camera, "connection", None)
         return MotionWorkerConfig(
             camera_id=camera.id,
             # Legacy discrete fields remain on the config for compatibility with
@@ -92,6 +93,7 @@ async def _default_config_loader(camera_id: int) -> MotionWorkerConfig | None:
             event_min_interval_ms=motion.event_min_interval_ms,
             stream_uri=resolved.uri,
             stream=resolved.role,
+            connection_revision=(connection.revision if connection is not None else None),
         )
 
 
