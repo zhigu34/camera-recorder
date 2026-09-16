@@ -1,5 +1,6 @@
 import asyncio
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
@@ -7,6 +8,7 @@ from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.main import app
 from app.models import Camera, CameraConnection
+from app.services.camera_connection import ConnectionAdapterMismatch, upsert_manual_rtsp_connection
 
 
 async def _connection_snapshot(camera_id: int) -> dict:
@@ -148,3 +150,36 @@ def test_manual_rtsp_update_preserves_connection_id_and_revises_only_connection_
 
         deleted = client.delete(f"/api/cameras/{camera_id}")
         assert deleted.status_code == 204
+
+
+def test_manual_rtsp_helper_rejects_current_adapter_mismatch() -> None:
+    camera = Camera(
+        name="adapter-mismatch",
+        connection_type="manual_rtsp",
+        ip="192.0.2.40",
+        rtsp_port=554,
+        username="admin",
+        password_encrypted="legacy-ciphertext",
+        rtsp_path="/main",
+    )
+    camera.connection = CameraConnection(
+        adapter="onvif",
+        host="192.0.2.40",
+        username="operator",
+        password_encrypted="current-ciphertext",
+    )
+
+    with pytest.raises(ConnectionAdapterMismatch):
+        upsert_manual_rtsp_connection(
+            camera,
+            host="192.0.2.41",
+            port=554,
+            username="admin",
+            password_encrypted="new-ciphertext",
+            main_path="/main",
+            sub_path=None,
+        )
+
+    assert camera.connection.adapter == "onvif"
+    assert camera.connection.host == "192.0.2.40"
+    assert camera.ip == "192.0.2.40"
