@@ -1,6 +1,7 @@
 from app.models.camera import Camera
 from app.models.event import Event
 from app.models.health_sample import CameraHealthSample
+from app.models.hikvision import HikDeviceMetadata
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.notification_settings import NotificationSettings
 from app.models.onvif import OnvifDeviceMetadata
@@ -12,6 +13,7 @@ from app.models.upload import UploadTask
 __all__ = [
     "Camera",
     "OnvifDeviceMetadata",
+    "HikDeviceMetadata",
     "Recording",
     "ExportJob",
     "ExportArtifact",
