@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import settings
+from app.services.media_input import MediaInput
+from app.services.media_source import MediaSource
 from app.services.system_settings import RuntimeSettings
 
 
@@ -9,13 +11,14 @@ from app.services.system_settings import RuntimeSettings
 class CameraRuntimeConfig:
     id: int
     name: str
-    stream_uri: str
+    stream_uri: str | None
     timestamp_mode: str
     fps_num: int | None
     fps_den: int | None
     audio_codec: str | None
     sample_rate: int | None
     audio_frame_samples: int | None
+    media_source: MediaSource | None = None
     # None follows the global setting. Scheduled recordings can explicitly disable
     # wall-clock alignment so a 21:01-21:11 window is not split at 21:10.
     align_segments_to_clock: bool | None = None
@@ -46,12 +49,29 @@ def _audio_setts(camera: CameraRuntimeConfig) -> str | None:
     )
 
 
+def _legacy_media_input(camera: CameraRuntimeConfig, runtime: RuntimeSettings) -> MediaInput:
+    if not camera.stream_uri:
+        raise FFmpegCommandError("recording media input is not materialized")
+    return MediaInput(
+        transport_args=(
+            "-rtsp_transport",
+            "tcp",
+            "-timeout",
+            str(runtime.rtsp_timeout_us),
+        ),
+        uri=camera.stream_uri,
+    )
+
+
 def build_record_command(
     camera: CameraRuntimeConfig,
     output_dir: Path,
     runtime: RuntimeSettings,
+    *,
+    media_input: MediaInput | None = None,
 ) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    media_input = media_input or _legacy_media_input(camera, runtime)
 
     input_fflags = "+discardcorrupt"
     if camera.timestamp_mode == "wallclock":
@@ -63,10 +83,7 @@ def build_record_command(
         "-hide_banner",
         "-loglevel",
         "warning",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        str(runtime.rtsp_timeout_us),
+        *media_input.transport_args,
         "-fflags",
         input_fflags,
     ]
@@ -76,7 +93,7 @@ def build_record_command(
 
     command += [
         "-i",
-        camera.stream_uri,
+        media_input.uri,
         "-map",
         "0:v:0",
         "-map",
