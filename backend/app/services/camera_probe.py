@@ -4,6 +4,7 @@ from fractions import Fraction
 from urllib.parse import quote
 
 from app.core.config import settings
+from app.services.media_input import media_input_from_uri
 
 
 class CameraProbeError(RuntimeError):
@@ -36,20 +37,22 @@ def _ratio(value: str | None) -> tuple[int | None, int | None, float | None]:
 
 
 async def probe_stream_uri(*, stream_uri: str, rtsp_timeout_us: int) -> dict:
-    """Probe video and audio from an already-resolved stream URI."""
+    """Probe video and audio from an already-resolved media URI."""
+
+    try:
+        media_input = media_input_from_uri(stream_uri, timeout_us=rtsp_timeout_us)
+    except ValueError as exc:
+        raise CameraProbeError(str(exc)) from exc
 
     command = [
         settings.ffprobe_bin,
         "-v",
         "error",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        str(rtsp_timeout_us),
+        *media_input.transport_args,
         "-show_streams",
         "-of",
         "json",
-        stream_uri,
+        media_input.uri,
     ]
 
     try:
@@ -68,7 +71,7 @@ async def probe_stream_uri(*, stream_uri: str, rtsp_timeout_us: int) -> dict:
     except TimeoutError as exc:
         process.kill()
         await process.wait()
-        raise CameraProbeError("RTSP probe timed out") from exc
+        raise CameraProbeError("media probe timed out") from exc
 
     if process.returncode != 0:
         message = stderr.decode(errors="replace").strip() or "ffprobe failed"
@@ -84,7 +87,7 @@ async def probe_stream_uri(*, stream_uri: str, rtsp_timeout_us: int) -> dict:
     audio = next((item for item in streams if item.get("codec_type") == "audio"), None)
 
     if not video:
-        raise CameraProbeError("RTSP stream has no video track")
+        raise CameraProbeError("media stream has no video track")
 
     fps_source = video.get("avg_frame_rate")
     if not fps_source or fps_source == "0/0":
