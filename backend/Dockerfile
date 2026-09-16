@@ -11,6 +11,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_INDEX_URL=${PYPI_INDEX_URL} \
     UV_DEFAULT_INDEX=${PYPI_INDEX_URL}
 
+# Prefer mainland China mirrors during image builds. Keep the original Debian
+# sources as an automatic fallback so a temporary mirror outage/403 cannot make
+# deployments fail. Debian 12+ images normally use DEB822 sources, while older
+# variants may still use sources.list.
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
       cp /etc/apt/sources.list.d/debian.sources /tmp/debian.sources.orig; \
@@ -31,15 +35,22 @@ RUN set -eux; \
     if ! apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 update; then \
       echo "Preferred Debian mirror unavailable; falling back to official Debian sources" >&2; \
       rm -rf /var/lib/apt/lists/*; \
-      if [ -f /tmp/debian.sources.orig ]; then cp /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources; fi; \
-      if [ -f /tmp/sources.list.orig ]; then cp /tmp/sources.list.orig /etc/apt/sources.list; fi; \
+      if [ -f /tmp/debian.sources.orig ]; then \
+        cp /tmp/debian.sources.orig /etc/apt/sources.list.d/debian.sources; \
+      fi; \
+      if [ -f /tmp/sources.list.orig ]; then \
+        cp /tmp/sources.list.orig /etc/apt/sources.list; \
+      fi; \
       apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 update; \
     fi; \
     apt-get -o Acquire::Retries=3 -o Acquire::http::Pipeline-Depth=0 install -y --no-install-recommends \
       ca-certificates xz-utils tzdata; \
     rm -rf /var/lib/apt/lists/* /tmp/debian.sources.orig /tmp/sources.list.orig
 
-# FFmpeg is supplied from the host build context so image builds do not depend on GitHub.
+# FFmpeg is intentionally supplied from the host build context instead of being
+# downloaded during docker build. This avoids GitHub connectivity becoming a
+# dependency of every image build. Prepare the archive with:
+#   bash scripts/download-ffmpeg.sh auto
 COPY vendor/ffmpeg/ /tmp/ffmpeg-dist/
 RUN set -eux; \
     case "${TARGETARCH}" in \
