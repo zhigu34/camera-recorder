@@ -59,6 +59,7 @@ class MotionWorkerConfig:
     event_min_interval_ms: int = 60_000
     stream_uri: str | None = None
     stream: MotionStream | None = None
+    connection_revision: int | None = None
 
 
 def select_motion_path(main_path: str, sub_path: str | None) -> tuple[str, MotionStream]:
