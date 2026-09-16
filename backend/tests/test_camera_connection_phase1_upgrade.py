@@ -37,7 +37,7 @@ def _connect(db_path: Path) -> sqlite3.Connection:
 
 def test_fresh_sqlite_upgrades_to_phase1_head(tmp_path: Path) -> None:
     db_path = tmp_path / "fresh.db"
-    _alembic(db_path, "head")
+    _alembic(db_path, PHASE1_HEAD)
 
     with _connect(db_path) as connection:
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
@@ -149,7 +149,7 @@ def test_upgrade_from_0019_to_head_preserves_camera_identity_and_history(tmp_pat
             ],
         }
 
-    _alembic(db_path, "head")
+    _alembic(db_path, PHASE1_HEAD)
 
     with _connect(db_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == PHASE1_HEAD
