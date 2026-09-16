@@ -22,6 +22,7 @@ class CameraRuntimeConfig:
     # None follows the global setting. Scheduled recordings can explicitly disable
     # wall-clock alignment so a 21:01-21:11 window is not split at 21:10.
     align_segments_to_clock: bool | None = None
+    connection_revision: int | None = None
 
 
 class FFmpegCommandError(ValueError):
