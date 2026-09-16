@@ -60,7 +60,7 @@ def test_media_source_requires_transport_payload() -> None:
             purpose="recording",
         )
 
-    with pytest.raises(ValueError, match="bridge source requires bridge_stream_id"):
+    with pytest.raises(ValueError, match="bridge source requires exactly one"):
         MediaSource(
             adapter="hik_sdk",
             transport="hik_bridge",
