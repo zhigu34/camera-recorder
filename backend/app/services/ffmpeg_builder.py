@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.config import settings
-from app.services.media_input import MediaInput
+from app.services.media_input import MediaInput, media_input_from_uri
 from app.services.media_source import MediaSource
 from app.services.system_settings import RuntimeSettings
 
@@ -52,15 +52,10 @@ def _audio_setts(camera: CameraRuntimeConfig) -> str | None:
 def _legacy_media_input(camera: CameraRuntimeConfig, runtime: RuntimeSettings) -> MediaInput:
     if not camera.stream_uri:
         raise FFmpegCommandError("recording media input is not materialized")
-    return MediaInput(
-        transport_args=(
-            "-rtsp_transport",
-            "tcp",
-            "-timeout",
-            str(runtime.rtsp_timeout_us),
-        ),
-        uri=camera.stream_uri,
-    )
+    try:
+        return media_input_from_uri(camera.stream_uri, timeout_us=runtime.rtsp_timeout_us)
+    except ValueError as exc:
+        raise FFmpegCommandError(str(exc)) from exc
 
 
 def build_record_command(
@@ -140,7 +135,7 @@ def redact_command(command: list[str]) -> list[str]:
     try:
         input_index = redacted.index("-i") + 1
         if input_index < len(redacted):
-            redacted[input_index] = "rtsp://***:***@camera/stream"
+            redacted[input_index] = "media://***"
     except ValueError:
         pass
     return redacted
