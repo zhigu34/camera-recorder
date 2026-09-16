@@ -247,7 +247,7 @@ def test_onvif_camera_creation_persists_current_connection_without_legacy_metada
 def test_onvif_camera_update_reuses_connection_and_replaces_current_config(monkeypatch) -> None:
     discoveries = [DISCOVERED, UPDATED_DISCOVERED]
     stream_calls: list[str] = []
-    recorder_calls: list[tuple[str, int]] = []
+    runtime_reload_calls: list[tuple[int, bool]] = []
 
     async def fake_onvif_probe(_payload):
         return discoveries.pop(0)
@@ -260,27 +260,14 @@ def test_onvif_camera_update_reuses_connection_and_replaces_current_config(monke
     async def no_reconcile():
         return None
 
-    async def no_motion_restart(_camera_id: int):
-        return None
-
-    def recorder_is_running(_camera_id: int) -> bool:
-        return True
-
-    async def stop_recorder(camera_id: int):
-        recorder_calls.append(("stop", camera_id))
-        return {"camera_id": camera_id, "state": "STOPPED", "pid": None}
-
-    async def start_regular(camera):
-        recorder_calls.append(("start", int(camera.id)))
-        return {"camera_id": int(camera.id), "state": "RECORDING", "pid": 1}
+    async def reload_runtime(camera_id: int, *, schedule_changed: bool = False) -> str:
+        runtime_reload_calls.append((camera_id, schedule_changed))
+        return "running"
 
     monkeypatch.setattr(onvif_api, "_probe_onvif", fake_onvif_probe)
     monkeypatch.setattr(onvif_api, "probe_stream_uri", fake_stream_probe)
     monkeypatch.setattr(onvif_api.recording_schedule_manager, "reconcile", no_reconcile)
-    monkeypatch.setattr(onvif_api.motion_detection_manager, "restart_camera", no_motion_restart)
-    monkeypatch.setattr(onvif_api.recorder_manager, "is_running", recorder_is_running)
-    monkeypatch.setattr(onvif_api.recorder_manager, "stop", stop_recorder)
-    monkeypatch.setattr(onvif_api, "start_regular_recorder", start_regular)
+    monkeypatch.setattr(onvif_api.camera_runtime_coordinator, "reload", reload_runtime)
 
     with TestClient(app) as client:
         created = client.post(
@@ -325,7 +312,7 @@ def test_onvif_camera_update_reuses_connection_and_replaces_current_config(monke
         assert body["sub_rtsp_path"] == "/sub-v2"
         assert body["video_codec"] == "hevc"
         assert stream_calls[-1] == "rtsp://operator:new-secret@10.0.0.21:8554/main-v2"
-        assert recorder_calls == [("stop", camera_id), ("start", camera_id)]
+        assert runtime_reload_calls == [(camera_id, False)]
 
         after = asyncio.run(_connection_snapshot(camera_id))
         assert after["camera_id"] == camera_id
