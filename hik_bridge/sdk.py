@@ -45,6 +45,20 @@ def _find_runtime_library(root: Path, stem: str) -> Path | None:
     return None
 
 
+def _preview_info(*, channel: int, stream_type: int) -> NET_DVR_PREVIEWINFO:
+    preview = NET_DVR_PREVIEWINFO()
+    preview.lChannel = int(channel)
+    preview.dwStreamType = int(stream_type)
+    preview.dwLinkMode = 0
+    preview.hPlayWnd = 0
+    # Blocking startup gives create_stream an immediate success/failure result.
+    preview.bBlocked = 1
+    # ANR record passback can inject historical device recordings after a link
+    # recovers; the bridge must expose only the live stream to the shared pipeline.
+    preview.bPassbackRecord = 0
+    return preview
+
+
 class HcNetSdk:
     def __init__(self, root: str | Path | None = None) -> None:
         self.root = Path(root or os.getenv("HIK_SDK_PATH", "/opt/hikvision/runtime"))
@@ -170,13 +184,7 @@ class HcNetSdk:
         callback: Callable[[bytes], None],
     ) -> int:
         lib = self._load()
-        preview = NET_DVR_PREVIEWINFO()
-        preview.lChannel = int(channel)
-        preview.dwStreamType = int(stream_type)
-        preview.dwLinkMode = 0
-        preview.hPlayWnd = 0
-        preview.bBlocked = 1
-        preview.bPassbackRecord = 1
+        preview = _preview_info(channel=channel, stream_type=stream_type)
 
         def _native(_handle, data_type, buffer, size, _user) -> None:
             if (
