@@ -12,6 +12,7 @@ recordings
 staging
 failed
 logs
+hik-sdk-runtime
 *.mkv
 *.mp4
 *.log
