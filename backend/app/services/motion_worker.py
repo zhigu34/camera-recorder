@@ -14,6 +14,7 @@ import numpy as np
 from app.core.config import settings
 from app.services.camera_preview import infer_substream_path
 from app.services.camera_probe import build_rtsp_url, probe_camera, probe_stream_uri
+from app.services.media_input import media_input_from_uri
 from app.services.motion_analysis import MotionAnalysisResult, MotionFrameAnalyzer
 from app.services.motion_detection import (
     ClosedMotionEvent,
@@ -105,22 +106,20 @@ def build_motion_command(
         stream_uri = build_rtsp_url(
             str(ip), int(port), str(username), str(password), str(rtsp_path)
         )
+    media_input = media_input_from_uri(stream_uri, timeout_us=rtsp_timeout_us)
     return [
         settings.ffmpeg_bin,
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        str(rtsp_timeout_us),
+        *media_input.transport_args,
         "-fflags",
         "nobuffer",
         "-flags",
         "low_delay",
         "-i",
-        stream_uri,
+        media_input.uri,
         "-map",
         "0:v:0",
         "-an",
