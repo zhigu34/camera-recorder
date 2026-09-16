@@ -11,7 +11,6 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       HIK_SDK_PATH: /opt/hikvision/runtime
-      LD_LIBRARY_PATH: /opt/hikvision/runtime:/opt/hikvision/runtime/HCNetSDKCom
     volumes:
       - ${HIK_SDK_DIR:-./hik-sdk-runtime}:/opt/hikvision/runtime:ro
     expose:
@@ -33,7 +32,7 @@ services:
     restart: unless-stopped
     depends_on:
       hik-bridge:
-        condition: service_healthy
+        condition: service_started
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CAMREC_SECRET_KEY: ${CAMREC_SECRET_KEY:-camera-recorder-local-change-me}
