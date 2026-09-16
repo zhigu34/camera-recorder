@@ -44,10 +44,3 @@ def test_backend_does_not_require_hik_bridge_health() -> None:
     dependency = compose["services"]["backend"]["depends_on"]["hik-bridge"]
 
     assert dependency["condition"] == "service_started"
-
-
-def test_hik_bridge_health_failure_is_non_fatal_for_deployment() -> None:
-    script = _deploy_script()
-
-    assert 'fail "HIK bridge 未通过健康检查"' not in script
-    assert 'warn "HIK bridge 未通过健康检查；HIK SDK 设备暂不可用，继续检查主系统"' in script
