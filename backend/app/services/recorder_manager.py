@@ -425,6 +425,7 @@ class CameraWorker:
                     message=message,
                     camera_id=self.camera.id,
                     metadata=metadata,
+                    blocks_camera_delete=True,
                 )
                 await session.commit()
         except Exception as exc:
