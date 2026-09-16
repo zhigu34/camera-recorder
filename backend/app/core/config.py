@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     logs_dir: Path = BASE_DIR / "logs"
     openlist_public_port: int = 5244
     hik_bridge_url: str = "http://hik-bridge:8100"
+    internal_media_url: str = "http://127.0.0.1:8000"
 
     # Internal worker polling intervals are implementation details, not UI settings.
     segment_scan_interval_seconds: float = 3.0
