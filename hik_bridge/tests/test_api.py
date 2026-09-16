@@ -5,12 +5,14 @@ from hik_bridge.service import HikBridgeService
 
 
 class FakeSdk:
-    def __init__(self, available=True):
+    def __init__(self, available=True, *, init_error: str | None = None):
         self.runtime_available = available
+        self.init_error = init_error
         self.callback = None
 
     def initialize(self):
-        pass
+        if self.init_error:
+            raise RuntimeError(self.init_error)
 
     def cleanup(self):
         pass
@@ -35,6 +37,32 @@ def test_health_reports_missing_runtime_without_failing_service():
         response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"ok": True, "runtime_available": False}
+
+
+def test_health_survives_broken_runtime_and_hik_operations_return_503():
+    app = create_app(
+        HikBridgeService(
+            FakeSdk(True, init_error="missing dependency libAudioRender.so")
+        )
+    )
+    with TestClient(app) as client:
+        health = client.get("/health")
+        probe = client.post(
+            "/probe",
+            json={
+                "host": "10.0.0.8",
+                "port": 8000,
+                "username": "admin",
+                "password": "secret",
+            },
+        )
+
+    assert health.status_code == 200
+    assert health.json() == {"ok": True, "runtime_available": False}
+    assert probe.status_code == 503
+    assert "initialization failed" in probe.json()["detail"]
+    assert "libAudioRender.so" in probe.json()["detail"]
+    assert "secret" not in probe.text
 
 
 def test_probe_and_stream_urls_never_echo_credentials():
