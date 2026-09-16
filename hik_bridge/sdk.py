@@ -20,6 +20,31 @@ from hik_bridge.hcnet_types import (
 from hik_bridge.service import HikBridgeError
 
 
+def _component_directory(root: Path) -> Path:
+    """Return the vendor component-library directory for NET_DVR_SetSDKInitCfg."""
+
+    candidate = root / "HCNetSDKCom"
+    return candidate if candidate.is_dir() else root
+
+
+def _find_runtime_library(root: Path, stem: str) -> Path | None:
+    """Find a vendor runtime library without assuming one OpenSSL SONAME."""
+
+    for directory in (root, root / "HCNetSDKCom"):
+        if not directory.is_dir():
+            continue
+        exact = directory / stem
+        if exact.is_file():
+            return exact
+        matches = sorted(
+            (path for path in directory.glob(f"{stem}.*") if path.is_file()),
+            key=lambda path: path.name,
+        )
+        if matches:
+            return matches[0]
+    return None
+
+
 class HcNetSdk:
     def __init__(self, root: str | Path | None = None) -> None:
         self.root = Path(root or os.getenv("HIK_SDK_PATH", "/opt/hikvision/runtime"))
@@ -57,24 +82,33 @@ class HcNetSdk:
             self._lib.NET_DVR_RealPlay_V40.restype = C_LONG
             self._lib.NET_DVR_StopRealPlay.argtypes = [C_LONG]
             self._lib.NET_DVR_StopRealPlay.restype = C_BOOL
+            if hasattr(self._lib, "NET_DVR_SetSDKInitCfg"):
+                self._lib.NET_DVR_SetSDKInitCfg.argtypes = [C_DWORD, ctypes.c_void_p]
+                self._lib.NET_DVR_SetSDKInitCfg.restype = C_BOOL
         return self._lib
 
     def initialize(self) -> None:
         if self._initialized:
             return
         lib = self._load()
-        sdk_path = NET_DVR_LOCAL_SDK_PATH()
-        root_bytes = str(self.root).encode("utf-8")
-        sdk_path.sPath = root_bytes[:255]
         if hasattr(lib, "NET_DVR_SetSDKInitCfg"):
+            sdk_path = NET_DVR_LOCAL_SDK_PATH()
+            component_bytes = str(_component_directory(self.root)).encode("utf-8")
+            sdk_path.sPath = component_bytes[:255]
             lib.NET_DVR_SetSDKInitCfg(2, ctypes.byref(sdk_path))
-            for command, name in ((3, "libcrypto.so.3"), (4, "libssl.so.3")):
-                candidate = self.root / name
-                if candidate.exists():
-                    lib.NET_DVR_SetSDKInitCfg(
-                        command,
-                        ctypes.create_string_buffer(str(candidate).encode()),
-                    )
+
+            # Hikvision runtimes have shipped with different OpenSSL SONAMEs.
+            # Configure the vendor library that is actually present instead of
+            # assuming the host/container OpenSSL major version.
+            for command, stem in ((3, "libcrypto.so"), (4, "libssl.so")):
+                candidate = _find_runtime_library(self.root, stem)
+                if candidate is None:
+                    continue
+                path_buffer = ctypes.create_string_buffer(str(candidate).encode("utf-8"))
+                lib.NET_DVR_SetSDKInitCfg(
+                    command,
+                    ctypes.cast(path_buffer, ctypes.c_void_p),
+                )
         if not lib.NET_DVR_Init():
             raise self._error("HCNetSDK initialization failed")
         self._initialized = True
