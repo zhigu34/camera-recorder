@@ -152,6 +152,32 @@ def test_manual_rtsp_update_preserves_connection_id_and_revises_only_connection_
         assert deleted.status_code == 204
 
 
+def test_manual_rtsp_resubmitting_same_plaintext_password_preserves_revision_and_ciphertext() -> None:
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras",
+            json=_create_payload("pytest-current-connection-same-password"),
+        )
+        assert created.status_code == 201, created.text
+        camera_id = int(created.json()["id"])
+        before = asyncio.run(_connection_snapshot(camera_id))
+
+        updated = client.put(
+            f"/api/cameras/{camera_id}",
+            json={"password": "initial-secret"},
+        )
+        assert updated.status_code == 200, updated.text
+        after = asyncio.run(_connection_snapshot(camera_id))
+
+        assert after["connection_id"] == before["connection_id"]
+        assert after["revision"] == before["revision"]
+        assert after["password_encrypted"] == before["password_encrypted"]
+        assert after["legacy"]["password_encrypted"] == before["password_encrypted"]
+
+        deleted = client.delete(f"/api/cameras/{camera_id}")
+        assert deleted.status_code == 204
+
+
 def test_manual_rtsp_helper_rejects_current_adapter_mismatch() -> None:
     camera = Camera(
         name="adapter-mismatch",
