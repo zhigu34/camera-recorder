@@ -3,6 +3,11 @@ from pathlib import Path
 import yaml
 
 
+def _compose_config() -> dict:
+    compose_path = Path(__file__).resolve().parents[2] / "docker-compose.yml"
+    return yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+
+
 def test_deploy_tracks_hik_bridge_and_private_runtime_changes() -> None:
     script = (Path(__file__).resolve().parents[2] / "deploy.sh").read_text(encoding="utf-8")
 
@@ -23,9 +28,15 @@ def test_deploy_classifies_hik_runtime_paths_without_full_deploy() -> None:
 
 
 def test_hik_bridge_does_not_pollute_python_library_path() -> None:
-    compose_path = Path(__file__).resolve().parents[2] / "docker-compose.yml"
-    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    compose = _compose_config()
     environment = compose["services"]["hik-bridge"].get("environment", {})
 
     assert environment["HIK_SDK_PATH"] == "/opt/hikvision/runtime"
     assert "LD_LIBRARY_PATH" not in environment
+
+
+def test_backend_does_not_require_hik_bridge_health() -> None:
+    compose = _compose_config()
+    dependency = compose["services"]["backend"]["depends_on"]["hik-bridge"]
+
+    assert dependency["condition"] == "service_started"
