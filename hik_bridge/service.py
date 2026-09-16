@@ -59,16 +59,33 @@ class HikBridgeService:
         self.queue_size = max(1, queue_size)
         self._sessions: dict[str, _Session] = {}
         self._started = False
+        self._runtime_ready = False
+        self._runtime_error: str | None = None
 
     @property
     def runtime_available(self) -> bool:
-        return bool(self.sdk.runtime_available)
+        return self._runtime_ready
 
     async def start(self) -> None:
         if self._started:
             return
-        if self.runtime_available:
-            await asyncio.to_thread(self.sdk.initialize)
+
+        self._runtime_ready = False
+        self._runtime_error = None
+        if self.sdk.runtime_available:
+            try:
+                await asyncio.to_thread(self.sdk.initialize)
+                self._runtime_ready = True
+            except Exception as exc:
+                # A partial or incompatible proprietary runtime must never prevent
+                # manual RTSP / ONVIF users from starting the application. Keep the
+                # bridge healthy in degraded mode and surface the SDK failure only
+                # when a HIK operation is attempted.
+                self._runtime_error = str(exc)[-500:] or exc.__class__.__name__
+                with suppress(Exception):
+                    await asyncio.to_thread(self.sdk.cleanup)
+        else:
+            self._runtime_error = "HCNetSDK runtime is unavailable"
         self._started = True
 
     async def stop(self) -> None:
@@ -76,13 +93,21 @@ class HikBridgeService:
             return
         for stream_id in list(self._sessions):
             await self.stop_stream(stream_id)
-        if self.runtime_available:
+        if self._runtime_ready:
             await asyncio.to_thread(self.sdk.cleanup)
+        self._runtime_ready = False
         self._started = False
 
     def _require_runtime(self) -> None:
-        if not self.runtime_available:
-            raise HikBridgeError("HCNetSDK runtime is unavailable")
+        if self._runtime_ready:
+            return
+        if self._runtime_error == "HCNetSDK runtime is unavailable":
+            raise HikBridgeError(self._runtime_error)
+        if self._runtime_error:
+            raise HikBridgeError(
+                f"HCNetSDK runtime initialization failed: {self._runtime_error}"
+            )
+        raise HikBridgeError("HCNetSDK runtime is unavailable")
 
     async def probe(
         self, host: str, port: int, username: str, password: str
