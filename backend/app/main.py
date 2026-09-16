@@ -9,6 +9,8 @@ from app.api.event_detection import router as event_detection_router
 from app.api.events import router as events_router
 from app.api.exports import router as exports_router
 from app.api.health import router as health_router
+from app.api.hik_cameras import router as hik_cameras_router
+from app.api.hik_media import router as hik_media_router
 from app.api.motion_detection import router as motion_detection_router
 from app.api.notifications import router as notifications_router
 from app.api.onvif_cameras import router as onvif_cameras_router
@@ -79,40 +81,15 @@ async def lifespan(_: FastAPI):
         await reconcile_camera_form_factors(session)
         await session.commit()
 
-    # Persist startup after the database/configuration are ready but before workers
-    # begin mutating recorder state. Reliability diagnostics can then explain only
-    # gaps temporally adjacent to an actual backend restart.
     await _record_backend_started()
-
-    # Start the alert observer before background workers/recorders so new failure
-    # events are never missed. It only reads state/events and cannot block recording.
     await alert_monitor.start()
     await segment_processor.start()
     await upload_manager.start()
     await recording_export_manager.start()
-
-    # Auto-record startup is owned by the schedule manager. With schedules disabled
-    # this preserves the old 24/7 auto_record behavior; enabled weekly schedules only
-    # start cameras while deployment-local time is inside a configured window.
     await recording_schedule_manager.start()
-
-    # Event prebuffer starts only after regular recorder reconciliation. It uses the
-    # same main stream but only while motion detection is enabled and no regular
-    # recorder owns the camera, so ordinary recording always has priority.
     await event_recording_manager.start()
-
-    # Connectivity observation starts after recorder reconciliation so healthy recorder
-    # processes are the strongest online signal. Non-recording cameras are checked with
-    # a lightweight RTSP control request; no media stream is opened by this monitor.
     await camera_connectivity_monitor.start()
-
-    # Motion detection is an auxiliary low-rate path. Starting it after recorder
-    # startup ensures detection can never delay or own the main recording lifecycle.
     await motion_detection_manager.start()
-
-    # Start background observability/protection after recorder auto-start. Planned
-    # schedule transitions should not pollute health metrics, and cleanup must never
-    # delay recorder startup.
     await health_sampler.start()
     await storage_cleanup_manager.start()
 
@@ -150,7 +127,9 @@ app.add_middleware(
 )
 app.add_middleware(PlaybackPrefetchMiddleware)
 
-# Keep the static ONVIF endpoints before /api/cameras/{camera_id} routes.
+app.include_router(hik_media_router)
+# Keep dedicated static adapter endpoints before /api/cameras/{camera_id} routes.
+app.include_router(hik_cameras_router)
 app.include_router(onvif_cameras_router)
 app.include_router(cameras_router)
 app.include_router(recordings_router)

@@ -61,7 +61,7 @@ async def test_schedule_reconcile_does_not_mutate_connectivity(monkeypatch) -> N
 def test_start_stop_preserve_probe_connectivity(monkeypatch) -> None:
     recorder_state = {"value": "STOPPED"}
 
-    async def fake_probe_camera(**kwargs):
+    async def fake_probe_camera_media(_camera, **kwargs):
         return {
             "video_codec": "hevc",
             "video_profile": "Main",
@@ -93,7 +93,7 @@ def test_start_stop_preserve_probe_connectivity(monkeypatch) -> None:
             return []
         return {"camera_id": camera_id, "state": recorder_state["value"], "pid": None}
 
-    monkeypatch.setattr("app.api.cameras.probe_camera", fake_probe_camera)
+    monkeypatch.setattr("app.api.cameras.probe_camera_media", fake_probe_camera_media)
     monkeypatch.setattr("app.services.recorder_manager.recorder_manager.start", fake_start)
     monkeypatch.setattr("app.services.recorder_manager.recorder_manager.stop", fake_stop)
     monkeypatch.setattr("app.services.recorder_manager.recorder_manager.status", fake_status)

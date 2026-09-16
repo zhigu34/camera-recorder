@@ -79,6 +79,9 @@ RUN uv sync --no-dev --no-install-project
 COPY backend/app ./app
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/migrations ./migrations
+# The HIK bridge shares this image so the existing deploy pipeline only has one
+# Python image to rebuild. Proprietary HCNetSDK binaries are mounted at runtime.
+COPY hik_bridge /app/hik_bridge
 
 ENV PATH="/app/backend/.venv/bin:${PATH}"
 

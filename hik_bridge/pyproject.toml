@@ -1,0 +1,21 @@
+[project]
+name = "camera-recorder-hik-bridge"
+version = "0.1.0"
+description = "Isolated Hikvision HCNetSDK media bridge for Camera Recorder"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.116,<1",
+  "uvicorn[standard]>=0.35,<1",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28,<1",
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = [".."]

@@ -62,10 +62,13 @@ jobs:
               return any(predicate(path) for path in changed)
 
           frontend = workflow in changed or any_path(lambda path: path.startswith('frontend/'))
-          backend = workflow in changed or any_path(lambda path: path.startswith('backend/'))
+          backend = workflow in changed or any_path(
+              lambda path: path.startswith('backend/') or path.startswith('hik_bridge/')
+          )
           docker = workflow in changed or any_path(
               lambda path: (
                   path.startswith('backend/')
+                  or path.startswith('hik_bridge/')
                   or path.startswith('vendor/ffmpeg/')
                   or path.startswith('scripts/')
                   or path in {
@@ -101,6 +104,10 @@ jobs:
       - run: uv sync --dev
       - run: uv run python -m compileall app
       - run: uv run python -m pytest
+      - name: Compile HIK bridge
+        run: cd .. && backend/.venv/bin/python -m compileall hik_bridge
+      - name: Test HIK bridge
+        run: cd .. && backend/.venv/bin/python -m pytest hik_bridge/tests
 
   frontend:
     needs: changes
@@ -149,6 +156,17 @@ jobs:
       - run: docker compose config
       - run: docker compose build backend frontend
       - run: docker compose up -d backend frontend
+      - name: Wait for HIK bridge health
+        run: |
+          for i in $(seq 1 30); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' camera-recorder-hik-bridge 2>/dev/null || true)"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose logs hik-bridge
+          exit 1
       - name: Wait for backend health
         run: |
           for i in $(seq 1 30); do
@@ -163,7 +181,7 @@ jobs:
       - name: Verify database migration compatibility
         run: |
           docker compose exec -T backend alembic current | tee /tmp/alembic-current
-          grep -q '20260915_0018' /tmp/alembic-current
+          grep -q '20260916_0019' /tmp/alembic-current
           docker compose exec -T backend python - <<'PY'
           import asyncio
           from sqlalchemy import inspect
@@ -180,6 +198,7 @@ jobs:
                       'motion_zones',
                       'motion_events',
                       'onvif_device_metadata',
+                      'hik_device_metadata',
                   }
                   missing = required - tables
                   if missing:
@@ -200,30 +219,40 @@ jobs:
 
           asyncio.run(main())
           PY
-      - name: Verify backend is internal only
+      - name: Verify backend and HIK bridge are internal only
         run: |
           python - <<'PY'
           import json
           import subprocess
 
-          container = json.loads(
-              subprocess.check_output(
-                  ["docker", "inspect", "camera-recorder-backend"],
-                  text=True,
-              )
-          )[0]
-          bindings = container.get("HostConfig", {}).get("PortBindings") or {}
-          published = bindings.get("8000/tcp") or []
-          if published:
-              raise SystemExit(
-                  f"backend port 8000 must not be published to the host: {published}"
-              )
-          print("backend:8000 is internal-only")
+          for container_name, port in (
+              ('camera-recorder-backend', '8000/tcp'),
+              ('camera-recorder-hik-bridge', '8100/tcp'),
+          ):
+              container = json.loads(
+                  subprocess.check_output(
+                      ['docker', 'inspect', container_name],
+                      text=True,
+                  )
+              )[0]
+              bindings = container.get('HostConfig', {}).get('PortBindings') or {}
+              published = bindings.get(port) or []
+              if published:
+                  raise SystemExit(
+                      f"{container_name} {port} must not be published to the host: {published}"
+                  )
+          print('backend:8000 and hik-bridge:8100 are internal-only')
           PY
           docker compose exec -T backend python - <<'PY'
+          import json
           import urllib.request
+
           with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
               assert response.status == 200
+          with urllib.request.urlopen("http://hik-bridge:8100/health", timeout=5) as response:
+              payload = json.load(response)
+              assert payload.get('ok') is True
+              assert isinstance(payload.get('runtime_available'), bool)
           PY
       - name: Wait for frontend
         run: |

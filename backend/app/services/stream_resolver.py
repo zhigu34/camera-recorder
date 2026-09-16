@@ -1,18 +1,9 @@
-from app.services.device_adapter import (
-    ManualRtspDeviceAdapter,
-    ResolvedStream,
-    StreamPreference,
-    StreamPurpose,
-)
-from app.services.onvif_device_adapter import OnvifDeviceAdapter
+from app.services.device_adapter import ResolvedStream
+from app.services.media_adapter import UnsupportedMediaAdapter, resolve_media_source
+from app.services.media_source import StreamPreference, StreamPurpose
 
 
-class UnsupportedDeviceAdapter(RuntimeError):
-    pass
-
-
-_manual_rtsp = ManualRtspDeviceAdapter()
-_onvif = OnvifDeviceAdapter()
+UnsupportedDeviceAdapter = UnsupportedMediaAdapter
 
 
 def resolve_stream(
@@ -21,9 +12,16 @@ def resolve_stream(
     *,
     preferred: StreamPreference = "auto",
 ) -> ResolvedStream:
-    connection_type = getattr(camera, "connection_type", "manual_rtsp")
-    if connection_type == "manual_rtsp":
-        return _manual_rtsp.resolve_stream(camera, purpose, preferred=preferred)
-    if connection_type == "onvif":
-        return _onvif.resolve_stream(camera, purpose, preferred=preferred)
-    raise UnsupportedDeviceAdapter(f"connection type {connection_type} is not implemented")
+    """Compatibility URI resolver for all materialized media adapters.
+
+    Manual RTSP and ONVIF return credentialed RTSP URIs. HIK SDK returns a
+    backend-only HTTP proxy URI whose lifetime owns the HCNetSDK sidecar session.
+    New code should prefer resolve_media_source when it needs transport metadata.
+    """
+
+    source = resolve_media_source(camera, purpose, preferred=preferred)
+    if not source.uri:
+        raise UnsupportedDeviceAdapter(
+            f"media adapter {source.adapter} has no materialized URI; use resolve_media_source"
+        )
+    return ResolvedStream(uri=source.uri, role=source.role, purpose=source.purpose)

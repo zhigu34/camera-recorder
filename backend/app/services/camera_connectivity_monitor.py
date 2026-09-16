@@ -8,8 +8,10 @@ from typing import Any
 from sqlalchemy import select
 
 from app.core.database import SessionLocal
+from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.services.event_log import add_event
+from app.services.hik_bridge_client import HikBridgeClient, HikBridgeClientError
 from app.services.recorder_manager import recorder_manager
 
 _CHECK_INTERVAL_SECONDS = 15.0
@@ -26,12 +28,7 @@ class ConnectivityObservation:
 
 
 def recorder_runtime_is_healthy(runtime: dict[str, Any] | None) -> bool:
-    """Return whether Recorder runtime is a trustworthy positive connectivity signal.
-
-    A live FFmpeg PID remains the strongest signal, but existing Recorder outage/failure
-    evidence wins over process existence. This avoids masking an unhealthy source merely
-    because an FFmpeg process is still alive or reconnecting internally.
-    """
+    """Return whether Recorder runtime is a trustworthy positive connectivity signal."""
 
     if not isinstance(runtime, dict):
         return False
@@ -55,6 +52,7 @@ def resolve_connectivity_observation(
     recorder_pid: int | None,
     probe_ok: bool | None,
     previous_failures: int,
+    probe_source: str = "rtsp",
 ) -> ConnectivityObservation:
     """Resolve one connectivity observation with recorder priority and failure hysteresis."""
 
@@ -69,7 +67,7 @@ def resolve_connectivity_observation(
         return ConnectivityObservation(
             status="online",
             consecutive_failures=0,
-            source="rtsp",
+            source=probe_source,
         )
 
     if probe_ok is False:
@@ -83,7 +81,7 @@ def resolve_connectivity_observation(
         return ConnectivityObservation(
             status=status,
             consecutive_failures=failures,
-            source="rtsp",
+            source=probe_source,
         )
 
     return ConnectivityObservation(
@@ -146,13 +144,7 @@ async def probe_rtsp_service(
     *,
     timeout_seconds: float = _PROBE_TIMEOUT_SECONDS,
 ) -> bool:
-    """Check RTSP control-plane reachability without credentials or media decode.
-
-    OPTIONS is the normal lightweight request. Some otherwise reachable RTSP servers
-    accept the TCP connection and immediately close OPTIONS; only in that case do we
-    retry on a fresh connection with DESCRIBE. A successful TCP connect by itself is
-    never considered online: at least one syntactically valid RTSP response is required.
-    """
+    """Check RTSP control-plane reachability without credentials or media decode."""
 
     options_connected, options_valid = await _probe_rtsp_method(
         ip,
@@ -178,12 +170,39 @@ async def probe_rtsp_service(
     return describe_valid
 
 
+async def probe_hik_service(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    *,
+    bridge_client: HikBridgeClient | None = None,
+) -> bool:
+    """Check HIK reachability with the adapter's native HCNetSDK login path."""
+
+    client = bridge_client or HikBridgeClient(timeout=_PROBE_TIMEOUT_SECONDS)
+    try:
+        await client.probe(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+        )
+        return True
+    except HikBridgeClientError:
+        return False
+
+
 @dataclass(frozen=True)
 class _CameraTarget:
     camera_id: int
+    connection_type: str
     ip: str
     rtsp_port: int
     rtsp_path: str
+    username: str
+    password_encrypted: str
+    hik_sdk_port: int
     previous_status: str
     previous_failures: int
 
@@ -226,7 +245,6 @@ class CameraConnectivityMonitor:
                 try:
                     await self._record_monitor_error(exc)
                 except Exception:
-                    # Observability must never make the observer affect recording/API uptime.
                     pass
 
             if self._stop.is_set():
@@ -271,9 +289,17 @@ class CameraConnectivityMonitor:
             targets = [
                 _CameraTarget(
                     camera_id=camera.id,
+                    connection_type=str(camera.connection_type),
                     ip=camera.ip,
                     rtsp_port=camera.rtsp_port,
                     rtsp_path=camera.rtsp_path,
+                    username=camera.username,
+                    password_encrypted=camera.password_encrypted,
+                    hik_sdk_port=(
+                        int(camera.hik_metadata.sdk_port)
+                        if camera.hik_metadata is not None
+                        else 8000
+                    ),
                     previous_status=camera.connectivity_status,
                     previous_failures=camera.connectivity_failures,
                 )
@@ -288,13 +314,26 @@ class CameraConnectivityMonitor:
             recorder_state = str(runtime.get("state") or "STOPPED") if recorder_healthy else "STOPPED"
             recorder_pid = runtime.get("pid") if recorder_healthy else None
             probe_ok: bool | None = None
+            probe_source = "hik_sdk" if target.connection_type == "hik_sdk" else "rtsp"
             if not recorder_healthy:
                 async with semaphore:
-                    probe_ok = await probe_rtsp_service(
-                        target.ip,
-                        target.rtsp_port,
-                        target.rtsp_path,
-                    )
+                    if target.connection_type == "hik_sdk":
+                        try:
+                            password = decrypt_secret(target.password_encrypted)
+                            probe_ok = await probe_hik_service(
+                                target.ip,
+                                target.hik_sdk_port,
+                                target.username,
+                                password,
+                            )
+                        except Exception:
+                            probe_ok = False
+                    else:
+                        probe_ok = await probe_rtsp_service(
+                            target.ip,
+                            target.rtsp_port,
+                            target.rtsp_path,
+                        )
             previous_failures = self._failures.get(target.camera_id, target.previous_failures)
             result = resolve_connectivity_observation(
                 previous_status=target.previous_status,
@@ -302,6 +341,7 @@ class CameraConnectivityMonitor:
                 recorder_pid=int(recorder_pid) if recorder_pid is not None else None,
                 probe_ok=probe_ok,
                 previous_failures=previous_failures,
+                probe_source=probe_source,
             )
             return target.camera_id, result
 

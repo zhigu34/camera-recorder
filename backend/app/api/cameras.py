@@ -22,7 +22,7 @@ from app.schemas.camera import (
 from app.services.camera_config import runtime_config
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
-from app.services.camera_probe import CameraProbeError, probe_camera
+from app.services.camera_probe import CameraProbeError, probe_camera_media
 from app.services.event_log import add_audit_event, add_event
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
@@ -314,6 +314,11 @@ async def update_camera(
     db: AsyncSession = Depends(get_db),
 ):
     camera = await _camera_or_404(camera_id, db)
+    if camera.connection_type != "manual_rtsp":
+        raise HTTPException(
+            status_code=409,
+            detail=f"{camera.connection_type} camera must be updated through its dedicated adapter endpoint",
+        )
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
     sub_rtsp_path_present = "sub_rtsp_path" in values
@@ -397,14 +402,9 @@ async def delete_camera(camera_id: int, db: AsyncSession = Depends(get_db)):
 async def probe(camera_id: int, db: AsyncSession = Depends(get_db)):
     camera = await _camera_or_404(camera_id, db)
     runtime = await load_runtime_settings(db)
-    password = _camera_password(camera)
     try:
-        result = await probe_camera(
-            ip=camera.ip,
-            port=camera.rtsp_port,
-            username=camera.username,
-            password=password,
-            rtsp_path=camera.rtsp_path,
+        result = await probe_camera_media(
+            camera,
             rtsp_timeout_us=runtime.rtsp_timeout_us,
         )
     except CameraProbeError as exc:

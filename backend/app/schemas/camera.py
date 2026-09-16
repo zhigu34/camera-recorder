@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
-CameraConnectionType = Literal["manual_rtsp", "onvif"]
+CameraConnectionType = Literal["manual_rtsp", "onvif", "hik_sdk"]
 CameraFormFactor = Literal["unknown", "bullet", "dome", "turret", "ptz", "doorbell", "indoor", "panoramic"]
 
 
@@ -140,7 +140,7 @@ class CameraCreate(CameraBase):
     @model_validator(mode="after")
     def validate_schedule(self):
         if self.connection_type != "manual_rtsp":
-            raise ValueError("use the dedicated ONVIF camera endpoint")
+            raise ValueError("use the dedicated camera adapter endpoint")
         if self.recording_schedule_enabled and not self.recording_schedule:
             raise ValueError("recording schedule requires at least one time window")
         if self.recording_schedule_enabled:
@@ -219,7 +219,7 @@ class CameraUpdate(BaseModel):
     @model_validator(mode="after")
     def normalize_schedule_policy(self):
         if self.connection_type not in {None, "manual_rtsp"}:
-            raise ValueError("use the dedicated ONVIF camera endpoint")
+            raise ValueError("use the dedicated camera adapter endpoint")
         if self.recording_schedule_enabled is True:
             if self.recording_schedule == []:
                 raise ValueError("recording schedule requires at least one time window")
