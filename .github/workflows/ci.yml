@@ -163,7 +163,7 @@ jobs:
       - name: Verify database migration compatibility
         run: |
           docker compose exec -T backend alembic current | tee /tmp/alembic-current
-          grep -q '20260915_0017' /tmp/alembic-current
+          grep -q '20260915_0018' /tmp/alembic-current
           docker compose exec -T backend python - <<'PY'
           import asyncio
           from sqlalchemy import inspect
@@ -179,10 +179,11 @@ jobs:
                       'motion_detection_settings',
                       'motion_zones',
                       'motion_events',
+                      'onvif_device_metadata',
                   }
                   missing = required - tables
                   if missing:
-                      raise SystemExit(f'missing legacy tables after migration: {sorted(missing)}')
+                      raise SystemExit(f'missing tables after migration: {sorted(missing)}')
                   columns = await connection.run_sync(
                       lambda sync_connection: inspect(sync_connection).get_columns('cameras')
                   )

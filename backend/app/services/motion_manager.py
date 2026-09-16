@@ -9,14 +9,18 @@ from typing import Any
 
 import cv2
 import numpy as np
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
-from app.models.recording import Recording
+from app.services.event_recording_link import (
+    begin_recording_event,
+    end_recording_event,
+    resolve_event_recording,
+)
 from app.services.motion_detection import ClosedMotionEvent
 from app.services.motion_worker import MotionWorker, MotionWorkerConfig
 from app.services.stream_resolver import resolve_stream
@@ -99,27 +103,21 @@ def _write_snapshot(path: Path, frame: np.ndarray) -> None:
     path.write_bytes(encoded.tobytes())
 
 
+async def _recording_for_event(camera_id: int, event: ClosedMotionEvent) -> int | None:
+    return await resolve_event_recording(camera_id, event.started_at, event.ended_at)
+
+
 async def _default_event_sink(
     camera_id: int,
     event: ClosedMotionEvent,
     frame: np.ndarray | None,
 ) -> None:
+    recording_id = await _recording_for_event(camera_id, event)
     async with SessionLocal() as db:
-        recording = await db.scalar(
-            select(Recording)
-            .where(
-                Recording.camera_id == camera_id,
-                Recording.started_at.is_not(None),
-                Recording.started_at <= event.ended_at,
-                or_(Recording.ended_at.is_(None), Recording.ended_at >= event.started_at),
-            )
-            .order_by(Recording.started_at.desc())
-            .limit(1)
-        )
         row = MotionEvent(
             camera_id=camera_id,
             zone_id=event.zone_id,
-            recording_id=recording.id if recording is not None else None,
+            recording_id=recording_id,
             started_at=event.started_at,
             ended_at=event.ended_at,
             peak_score=event.peak_score,
@@ -288,10 +286,17 @@ class MotionDetectionManager:
                     diagnostics,
                 )
 
+            async def on_event_started(started_at: datetime) -> None:
+                begin_recording_event(camera_id, started_at)
+
             async def on_event(event: ClosedMotionEvent, frame: np.ndarray | None) -> None:
-                await self.event_sink(camera_id, event, frame)
+                try:
+                    await self.event_sink(camera_id, event, frame)
+                finally:
+                    end_recording_event(camera_id)
 
             worker = self.worker_factory(config, on_event=on_event, on_status=on_status)
+            worker.on_event_started = on_event_started
             try:
                 await worker.run()
                 if not self._running:

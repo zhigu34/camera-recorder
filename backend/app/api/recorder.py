@@ -7,6 +7,7 @@ from app.models.camera import Camera
 from app.services.camera_config import runtime_config
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
+from app.services.recording_start import start_regular_recorder
 
 router = APIRouter(prefix="/api/recorder", tags=["recorder"])
 
@@ -25,7 +26,7 @@ async def start_all(db: AsyncSession = Depends(get_db)):
         if camera.timestamp_mode == "reconstruct" and (not camera.fps_num or not camera.fps_den):
             skipped.append({"camera_id": camera.id, "reason": "Probe required"})
             continue
-        started.append(await recorder_manager.start(runtime_config(camera)))
+        started.append(await start_regular_recorder(runtime_config(camera)))
         recording_schedule_manager.note_manual_start(camera.id)
         camera.status = "recording"
     await db.commit()

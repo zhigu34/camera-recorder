@@ -1,8 +1,10 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.services.motion_manager as motion_manager_module
+from app.services.motion_detection import ClosedMotionEvent
 from app.services.motion_manager import MotionDetectionManager
 from app.services.motion_worker import MotionWorkerConfig
 
@@ -214,4 +216,64 @@ async def test_manager_preserves_diagnostics_during_reconnect_transition() -> No
     assert status["confidence"] == 0.0
     assert status["global_change_ratio"] == 0.82
     assert status["global_change"] is True
+    await manager.stop()
+
+
+@pytest.mark.asyncio
+async def test_manager_bridges_confirmed_event_start_and_end(monkeypatch) -> None:
+    started_at = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
+    lifecycle: list[tuple[str, int, datetime | None]] = []
+    persisted: list[ClosedMotionEvent] = []
+
+    def begin_recording_event(camera_id: int, anchor: datetime) -> None:
+        lifecycle.append(("begin", camera_id, anchor))
+
+    def end_recording_event(camera_id: int) -> None:
+        lifecycle.append(("end", camera_id, None))
+
+    monkeypatch.setattr(motion_manager_module, "begin_recording_event", begin_recording_event)
+    monkeypatch.setattr(motion_manager_module, "end_recording_event", end_recording_event)
+
+    class EmitEventWorker(FakeWorker):
+        async def run(self) -> None:
+            callback = getattr(self, "on_event_started", None)
+            assert callback is not None
+            await callback(started_at)
+            event = ClosedMotionEvent(
+                started_at=started_at,
+                ended_at=started_at + timedelta(seconds=4),
+                zone_id=None,
+                peak_score=0.8,
+            )
+            await self.on_event(event, None)
+            await asyncio.Event().wait()
+
+    async def enabled_loader() -> list[int]:
+        return [4]
+
+    async def config_loader(camera_id: int):
+        return _config(camera_id)
+
+    async def event_sink(camera_id, event, frame) -> None:
+        assert camera_id == 4
+        persisted.append(event)
+
+    manager = MotionDetectionManager(
+        enabled_camera_loader=enabled_loader,
+        config_loader=config_loader,
+        event_sink=event_sink,
+        worker_factory=EmitEventWorker,
+        reconnect_delays=(1.0,),
+    )
+    await manager.start()
+    for _ in range(20):
+        if persisted:
+            break
+        await asyncio.sleep(0.002)
+
+    assert len(persisted) == 1
+    assert lifecycle == [
+        ("begin", 4, started_at),
+        ("end", 4, None),
+    ]
     await manager.stop()

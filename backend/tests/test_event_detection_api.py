@@ -48,6 +48,26 @@ async def _insert_motion_event(camera_id: int) -> tuple[int, datetime, datetime]
         return int(row.id), start, end
 
 
+async def _insert_motion_events(camera_id: int, count: int = 3) -> tuple[list[int], datetime, datetime]:
+    start = datetime(2026, 9, 14, 15, 0, tzinfo=timezone.utc)
+    ids: list[int] = []
+    async with SessionLocal() as db:
+        for offset in range(count):
+            event_start = start + timedelta(minutes=offset)
+            row = MotionEvent(
+                camera_id=camera_id,
+                started_at=event_start,
+                ended_at=event_start + timedelta(seconds=3),
+                peak_score=0.7 + offset / 100,
+                metadata_json='{"detector":"motion-v2"}',
+            )
+            db.add(row)
+            await db.flush()
+            ids.append(int(row.id))
+        await db.commit()
+    return ids, start, start + timedelta(minutes=count, seconds=5)
+
+
 def test_event_detection_overview_is_honest_about_v1_capabilities() -> None:
     with TestClient(app) as client:
         camera_id = _create_camera(client, "event-detection-overview")
@@ -138,3 +158,20 @@ def test_detection_events_normalize_legacy_motion_without_relabeling() -> None:
         )
         assert response.status_code == 200
         assert response.json() == []
+
+
+def test_detection_events_limit_returns_latest_rows_first() -> None:
+    with TestClient(app) as client:
+        camera_id = _create_camera(client, "event-detection-latest")
+        ids, start, end = asyncio.run(_insert_motion_events(camera_id))
+        response = client.get(
+            "/api/detection-events",
+            params={
+                "start": (start - timedelta(seconds=1)).isoformat(),
+                "end": end.isoformat(),
+                "camera_id": camera_id,
+                "limit": 2,
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert [item["id"] for item in response.json()] == [ids[2], ids[1]]

@@ -199,6 +199,12 @@ class MotionEventStateMachine:
     def active(self) -> bool:
         return self._started_at is not None
 
+    @property
+    def started_at(self) -> datetime | None:
+        """Return the confirmed event anchor while an event is active."""
+
+        return self._started_at
+
     def _reset(self) -> None:
         self._candidate_started_at = None
         self._candidate_zone_id = None

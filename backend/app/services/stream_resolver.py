@@ -4,6 +4,7 @@ from app.services.device_adapter import (
     StreamPreference,
     StreamPurpose,
 )
+from app.services.onvif_device_adapter import OnvifDeviceAdapter
 
 
 class UnsupportedDeviceAdapter(RuntimeError):
@@ -11,6 +12,7 @@ class UnsupportedDeviceAdapter(RuntimeError):
 
 
 _manual_rtsp = ManualRtspDeviceAdapter()
+_onvif = OnvifDeviceAdapter()
 
 
 def resolve_stream(
@@ -22,4 +24,6 @@ def resolve_stream(
     connection_type = getattr(camera, "connection_type", "manual_rtsp")
     if connection_type == "manual_rtsp":
         return _manual_rtsp.resolve_stream(camera, purpose, preferred=preferred)
+    if connection_type == "onvif":
+        return _onvif.resolve_stream(camera, purpose, preferred=preferred)
     raise UnsupportedDeviceAdapter(f"connection type {connection_type} is not implemented")
