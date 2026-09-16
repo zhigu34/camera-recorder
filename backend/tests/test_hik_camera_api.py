@@ -181,3 +181,29 @@ def test_hik_update_restarts_active_recorder_and_auxiliary_workers(monkeypatch) 
         metadata = asyncio.run(_metadata(camera_id))
         assert metadata is not None
         assert metadata.channel == 3
+
+
+def test_hik_probe_preserves_bridge_runtime_unavailable_status(monkeypatch) -> None:
+    async def fail_probe(_self, **_kwargs):
+        raise hik_api.HikBridgeClientError(
+            "HCNetSDK runtime is unavailable",
+            status_code=503,
+        )
+
+    monkeypatch.setattr(hik_api.HikBridgeClient, "probe", fail_probe)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/cameras/hik/probe",
+            json={
+                "host": "10.0.0.90",
+                "port": 8000,
+                "username": "admin",
+                "password": "private-secret",
+                "channel": 1,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "HCNetSDK runtime is unavailable"
+    assert "private-secret" not in response.text
