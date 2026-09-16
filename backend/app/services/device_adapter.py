@@ -40,8 +40,29 @@ class ManualRtspDeviceAdapter:
         *,
         preferred: StreamPreference = "auto",
     ) -> MediaSource:
-        main_path = str(camera.rtsp_path)
-        configured_sub = str(camera.sub_rtsp_path).strip() if camera.sub_rtsp_path else None
+        connection = getattr(camera, "connection", None)
+        if connection is not None:
+            if str(connection.adapter) != "manual_rtsp":
+                raise ValueError(
+                    f"current connection adapter is {connection.adapter}, expected manual_rtsp"
+                )
+            rtsp_config = getattr(connection, "rtsp_config", None)
+            if rtsp_config is None:
+                raise ValueError("manual RTSP current connection has no RTSP config")
+            host = str(connection.host)
+            port = int(rtsp_config.port)
+            username = str(connection.username)
+            password_encrypted = str(connection.password_encrypted)
+            main_path = str(rtsp_config.main_path)
+            configured_sub = str(rtsp_config.sub_path).strip() if rtsp_config.sub_path else None
+        else:
+            host = str(camera.ip)
+            port = int(camera.rtsp_port)
+            username = str(camera.username)
+            password_encrypted = str(camera.password_encrypted)
+            main_path = str(camera.rtsp_path)
+            configured_sub = str(camera.sub_rtsp_path).strip() if camera.sub_rtsp_path else None
+
         inferred_sub = infer_substream_path(main_path)
 
         role: StreamRole
@@ -61,10 +82,10 @@ class ManualRtspDeviceAdapter:
                 role, path = "main", main_path
 
         uri = build_rtsp_url(
-            str(camera.ip),
-            int(camera.rtsp_port),
-            str(camera.username),
-            decrypt_secret(str(camera.password_encrypted)),
+            host,
+            port,
+            username,
+            decrypt_secret(password_encrypted),
             path,
         )
         return MediaSource(
