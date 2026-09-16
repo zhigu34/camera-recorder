@@ -40,6 +40,13 @@ class FakeSdk:
         self.stopped.append(handle)
 
 
+class ImmediateCallbackSdk(FakeSdk):
+    def start_realplay(self, user_id, channel, stream_type, callback):
+        handle = super().start_realplay(user_id, channel, stream_type, callback)
+        callback(b"system-head-before-return")
+        return handle
+
+
 @pytest.mark.asyncio
 async def test_probe_balances_login_logout_and_hides_password():
     sdk = FakeSdk()
@@ -73,6 +80,24 @@ async def test_stream_uses_channel_and_stream_type_and_preserves_callback_order(
             break
     assert chunks == [b"head", b"packet-1", b"packet-2"]
     await service.stop_stream(stream_id)
+    assert sdk.stopped == [9]
+    assert sdk.logouts == [7]
+    await service.stop()
+
+
+@pytest.mark.asyncio
+async def test_stream_keeps_callback_bytes_emitted_before_realplay_returns():
+    sdk = ImmediateCallbackSdk()
+    service = HikBridgeService(sdk, queue_size=4)
+    await service.start()
+    stream_id = await service.create_stream(
+        StreamRequest("10.0.0.8", 8000, "admin", "secret", 1, 0)
+    )
+    iterator = service.iter_stream(stream_id)
+
+    assert await asyncio.wait_for(anext(iterator), timeout=1.0) == b"system-head-before-return"
+
+    await iterator.aclose()
     assert sdk.stopped == [9]
     assert sdk.logouts == [7]
     await service.stop()
