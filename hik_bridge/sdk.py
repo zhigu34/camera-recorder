@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from hik_bridge.hcnet_types import (
+    C_BOOL,
+    C_DWORD,
+    C_LONG,
     NET_DVR_DEVICEINFO_V40,
     NET_DVR_LOCAL_SDK_PATH,
     NET_DVR_PREVIEWINFO,
@@ -35,15 +38,25 @@ class HcNetSdk:
             raise HikBridgeError("HCNetSDK runtime is unavailable")
         if self._lib is None:
             self._lib = ctypes.CDLL(str(self.library_path))
-            self._lib.NET_DVR_Init.restype = ctypes.c_bool
-            self._lib.NET_DVR_Cleanup.restype = ctypes.c_bool
-            self._lib.NET_DVR_GetLastError.restype = ctypes.c_uint32
-            self._lib.NET_DVR_Login_V40.restype = ctypes.c_long
-            self._lib.NET_DVR_Logout.argtypes = [ctypes.c_long]
-            self._lib.NET_DVR_Logout.restype = ctypes.c_bool
-            self._lib.NET_DVR_RealPlay_V40.restype = ctypes.c_long
-            self._lib.NET_DVR_StopRealPlay.argtypes = [ctypes.c_long]
-            self._lib.NET_DVR_StopRealPlay.restype = ctypes.c_bool
+            self._lib.NET_DVR_Init.restype = C_BOOL
+            self._lib.NET_DVR_Cleanup.restype = C_BOOL
+            self._lib.NET_DVR_GetLastError.restype = C_DWORD
+            self._lib.NET_DVR_Login_V40.argtypes = [
+                ctypes.POINTER(NET_DVR_USER_LOGIN_INFO),
+                ctypes.POINTER(NET_DVR_DEVICEINFO_V40),
+            ]
+            self._lib.NET_DVR_Login_V40.restype = C_LONG
+            self._lib.NET_DVR_Logout.argtypes = [C_LONG]
+            self._lib.NET_DVR_Logout.restype = C_BOOL
+            self._lib.NET_DVR_RealPlay_V40.argtypes = [
+                C_LONG,
+                ctypes.POINTER(NET_DVR_PREVIEWINFO),
+                REALDATA_CALLBACK,
+                ctypes.c_void_p,
+            ]
+            self._lib.NET_DVR_RealPlay_V40.restype = C_LONG
+            self._lib.NET_DVR_StopRealPlay.argtypes = [C_LONG]
+            self._lib.NET_DVR_StopRealPlay.restype = C_BOOL
         return self._lib
 
     def initialize(self) -> None:
