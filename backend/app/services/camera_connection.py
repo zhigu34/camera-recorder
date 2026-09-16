@@ -2,11 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.core.security import decrypt_secret
 from app.models import Camera, CameraConnection, RtspConnectionConfig
 
 
 class ConnectionAdapterMismatch(ValueError):
     """Raised when a write targets a different current adapter."""
+
+
+def _same_encrypted_secret(current: str, candidate: str) -> bool:
+    if current == candidate:
+        return True
+    try:
+        return decrypt_secret(current) == decrypt_secret(candidate)
+    except Exception:
+        return False
 
 
 def upsert_manual_rtsp_connection(
@@ -24,6 +34,7 @@ def upsert_manual_rtsp_connection(
 ) -> CameraConnection:
     normalized_sub_path = sub_path.strip() if sub_path else None
     connection = camera.connection
+    effective_password_encrypted = password_encrypted
 
     if connection is None:
         connection = CameraConnection(
@@ -48,11 +59,14 @@ def upsert_manual_rtsp_connection(
                 f"current connection adapter is {connection.adapter}, expected manual_rtsp"
             )
 
+        if _same_encrypted_secret(connection.password_encrypted, password_encrypted):
+            effective_password_encrypted = connection.password_encrypted
+
         rtsp_config = connection.rtsp_config
         config_changed = rtsp_config is None or (
             connection.host != host
             or connection.username != username
-            or connection.password_encrypted != password_encrypted
+            or connection.password_encrypted != effective_password_encrypted
             or rtsp_config.port != port
             or rtsp_config.main_path != main_path
             or rtsp_config.sub_path != normalized_sub_path
@@ -67,7 +81,7 @@ def upsert_manual_rtsp_connection(
 
         connection.host = host
         connection.username = username
-        connection.password_encrypted = password_encrypted
+        connection.password_encrypted = effective_password_encrypted
         rtsp_config.port = port
         rtsp_config.main_path = main_path
         rtsp_config.sub_path = normalized_sub_path
@@ -90,7 +104,7 @@ def upsert_manual_rtsp_connection(
     camera.ip = host
     camera.rtsp_port = port
     camera.username = username
-    camera.password_encrypted = password_encrypted
+    camera.password_encrypted = effective_password_encrypted
     camera.rtsp_path = main_path
     camera.sub_rtsp_path = normalized_sub_path
     return connection
