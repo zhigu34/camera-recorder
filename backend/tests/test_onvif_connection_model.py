@@ -73,6 +73,7 @@ def test_onvif_connection_config_round_trips_connection_scoped_state() -> None:
         assert camera.connection.adapter == "onvif"
         assert camera.connection.onvif_config is not None
         config = camera.connection.onvif_config
+        assert config.connection_id == camera.connection.id
         assert config.device_service_url == "http://10.0.0.20:80/onvif/device_service"
         assert config.device_uuid == "urn:uuid:camera-20"
         assert config.capabilities_json["media_xaddr"].endswith("/onvif/media_service")
