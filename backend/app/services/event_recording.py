@@ -15,6 +15,7 @@ from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings
 from app.models.recording import Recording
+from app.services.media_input import media_input_from_uri
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import (
     decode_media_video,
@@ -58,22 +59,20 @@ def build_event_buffer_command(
     rtsp_timeout_us: int,
 ) -> list[str]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    media_input = media_input_from_uri(stream_uri, timeout_us=rtsp_timeout_us)
     return [
         settings.ffmpeg_bin,
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "warning",
-        "-rtsp_transport",
-        "tcp",
-        "-timeout",
-        str(rtsp_timeout_us),
+        *media_input.transport_args,
         "-fflags",
         "+discardcorrupt+genpts",
         "-use_wallclock_as_timestamps",
         "1",
         "-i",
-        stream_uri,
+        media_input.uri,
         "-map",
         "0:v:0",
         "-map",
