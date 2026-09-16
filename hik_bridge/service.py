@@ -135,10 +135,10 @@ class HikBridgeService:
                 request.password,
             )
             chunks: queue.Queue[bytes | object] = queue.Queue(maxsize=self.queue_size)
-            state: dict[str, Any] = {"session": None}
+            stream_id = secrets.token_urlsafe(24)
+            session: _Session | None = None
 
             def on_data(data: bytes) -> None:
-                session: _Session | None = state["session"]
                 if session is None or session.closed or not data:
                     return
                 try:
@@ -146,6 +146,10 @@ class HikBridgeService:
                 except queue.Full:
                     session.overflowed = True
 
+            # HCNetSDK may synchronously emit NET_DVR_SYSHEAD from inside
+            # NET_DVR_RealPlay_V40 before that call returns. Prepare the session
+            # first so the one-time demux header can never be dropped.
+            session = _Session(stream_id, user_id, -1, on_data, chunks)
             play_handle = await asyncio.to_thread(
                 self.sdk.start_realplay,
                 user_id,
@@ -153,9 +157,7 @@ class HikBridgeService:
                 request.stream_type,
                 on_data,
             )
-            stream_id = secrets.token_urlsafe(24)
-            session = _Session(stream_id, user_id, play_handle, on_data, chunks)
-            state["session"] = session
+            session.play_handle = play_handle
             self._sessions[stream_id] = session
             return stream_id
         except Exception:
