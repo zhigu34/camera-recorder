@@ -103,6 +103,7 @@ jobs:
           python-version: '3.12'
       - run: uv sync --dev
       - run: uv run python -m compileall app
+      - run: uv run ruff check app tests migrations
       - run: uv run python -m pytest
       - name: Compile HIK bridge
         run: cd .. && backend/.venv/bin/python -m compileall hik_bridge
