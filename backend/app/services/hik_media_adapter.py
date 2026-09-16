@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from app.core.security import decrypt_secret
+from app.core.config import settings
 from app.services.media_source import MediaSource, StreamPreference, StreamPurpose, StreamRole
 
 
@@ -29,23 +29,18 @@ class HikMediaAdapter:
         role: StreamRole
         if purpose == "recording" or preferred == "main":
             role = "main"
-            stream_type = int(metadata.main_stream_type)
         else:
             role = "sub"
-            stream_type = int(metadata.sub_stream_type)
 
-        target = HikBridgeTarget(
-            host=str(camera.ip),
-            port=int(metadata.sdk_port),
-            username=str(camera.username),
-            password=decrypt_secret(str(camera.password_encrypted)),
-            channel=int(metadata.channel),
-            stream_type=stream_type,
-        )
+        # Keep HCNetSDK credentials out of every FFmpeg command. The backend-only
+        # proxy loads credentials from SQLite, creates a sidecar session for the
+        # duration of the HTTP consumer, and tears the SDK session down on disconnect.
+        base = settings.internal_media_url.rstrip("/")
+        uri = f"{base}/internal/hik-media/{int(camera.id)}/{role}"
         return MediaSource(
             adapter="hik_sdk",
             transport="hik_bridge",
             role=role,
             purpose=purpose,
-            bridge_target=target,
+            uri=uri,
         )
