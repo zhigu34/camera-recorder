@@ -9,7 +9,7 @@ from app.schemas.camera import CameraUpdate
 
 class FakeDb:
     async def get(self, _model, _camera_id):
-        return SimpleNamespace(id=9, connection_type="hik_sdk")
+        return SimpleNamespace(id=9, connection_type="hik_sdk", connection=None)
 
 
 @pytest.mark.asyncio
