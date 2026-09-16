@@ -28,6 +28,10 @@ failed/
 logs/
 openlist-data/
 
+# Proprietary HIK HCNetSDK runtime. Keep vendor binaries out of Git.
+hik-sdk-runtime/*
+!hik-sdk-runtime/.gitkeep
+
 # Media
 *.mkv
 *.mp4
