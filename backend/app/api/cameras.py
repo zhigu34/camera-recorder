@@ -314,6 +314,11 @@ async def update_camera(
     db: AsyncSession = Depends(get_db),
 ):
     camera = await _camera_or_404(camera_id, db)
+    if camera.connection_type != "manual_rtsp":
+        raise HTTPException(
+            status_code=409,
+            detail=f"{camera.connection_type} camera must be updated through its dedicated adapter endpoint",
+        )
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password", None)
     sub_rtsp_path_present = "sub_rtsp_path" in values
