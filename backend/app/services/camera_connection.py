@@ -353,3 +353,117 @@ def upsert_hik_connection(
     metadata.device_model = device_model
     metadata.device_name = device_name
     return connection
+
+
+def _prepare_connection_switch(camera: Camera, target_adapter: str) -> CameraConnection:
+    connection = camera.connection
+    if connection is None:
+        raise ValueError("camera has no current connection to switch")
+    if connection.adapter == target_adapter:
+        raise ConnectionAdapterMismatch(
+            f"current connection adapter is already {target_adapter}; use the strict upsert"
+        )
+
+    connection.rtsp_config = None
+    connection.onvif_config = None
+    connection.hik_config = None
+    connection.adapter = target_adapter
+    return connection
+
+
+def switch_to_manual_rtsp_connection(
+    camera: Camera,
+    *,
+    host: str,
+    port: int,
+    username: str,
+    password_encrypted: str,
+    main_path: str,
+    sub_path: str | None,
+    verification_status: str | None = None,
+    verified_at: datetime | None = None,
+    last_error: str | None = None,
+) -> CameraConnection:
+    _prepare_connection_switch(camera, "manual_rtsp")
+    return upsert_manual_rtsp_connection(
+        camera,
+        host=host,
+        port=port,
+        username=username,
+        password_encrypted=password_encrypted,
+        main_path=main_path,
+        sub_path=sub_path,
+        verification_status=verification_status,
+        verified_at=verified_at,
+        last_error=last_error,
+    )
+
+
+def switch_to_onvif_connection(
+    camera: Camera,
+    *,
+    host: str,
+    username: str,
+    password_encrypted: str,
+    device_service_url: str,
+    device_uuid: str | None,
+    capabilities: dict,
+    profiles: list[dict],
+    recording_profile_token: str,
+    preview_profile_token: str | None,
+    detection_profile_token: str | None,
+    recording_uri: str,
+    preview_uri: str | None,
+    detection_uri: str | None,
+    verified_at: datetime,
+) -> CameraConnection:
+    _prepare_connection_switch(camera, "onvif")
+    return upsert_onvif_connection(
+        camera,
+        host=host,
+        username=username,
+        password_encrypted=password_encrypted,
+        device_service_url=device_service_url,
+        device_uuid=device_uuid,
+        capabilities=capabilities,
+        profiles=profiles,
+        recording_profile_token=recording_profile_token,
+        preview_profile_token=preview_profile_token,
+        detection_profile_token=detection_profile_token,
+        recording_uri=recording_uri,
+        preview_uri=preview_uri,
+        detection_uri=detection_uri,
+        verified_at=verified_at,
+    )
+
+
+def switch_to_hik_connection(
+    camera: Camera,
+    *,
+    host: str,
+    username: str,
+    password_encrypted: str,
+    sdk_port: int,
+    channel: int,
+    main_stream_type: int,
+    sub_stream_type: int,
+    device_serial: str | None,
+    device_model: str | None,
+    device_name: str | None,
+    verified_at: datetime,
+) -> CameraConnection:
+    _prepare_connection_switch(camera, "hik_sdk")
+    return upsert_hik_connection(
+        camera,
+        host=host,
+        username=username,
+        password_encrypted=password_encrypted,
+        sdk_port=sdk_port,
+        channel=channel,
+        main_stream_type=main_stream_type,
+        sub_stream_type=sub_stream_type,
+        device_serial=device_serial,
+        device_model=device_model,
+        device_name=device_name,
+        verified_at=verified_at,
+    )
