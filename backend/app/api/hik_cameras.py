@@ -8,10 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import encrypt_secret
 from app.models.camera import Camera
-from app.models.hikvision import HikDeviceMetadata
 from app.schemas.camera import CameraRead
 from app.schemas.hikvision import HikCameraCreate, HikCameraUpdate, HikProbeRequest, HikProbeResult
 from app.services.camera_config import runtime_config
+from app.services.camera_connection import ConnectionAdapterMismatch, upsert_hik_connection
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
 from app.services.event_log import add_audit_event, add_event
 from app.services.event_recording import event_recording_manager
@@ -97,18 +97,28 @@ def _apply_media_fields(camera: Camera, media: dict) -> None:
     camera.audio_frame_samples = media.get("audio_frame_samples")
 
 
-def _apply_hik_metadata(camera: Camera, payload: HikProbeRequest, discovered: HikProbeResult) -> None:
-    metadata = camera.hik_metadata
-    if metadata is None:
-        metadata = HikDeviceMetadata()
-        camera.hik_metadata = metadata
-    metadata.sdk_port = payload.port
-    metadata.channel = payload.channel
-    metadata.main_stream_type = 0
-    metadata.sub_stream_type = 1
-    metadata.device_serial = discovered.serial_number
-    metadata.device_model = discovered.device_model
-    metadata.device_name = discovered.device_name
+def _write_current_connection(
+    camera: Camera,
+    payload: HikProbeRequest,
+    discovered: HikProbeResult,
+    *,
+    password_encrypted: str,
+    verified_at: datetime,
+) -> None:
+    upsert_hik_connection(
+        camera,
+        host=payload.host,
+        username=payload.username,
+        password_encrypted=password_encrypted,
+        sdk_port=payload.port,
+        channel=payload.channel,
+        main_stream_type=0,
+        sub_stream_type=1,
+        device_serial=discovered.serial_number,
+        device_model=discovered.device_model,
+        device_name=discovered.device_name,
+        verified_at=verified_at,
+    )
 
 
 @router.post("/probe", response_model=HikProbeResult)
@@ -126,6 +136,7 @@ async def create_hik_camera(
     model = discovered.device_model or (
         f"HIK device type {discovered.device_type}" if discovered.device_type is not None else None
     )
+    password_encrypted = encrypt_secret(payload.password)
     camera = Camera(
         name=payload.name,
         manufacturer="Hikvision",
@@ -135,7 +146,7 @@ async def create_hik_camera(
         ip=payload.host,
         rtsp_port=554,
         username=payload.username,
-        password_encrypted=encrypt_secret(payload.password),
+        password_encrypted=password_encrypted,
         rtsp_path="/hik-sdk/main",
         sub_rtsp_path="/hik-sdk/sub",
         enabled=payload.enabled,
@@ -146,8 +157,14 @@ async def create_hik_camera(
         status="online",
     )
     _apply_media_fields(camera, media)
-    _apply_hik_metadata(camera, payload, discovered)
     now = datetime.now(timezone.utc)
+    _write_current_connection(
+        camera,
+        payload,
+        discovered,
+        password_encrypted=password_encrypted,
+        verified_at=now,
+    )
     camera.last_probe_at = now
     camera.last_online_at = now
     db.add(camera)
@@ -192,7 +209,9 @@ async def update_hik_camera(
     camera = await db.get(Camera, camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
-    if camera.connection_type != "hik_sdk":
+    connection = camera.connection
+    current_adapter = connection.adapter if connection is not None else camera.connection_type
+    if current_adapter != "hik_sdk":
         raise HTTPException(status_code=409, detail="camera is not a HIK SDK device")
 
     was_recording = recorder_manager.is_running(camera.id)
@@ -208,9 +227,6 @@ async def update_hik_camera(
     )
     if payload.form_factor is not None:
         camera.form_factor = payload.form_factor
-    camera.ip = payload.host
-    camera.username = payload.username
-    camera.password_encrypted = encrypt_secret(payload.password)
     if payload.enabled is not None:
         schedule_changed = schedule_changed or payload.enabled != camera.enabled
         camera.enabled = payload.enabled
@@ -220,8 +236,17 @@ async def update_hik_camera(
     if payload.timestamp_mode is not None:
         camera.timestamp_mode = payload.timestamp_mode
     _apply_media_fields(camera, media)
-    _apply_hik_metadata(camera, payload, discovered)
     now = datetime.now(timezone.utc)
+    try:
+        _write_current_connection(
+            camera,
+            payload,
+            discovered,
+            password_encrypted=encrypt_secret(payload.password),
+            verified_at=now,
+        )
+    except ConnectionAdapterMismatch as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     camera.status = "online"
     camera.last_probe_at = now
     camera.last_online_at = now
@@ -254,8 +279,6 @@ async def update_hik_camera(
     await db.refresh(camera)
     if was_recording:
         await recorder_manager.stop(camera.id)
-    # HIK worker URIs are stable backend-proxy URLs; force the event ring to
-    # disconnect so a credential/channel change cannot keep the old SDK session.
     await event_recording_manager.stop_camera(camera.id)
     await motion_detection_manager.restart_camera(camera.id)
     if schedule_changed:
