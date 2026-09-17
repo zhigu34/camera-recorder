@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make detail previews, preview-wall slots, and HIK bridge streams camera-scoped runtime resources that are terminated immediately by camera disable, reload, deletion, or adapter switch without being recreated by runtime restore.
+**Goal:** Make detail previews, preview-wall slots, and HIK bridge streams camera-scoped runtime resources that terminate immediately on camera disable, reload, deletion, or adapter switch, without being recreated by runtime restore.
 
-**Architecture:** Add a process-local `CameraMediaSessionRegistry` that owns only session membership and invokes async close callbacks best-effort. Detail preview, preview-wall slot, and HIK internal-media lifetimes register with this registry; `CameraRuntimeCoordinator.stop_all()` calls `stop_camera(camera_id)` before motion/event/recorder/schedule teardown, while `restore()` remains preview-agnostic.
+**Architecture:** Add a process-local `CameraMediaSessionRegistry` that stores camera-scoped async close callbacks and detaches them atomically before cleanup. Detail preview, preview-wall slot, and HIK internal-media lifetimes register with this registry; `CameraRuntimeCoordinator.stop_all()` invokes media teardown before motion/event/recorder/schedule teardown, while `restore()` remains preview-agnostic.
 
 **Tech Stack:** FastAPI, asyncio, SQLAlchemy async ORM, FFmpeg subprocesses, httpx, pytest, GitHub Actions.
 
@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Target behavior is option A from the approved design: disable, reload, deletion, and adapter switch immediately terminate active preview/media sessions; users reopen previews explicitly.
+- Use approved option A: disable, reload, deletion, and adapter switch immediately terminate active preview/media sessions; users reopen previews explicitly.
 - Media-session cleanup is best-effort and must not block camera configuration persistence or lifecycle teardown.
 - `CameraRuntimeCoordinator.restore()` must never recreate preview/media sessions.
 - Target adapter validation/probing must remain before camera runtime teardown.
@@ -26,14 +26,13 @@
 ## File Structure
 
 - Create `backend/app/services/camera_media_session_registry.py`: generic camera-scoped async session membership/teardown.
-- Modify `backend/app/services/camera_preview.py`: make detail-preview session close public and idempotent; provide a registry-aware stream wrapper boundary.
+- Modify `backend/app/services/camera_preview.py`: make detail-preview session close public and idempotent.
 - Modify `backend/app/api/cameras.py`: register detail preview after a successful open and unregister on stream completion.
 - Modify `backend/app/services/preview_wall.py`: introduce a slot session object that owns one FFmpeg process and exposes `stream()` + `close()`.
 - Modify `backend/app/api/preview_wall.py`: register each slot by `camera_id` and unregister independently.
 - Modify `backend/app/api/hik_media.py`: register HIK bridge `stream_id` after creation and unregister in iterator finalization.
-- Modify `backend/app/services/hik_media_proxy.py`: keep existing iterator semantics; allow an external closer to race safely with natural cleanup.
-- Modify `backend/app/services/camera_runtime_coordinator.py`: call media-session teardown first in `stop_all()` only; leave `restore()` preview-agnostic.
-- Create focused lifecycle tests instead of overloading unrelated API suites.
+- Modify `backend/app/services/hik_media_proxy.py`: preserve iterator semantics while making natural and external close share one idempotent closer.
+- Modify `backend/app/services/camera_runtime_coordinator.py`: call media-session teardown first in `stop_all()` only.
 - Modify `docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md`: mark active preview/session termination and HIK temporary-session release complete only after final CI is green.
 
 ---
@@ -48,17 +47,23 @@
 - Produces: `SessionCloser = Callable[[], Awaitable[None]]`
 - Produces: `CameraMediaSessionRegistry.register(camera_id: int, closer: SessionCloser) -> str`
 - Produces: `CameraMediaSessionRegistry.unregister(camera_id: int, session_id: str) -> None`
+- Produces: `CameraMediaSessionRegistry.active_count(camera_id: int) -> int`
 - Produces: `CameraMediaSessionRegistry.stop_camera(camera_id: int) -> None`
 - Produces: `CameraMediaSessionRegistry.stop_all() -> None`
 - Produces singleton: `camera_media_session_registry`
 
-- [ ] **Step 1: Write the failing registry tests**
-
-Create tests that exercise camera isolation, atomic detach, idempotent unregister, best-effort closer failures, and global drain. Use closers that append to a call list and an `asyncio.Event` to prove sessions registered during cleanup survive the current stop generation.
+- [ ] **Step 1: Write failing registry tests**
 
 ```python
+import asyncio
+
+import pytest
+
+from app.services.camera_media_session_registry import CameraMediaSessionRegistry
+
+
 @pytest.mark.asyncio
-async def test_stop_camera_closes_only_detached_target_sessions() -> None:
+async def test_stop_camera_closes_only_target_camera_sessions() -> None:
     registry = CameraMediaSessionRegistry()
     calls: list[str] = []
 
@@ -80,11 +85,8 @@ async def test_stop_camera_closes_only_detached_target_sessions() -> None:
     assert calls == ["a1", "a2"]
     assert await registry.active_count(1) == 0
     assert await registry.active_count(2) == 1
-```
 
-Also add:
 
-```python
 @pytest.mark.asyncio
 async def test_stop_camera_detaches_before_awaiting_closers() -> None:
     registry = CameraMediaSessionRegistry()
@@ -110,23 +112,55 @@ async def test_stop_camera_detaches_before_awaiting_closers() -> None:
 
     assert calls == ["old"]
     assert await registry.active_count(7) == 1
+
+
+@pytest.mark.asyncio
+async def test_unregister_is_idempotent() -> None:
+    registry = CameraMediaSessionRegistry()
+
+    async def closer() -> None:
+        return None
+
+    session_id = await registry.register(3, closer)
+    await registry.unregister(3, session_id)
+    await registry.unregister(3, session_id)
+
+    assert await registry.active_count(3) == 0
+
+
+@pytest.mark.asyncio
+async def test_closer_failure_does_not_block_remaining_sessions() -> None:
+    registry = CameraMediaSessionRegistry()
+    calls: list[str] = []
+
+    async def failing() -> None:
+        calls.append("failing")
+        raise RuntimeError("cleanup failed")
+
+    async def succeeding() -> None:
+        calls.append("succeeding")
+
+    await registry.register(9, failing)
+    await registry.register(9, succeeding)
+    await registry.stop_camera(9)
+
+    assert calls == ["failing", "succeeding"]
+    assert await registry.active_count(9) == 0
 ```
 
-Use a small `active_count(camera_id)` test/diagnostic method rather than reaching into private dict state.
+Add one more test proving `stop_all()` drains sessions from multiple cameras.
 
 - [ ] **Step 2: Run the new test file and confirm RED**
 
-Run from `backend/`:
+From `backend/`:
 
 ```bash
 uv run pytest tests/test_camera_media_session_registry.py -q
 ```
 
-Expected: collection/import failure because `camera_media_session_registry.py` and `CameraMediaSessionRegistry` do not exist.
+Expected: import/collection failure because the registry module does not yet exist.
 
 - [ ] **Step 3: Implement the minimal registry**
-
-Use an `asyncio.Lock`, a monotonic in-process `session_id` source such as `uuid.uuid4().hex`, and detach maps under the lock before awaiting closers.
 
 ```python
 from __future__ import annotations
@@ -164,7 +198,11 @@ class CameraMediaSessionRegistry:
         async with self._lock:
             return len(self._sessions.get(camera_id, {}))
 
-    async def _close_detached(self, camera_id: int, sessions: dict[str, SessionCloser]) -> None:
+    async def _close_detached(
+        self,
+        camera_id: int,
+        sessions: dict[str, SessionCloser],
+    ) -> None:
         for session_id, closer in sessions.items():
             try:
                 await closer()
@@ -190,7 +228,7 @@ class CameraMediaSessionRegistry:
 camera_media_session_registry = CameraMediaSessionRegistry()
 ```
 
-- [ ] **Step 4: Run registry tests and relevant quality checks**
+- [ ] **Step 4: Run tests and quality checks**
 
 ```bash
 uv run pytest tests/test_camera_media_session_registry.py -q
@@ -218,12 +256,12 @@ git commit -m "feat: add camera media session registry"
 
 **Interfaces:**
 - Consumes: `camera_media_session_registry.register/unregister`
-- Produces: idempotent `PreviewSession.close() -> None`
-- Produces: response iterator that always unregisters its registry entry in `finally`
+- Produces: `PreviewSession.close() -> Awaitable[None]`, idempotent
+- Endpoint response iterator always unregisters in `finally`
 
-- [ ] **Step 1: Write failing session-close unit tests**
+- [ ] **Step 1: Write failing idempotent close tests**
 
-Use a fake process that records `terminate`, `wait`, and `kill`. Prove two calls to `PreviewSession.close()` only perform process teardown once and that `stream()` calling `close()` after an external close is safe.
+Use a fake subprocess whose `returncode` starts as `None`, `terminate()` records calls and flips `returncode`, and `wait()` is async.
 
 ```python
 @pytest.mark.asyncio
@@ -237,9 +275,18 @@ async def test_preview_session_close_is_idempotent() -> None:
     assert process.terminate_calls == 1
 ```
 
-- [ ] **Step 2: Write failing endpoint registration/unregister tests**
+Also consume `session.stream()` after an external `close()` and assert no second terminate occurs.
 
-Monkeypatch `open_mjpeg_preview()` to return a fake session with `close()` and `stream()`, and monkeypatch the registry singleton used by `app.api.cameras`. Call `preview_camera()` directly with a temporary DB/session setup or use the existing FastAPI test fixture. Assert registration uses the requested `camera_id`, then consume/close the streaming iterator and assert `unregister(camera_id, session_id)` runs.
+- [ ] **Step 2: Write failing endpoint registration/unregister test**
+
+Patch `app.api.cameras.open_mjpeg_preview` to return a fake session and patch the imported registry singleton with a fake registry that records `register()` and `unregister()`. Call the existing `preview_camera()` path through the project FastAPI test client, consume the stream body, then assert:
+
+```python
+assert registry.registered_camera_ids == [camera_id]
+assert registry.unregistered == [(camera_id, "session-1")]
+```
+
+Keep the existing `X-Preview-Stream` assertion so the lifecycle wrapper cannot drop headers.
 
 - [ ] **Step 3: Run focused tests and confirm RED**
 
@@ -247,11 +294,17 @@ Monkeypatch `open_mjpeg_preview()` to return a fake session with `close()` and `
 uv run pytest tests/test_camera_preview_session_lifecycle.py -q
 ```
 
-Expected: failures because `PreviewSession.close()` is not a public idempotent method and the endpoint does not register sessions.
+Expected: failure because `PreviewSession.close()` and endpoint registry integration do not exist.
 
 - [ ] **Step 4: Implement idempotent PreviewSession.close()**
 
-Add an internal guard on `PreviewSession` and make `stream()` delegate final cleanup to `close()`.
+Modify imports:
+
+```python
+from dataclasses import dataclass, field
+```
+
+Modify the session:
 
 ```python
 @dataclass(slots=True)
@@ -270,16 +323,21 @@ class PreviewSession:
 
     async def stream(self) -> AsyncIterator[bytes]:
         try:
-            ...
+            if self.first_chunk:
+                yield self.first_chunk
+            assert self.process.stdout is not None
+            while True:
+                chunk = await self.process.stdout.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
         finally:
             await self.close()
 ```
 
-Use `field(default_factory=asyncio.Lock)` so locks are not shared between sessions.
+- [ ] **Step 5: Register detail preview in `preview_camera()`**
 
-- [ ] **Step 5: Register and unregister detail preview in the camera endpoint**
-
-After the final preview session (including auto-fallback selection) is successfully opened:
+Import the registry singleton in `app.api.cameras`, then after the final preview session has been selected/opened:
 
 ```python
 session_id = await camera_media_session_registry.register(camera_id, session.close)
@@ -292,7 +350,7 @@ async def registered_stream():
         await camera_media_session_registry.unregister(camera_id, session_id)
 ```
 
-Return `StreamingResponse(registered_stream(), ...)` without otherwise changing preview headers/fallback behavior.
+Return `StreamingResponse(registered_stream(), ...)` with the existing media type and headers unchanged.
 
 - [ ] **Step 6: Run focused and existing preview tests**
 
@@ -301,7 +359,7 @@ uv run pytest tests/test_camera_preview_session_lifecycle.py tests/test_camera_p
 uv run ruff check app/services/camera_preview.py app/api/cameras.py tests/test_camera_preview_session_lifecycle.py
 ```
 
-Expected: PASS; existing command/path/fallback tests remain unchanged.
+Expected: PASS.
 
 - [ ] **Step 7: Commit Task 2**
 
@@ -322,31 +380,52 @@ git commit -m "feat: track active camera detail previews"
 
 **Interfaces:**
 - Consumes: `camera_media_session_registry.register/unregister`
-- Produces: `WallPreviewSession(source: WallPreviewSource)` with `stream(on_frame)` and idempotent `close()`
-- Each API slot registers independently under `slot.camera_id`
+- Produces: `WallPreviewSession(source: WallPreviewSource)`
+- Produces: `WallPreviewSession.stream(on_frame: FrameCallback) -> Awaitable[None]`
+- Produces: `WallPreviewSession.close() -> Awaitable[None]`, idempotent
 
-- [ ] **Step 1: Write failing WallPreviewSession tests**
+- [ ] **Step 1: Write failing WallPreviewSession close test**
 
-Move process ownership from `stream_preview_frames()` into a session object. The tests must prove external `close()` terminates the process and natural `stream()` finalization is idempotent.
+Create a fake process whose stdout blocks on an event until externally closed. Spawn `session.stream(on_frame)` as a task, wait until the fake process starts, call `session.close()`, release the fake read, await the task, and assert exactly one terminate.
 
 ```python
 @pytest.mark.asyncio
-async def test_wall_preview_session_close_terminates_owned_process_once(monkeypatch) -> None:
+async def test_wall_preview_session_external_close_is_idempotent(monkeypatch) -> None:
+    source = WallPreviewSource(
+        ip="192.0.2.10",
+        port=554,
+        username="user",
+        password="pass",
+        rtsp_path="/sub",
+        rtsp_timeout_us=5_000_000,
+        fps=3,
+        width=480,
+    )
+    process = FakeProcess()
+
+    async def fake_spawn(*args, **kwargs):
+        process.started.set()
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn)
     session = WallPreviewSession(source)
-    process = FakeProcess(...)
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_spawn(process))
+
+    async def on_frame(frame: bytes) -> None:
+        return None
 
     streaming = asyncio.create_task(session.stream(on_frame))
     await process.started.wait()
     await session.close()
+    await session.close()
+    process.release_read.set()
     await streaming
 
     assert process.terminate_calls == 1
 ```
 
-- [ ] **Step 2: Write failing multi-slot registry isolation test**
+- [ ] **Step 2: Write failing per-camera slot isolation test**
 
-Build two slot sessions for cameras 10 and 11. Register them independently, invoke `camera_media_session_registry.stop_camera(10)`, and assert camera 10's slot finishes while camera 11 remains active. The WebSocket itself must not be closed by the registry.
+Use two `WallPreviewSession` fakes registered under cameras 10 and 11. Invoke registry `stop_camera(10)` and assert session 10 is closed, session 11 is not closed, and the fake WebSocket close method was never called.
 
 - [ ] **Step 3: Run focused tests and confirm RED**
 
@@ -354,11 +433,35 @@ Build two slot sessions for cameras 10 and 11. Register them independently, invo
 uv run pytest tests/test_preview_wall_session_lifecycle.py -q
 ```
 
-Expected: FAIL because the current service exposes only `stream_preview_frames()` and API tasks are not registry-owned.
+Expected: failure because `WallPreviewSession` does not exist and API slots are not registry-owned.
 
-- [ ] **Step 4: Introduce WallPreviewSession without changing parser/command behavior**
+- [ ] **Step 4: Extract process opening into `_open_wall_process()`**
 
-The session should spawn lazily in `stream()` and hold its process for external close:
+```python
+async def _open_wall_process(source: WallPreviewSource) -> asyncio.subprocess.Process:
+    command = build_wall_preview_command(
+        ip=source.ip,
+        port=source.port,
+        username=source.username,
+        password=source.password,
+        rtsp_path=source.rtsp_path,
+        rtsp_timeout_us=source.rtsp_timeout_us,
+        fps=source.fps,
+        width=source.width,
+    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError("ffmpeg not found") from exc
+    assert process.stdout is not None
+    return process
+```
+
+- [ ] **Step 5: Implement `WallPreviewSession` with the existing read/parser loop**
 
 ```python
 class WallPreviewSession:
@@ -379,36 +482,64 @@ class WallPreviewSession:
     async def stream(self, on_frame: FrameCallback) -> None:
         if self._closed:
             return
-        self._process = await _open_process(self.source)
+        process = await _open_wall_process(self.source)
+        self._process = process
+        assert process.stdout is not None
+        parser = JpegFrameParser()
+        read_timeout = max(8.0, self.source.rtsp_timeout_us / 1_000_000 + 3.0)
         try:
-            ...existing JPEG parser/read loop...
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        process.stdout.read(64 * 1024),
+                        timeout=read_timeout,
+                    )
+                except TimeoutError as exc:
+                    raise RuntimeError("实时预览连接超时") from exc
+                if not chunk:
+                    if process.returncode is None:
+                        await process.wait()
+                    raise RuntimeError("实时预览码流已结束")
+                for frame in parser.feed(chunk):
+                    await on_frame(frame)
+                    read_timeout = 30.0
         finally:
             await self.close()
-```
 
-Keep a compatibility `stream_preview_frames(source, on_frame)` wrapper if existing callers/tests outside the API depend on it:
 
-```python
-async def stream_preview_frames(source, on_frame):
+async def stream_preview_frames(source: WallPreviewSource, on_frame: FrameCallback) -> None:
     await WallPreviewSession(source).stream(on_frame)
 ```
 
-- [ ] **Step 5: Wire each wall slot through the registry**
+- [ ] **Step 6: Wire primary/fallback slot sessions through the registry**
 
-In `app.api.preview_wall`, construct a `WallPreviewSession` for the primary source and another only when fallback is actually needed. Register the currently active session under `slot.camera_id`, unregister it in `finally`, and when switching from sub to main fallback unregister/close the failed primary before registering the fallback session.
+In `app.api.preview_wall`, change the slot streamer to create a `WallPreviewSession` for each active source. Use a helper that registers before streaming and unregisters in `finally`:
 
-Do not close the WebSocket from the registry callback; only the slot's process/task should end.
+```python
+async def run_registered_session(
+    camera_id: int,
+    session: WallPreviewSession,
+    on_frame,
+) -> None:
+    session_id = await camera_media_session_registry.register(camera_id, session.close)
+    try:
+        await session.stream(on_frame)
+    finally:
+        await camera_media_session_registry.unregister(camera_id, session_id)
+```
 
-- [ ] **Step 6: Run focused + existing wall tests**
+Call it for primary; if primary fails and fallback is allowed, create a fresh fallback session and call the same helper. Do not close the WebSocket from registry teardown.
+
+- [ ] **Step 7: Run focused + existing wall tests**
 
 ```bash
 uv run pytest tests/test_preview_wall_session_lifecycle.py tests/test_preview_wall.py -q
 uv run ruff check app/services/preview_wall.py app/api/preview_wall.py tests/test_preview_wall_session_lifecycle.py
 ```
 
-Expected: PASS; existing JPEG parsing/status/fallback semantics remain green.
+Expected: PASS.
 
-- [ ] **Step 7: Commit Task 3**
+- [ ] **Step 8: Commit Task 3**
 
 ```bash
 git add backend/app/services/preview_wall.py backend/app/api/preview_wall.py backend/tests/test_preview_wall_session_lifecycle.py
@@ -421,43 +552,34 @@ git commit -m "feat: track preview wall slot sessions"
 
 **Files:**
 - Modify: `backend/app/api/hik_media.py`
-- Modify: `backend/app/services/hik_media_proxy.py` only if needed for an explicit shared closer helper
+- Modify: `backend/app/services/hik_media_proxy.py`
 - Create: `backend/tests/test_hik_media_session_lifecycle.py`
 - Preserve: `backend/tests/test_hik_media_proxy.py`
 
 **Interfaces:**
 - Consumes: `camera_media_session_registry.register/unregister`
-- HIK closer: async callback that invokes `HikBridgeClient.stop_stream(stream_id)` best-effort
-- Natural iterator cleanup and registry-triggered cleanup may race safely
+- Produces: `HikRegisteredStream.close() -> Awaitable[None]`, idempotent best-effort DELETE
+- Produces: `HikRegisteredStream.iter_bytes() -> AsyncIterator[bytes]`
 
-- [ ] **Step 1: Write failing HIK API lifecycle tests**
+- [ ] **Step 1: Write failing HIK lifecycle tests**
 
-Monkeypatch `HikBridgeClient.create_stream()` to return `stream-1`, provide an iterator that stays open, and spy on registry registration. Assert the endpoint registers only after stream creation succeeds and associates the session with the route `camera_id`.
+Create a fake bridge client where `create_stream()` returns `stream-1`, `iter_media()` yields `b"payload"`, and `stop_stream()` records calls. Test that route-created sessions register under the route camera ID and that invoking the registered closer immediately records `stream-1`.
 
-Add a test that invokes the registered closer and proves `stop_stream("stream-1")` is called immediately.
-
-- [ ] **Step 2: Write a race/idempotency regression test**
-
-Simulate external registry close followed by iterator `aclose()`. `stop_stream()` may be invoked twice at the client boundary, but neither call may propagate and the registry must unregister cleanly. Prefer making the API closer itself idempotent so only one DELETE is attempted per backend session.
+- [ ] **Step 2: Write the natural/external cleanup race test**
 
 ```python
-class HikRegisteredStream:
-    def __init__(self, client, stream_id):
-        self._client = client
-        self._stream_id = stream_id
-        self._closed = False
-        self._lock = asyncio.Lock()
+@pytest.mark.asyncio
+async def test_hik_registered_stream_close_is_idempotent() -> None:
+    client = FakeBridgeClient()
+    stream = HikRegisteredStream(client, "stream-1")
 
-    async def close(self) -> None:
-        async with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            with suppress(Exception):
-                await self._client.stop_stream(self._stream_id)
+    await stream.close()
+    await stream.close()
+
+    assert client.stopped == ["stream-1"]
 ```
 
-The wrapper can live in `hik_media_proxy.py` if keeping API code thin improves clarity.
+Add a second test that consumes `iter_bytes()` to completion after an external `close()` and asserts cleanup failure is not propagated.
 
 - [ ] **Step 3: Run focused tests and confirm RED**
 
@@ -465,9 +587,50 @@ The wrapper can live in `hik_media_proxy.py` if keeping API code thin improves c
 uv run pytest tests/test_hik_media_session_lifecycle.py -q
 ```
 
-Expected: FAIL because active HIK streams are not registered by camera.
+Expected: failure because HIK active streams are not registry-owned and `HikRegisteredStream` does not exist.
 
-- [ ] **Step 4: Implement registry-aware HIK stream response**
+- [ ] **Step 4: Implement `HikRegisteredStream`**
+
+In `hik_media_proxy.py`:
+
+```python
+import asyncio
+
+
+class HikRegisteredStream:
+    def __init__(self, client, stream_id: str) -> None:
+        self._client = client
+        self._stream_id = stream_id
+        self._closed = False
+        self._close_lock = asyncio.Lock()
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            with suppress(Exception):
+                await self._client.stop_stream(self._stream_id)
+
+    async def iter_bytes(self) -> AsyncIterator[bytes]:
+        try:
+            async for chunk in self._client.iter_media(self._stream_id):
+                if chunk:
+                    yield chunk
+        finally:
+            await self.close()
+```
+
+Keep `iter_hik_stream(client, stream_id)` as the compatibility wrapper:
+
+```python
+async def iter_hik_stream(client, stream_id: str) -> AsyncIterator[bytes]:
+    registered = HikRegisteredStream(client, stream_id)
+    async for chunk in registered.iter_bytes():
+        yield chunk
+```
+
+- [ ] **Step 5: Register the HIK session in the API**
 
 After `create_stream()` succeeds:
 
@@ -477,25 +640,25 @@ session_id = await camera_media_session_registry.register(camera_id, registered.
 
 async def registered_iter():
     try:
-        async for chunk in iter_hik_stream(client, stream_id, closer=registered.close):
+        async for chunk in registered.iter_bytes():
             yield chunk
     finally:
         await registered.close()
         await camera_media_session_registry.unregister(camera_id, session_id)
 ```
 
-If adding a `closer` parameter to `iter_hik_stream`, preserve its defaults so existing tests/callers still use the current best-effort stop semantics.
+Return `StreamingResponse(registered_iter(), ...)` with current headers unchanged.
 
-- [ ] **Step 5: Run HIK lifecycle + existing proxy tests**
+- [ ] **Step 6: Run HIK lifecycle + existing proxy tests**
 
 ```bash
 uv run pytest tests/test_hik_media_session_lifecycle.py tests/test_hik_media_proxy.py -q
 uv run ruff check app/api/hik_media.py app/services/hik_media_proxy.py tests/test_hik_media_session_lifecycle.py
 ```
 
-Expected: PASS, including existing empty-chunk and cleanup-failure tests.
+Expected: PASS, including empty-chunk and cleanup-failure regressions.
 
-- [ ] **Step 6: Commit Task 4**
+- [ ] **Step 7: Commit Task 4**
 
 ```bash
 git add backend/app/api/hik_media.py backend/app/services/hik_media_proxy.py backend/tests/test_hik_media_session_lifecycle.py
@@ -509,20 +672,18 @@ git commit -m "feat: track HIK bridge media sessions"
 **Files:**
 - Modify: `backend/app/services/camera_runtime_coordinator.py`
 - Modify: `backend/tests/test_camera_runtime_coordinator.py`
-- Modify or create: `backend/tests/test_camera_runtime_media_lifecycle.py`
+- Create: `backend/tests/test_camera_runtime_media_lifecycle.py`
 
 **Interfaces:**
 - Consumes singleton `camera_media_session_registry`
-- `CameraRuntimeCoordinator.stop_all(camera_id, ...)` must call `await camera_media_session_registry.stop_camera(camera_id)` before motion/event/recorder/schedule teardown
+- `CameraRuntimeCoordinator.stop_all(camera_id, ...)` calls `await camera_media_session_registry.stop_camera(camera_id)` before motion/event/recorder/schedule teardown
 - `restore()` has no registry calls
 
-- [ ] **Step 1: Add the failing teardown-order test**
-
-Extend `_patch_stop_dependencies()` or create a dedicated test seam so the first call is media teardown:
+- [ ] **Step 1: Add failing teardown-order test**
 
 ```python
 @pytest.mark.asyncio
-async def test_stop_all_stops_media_sessions_before_device_runtime(monkeypatch) -> None:
+async def test_stop_all_stops_media_before_device_runtime(monkeypatch) -> None:
     calls: list[str] = []
 
     async def stop_media(camera_id: int) -> None:
@@ -547,9 +708,9 @@ async def test_stop_all_stops_media_sessions_before_device_runtime(monkeypatch) 
     ]
 ```
 
-- [ ] **Step 2: Add failing restore-negative test**
+- [ ] **Step 2: Add restore-negative test**
 
-Patch registry `register`, `stop_camera`, and `stop_all` to raise `AssertionError` if called, then invoke `restore()` on an enabled camera and assert only existing recorder/schedule/event/motion restoration occurs.
+Patch `camera_media_session_registry.stop_camera` and `stop_all` with async functions that raise `AssertionError`, call `restore()` directly with a valid snapshot/enabled camera, and assert restore completes through the existing recorder/schedule/event/motion path without touching the registry.
 
 - [ ] **Step 3: Run coordinator tests and confirm RED**
 
@@ -557,25 +718,40 @@ Patch registry `register`, `stop_camera`, and `stop_all` to raise `AssertionErro
 uv run pytest tests/test_camera_runtime_coordinator.py tests/test_camera_runtime_media_lifecycle.py -q
 ```
 
-Expected: teardown-order test fails because media registry is not yet called.
+Expected: teardown-order test fails because media registry teardown is not yet called.
 
-- [ ] **Step 4: Add the registry call at the top of stop_all()**
+- [ ] **Step 4: Integrate registry teardown at the top of `stop_all()`**
 
 ```python
 from app.services.camera_media_session_registry import camera_media_session_registry
 
-async def stop_all(...):
-    snapshot = RuntimeStopSnapshot(...)
+
+async def stop_all(
+    self,
+    camera_id: int,
+    *,
+    forget_schedule: bool = False,
+) -> RuntimeStopSnapshot:
+    snapshot = RuntimeStopSnapshot(
+        was_recording=recorder_manager.is_running(camera_id),
+        recording_owner=recording_schedule_manager.recording_owner(camera_id),
+    )
     await camera_media_session_registry.stop_camera(camera_id)
     await motion_detection_manager.stop_camera(camera_id)
-    ...
+    event_recording_manager.end_event(camera_id)
+    await event_recording_manager.stop_camera(camera_id)
+    if snapshot.was_recording:
+        await recorder_manager.stop(camera_id)
+    if forget_schedule:
+        recording_schedule_manager.forget(camera_id)
+    else:
+        recording_schedule_manager.detach_for_runtime_reload(camera_id)
+    return snapshot
 ```
 
-Do not add registry calls to `restore()`.
+Leave `restore()` unchanged.
 
-- [ ] **Step 5: Verify existing caller inheritance**
-
-Run the existing API tests that cover update/disable/delete and adapter switch, plus the coordinator suite. The important regression is that those paths still call `stop_all()`/`reload()` rather than bypassing the coordinator.
+- [ ] **Step 5: Verify existing API callers still inherit coordinator teardown**
 
 ```bash
 uv run pytest \
@@ -586,7 +762,7 @@ uv run pytest \
   tests/test_camera_deletion.py -q
 ```
 
-If the exact deletion test filename differs, use the existing camera-deletion suite discovered in `backend/tests` rather than creating duplicate coverage.
+Expected: PASS. These suites prove update/switch/delete paths still route through the coordinator; the new coordinator-order test proves those calls now invalidate active media sessions first.
 
 - [ ] **Step 6: Commit Task 5**
 
@@ -601,26 +777,26 @@ git commit -m "feat: stop active media before camera runtime reload"
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md`
-- Review all changed backend/test files from Tasks 1-5
+- Review all changed files from Tasks 1-5
 
 **Interfaces:**
 - No new production interface; this task closes the slice and records verified status.
 
-- [ ] **Step 1: Add any missing end-to-end lifecycle regression discovered during review**
+- [ ] **Step 1: Confirm required lifecycle evidence is covered**
 
-Before changing docs, review the diff against the spec success criteria. If API-level coverage does not yet prove a camera lifecycle call reaches registry teardown, add one focused regression using the existing API fixture rather than duplicating endpoint behavior.
-
-Minimum accepted evidence must cover:
+Before changing docs, verify tests explicitly cover all of these statements:
 
 ```text
-detail preview registered -> coordinator stop -> FFmpeg close
-preview wall camera A/B -> stop A -> A closes, B remains
-HIK stream registered -> coordinator stop -> bridge DELETE
-restore() -> no preview/media registration
-invalid adapter target -> validation fails before coordinator stop (existing switch test stays green)
+detail preview registered -> coordinator/media stop -> FFmpeg close
+preview wall camera A/B -> stop A -> A closes and B remains
+HIK stream registered -> coordinator/media stop -> bridge DELETE
+restore() -> no preview/media registry calls
+invalid adapter target -> validation fails before coordinator stop
 ```
 
-- [ ] **Step 2: Run focused lifecycle tests**
+If one statement lacks direct coverage, add exactly one focused regression to the corresponding lifecycle test file before continuing.
+
+- [ ] **Step 2: Run focused lifecycle suite**
 
 ```bash
 uv run pytest \
@@ -634,7 +810,7 @@ uv run pytest \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run repository backend quality locally when available**
+- [ ] **Step 3: Run backend quality locally when available**
 
 ```bash
 uv run python -m compileall app
@@ -643,20 +819,20 @@ uv run ruff check app tests migrations ci_test_shards.py
 
 Expected: PASS.
 
-- [ ] **Step 4: Update migration status documentation only after focused GREEN**
+- [ ] **Step 4: Update migration status documentation**
 
-In `docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md` mark these two Switch items complete:
+Change these Switch items to checked:
 
 ```markdown
 - [x] Terminate already-active preview sessions when a Camera is disabled or reloaded.
 - [x] Release adapter-specific temporary sessions on disable/reload, especially HIK bridge streams.
 ```
 
-Add a verification subsection naming the final CI run only after it completes successfully. Do not mark frontend reconnect or Contract cleanup complete.
+Add a new verification subsection only after final CI succeeds. Do not mark frontend reconnect, persistent HIK session inventory, or Contract cleanup complete.
 
-- [ ] **Step 5: Open/update the PR and run full GitHub Actions**
+- [ ] **Step 5: Open a draft PR and run full GitHub Actions**
 
-Required final head evidence:
+Final-head required results:
 
 ```text
 changes: success
@@ -670,21 +846,27 @@ backend aggregate: success
 frontend: skipped unless a frontend file changed unexpectedly
 ```
 
-Docker smoke must include database migration compatibility even though this slice has no schema migration.
+Docker smoke must include database migration compatibility even though this slice adds no schema migration.
 
 - [ ] **Step 6: Final diff review**
 
-Verify:
+Verify all of the following:
 
-- no frontend files changed;
-- no database migration added;
-- no persistent session table added;
-- no recorder/schedule/motion/event ownership redesign;
-- no credential leakage in logs or tests;
-- HIK natural cleanup remains best-effort;
-- preview fallback behavior remains intact;
-- PR has no unresolved review threads.
+```text
+no frontend files changed
+no database migration added
+no persistent session table added
+no recorder/schedule/motion/event ownership redesign
+no credential leakage in logs or tests
+HIK natural cleanup remains best-effort
+preview fallback behavior remains intact
+no unresolved PR review threads
+```
 
-- [ ] **Step 7: Mark PR ready and merge after final GREEN**
+- [ ] **Step 7: Update PR body with final verification evidence**
 
-Use the already established repository workflow: after latest-head CI is fully green, mark the PR ready and merge to `main` without asking for a separate merge confirmation.
+The PR body must name the exact final head SHA and CI run number/id and state which jobs passed. Do not claim GREEN until the latest head run has completed successfully.
+
+- [ ] **Step 8: Mark PR ready and merge after final GREEN**
+
+Use the established repository workflow: once the latest head is fully green, mark the PR ready and merge to `main` without requesting a separate merge confirmation.
