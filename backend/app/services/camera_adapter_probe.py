@@ -22,6 +22,10 @@ from app.schemas.camera_connection import (
     OnvifConnectionUpdate,
 )
 from app.schemas.hikvision import HikProbeResult
+from app.services.camera_adapter_registry import (
+    CameraAdapterUnavailableError,
+    require_camera_adapter_available,
+)
 from app.services.camera_connection import (
     upsert_hik_connection,
     upsert_manual_rtsp_connection,
@@ -37,6 +41,11 @@ class CameraAdapterProbeError(RuntimeError):
     def __init__(self, message: str, *, status_code: int = 502) -> None:
         self.status_code = status_code
         super().__init__(message)
+
+
+class CameraAdapterUnavailableProbeError(CameraAdapterProbeError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=503)
 
 
 class CameraConnectionProbeResult(BaseModel):
@@ -164,6 +173,11 @@ async def _probe_hik(
     password: str,
     rtsp_timeout_us: int,
 ) -> CameraConnectionProbeResult:
+    try:
+        await require_camera_adapter_available("hik_sdk")
+    except CameraAdapterUnavailableError as exc:
+        raise CameraAdapterUnavailableProbeError(str(exc)) from exc
+
     client = HikBridgeClient()
     stream_id: str | None = None
     try:

@@ -17,6 +17,7 @@ from app.schemas.camera import (
 )
 from app.services.camera_adapter_probe import (
     CameraAdapterProbeError,
+    CameraAdapterUnavailableProbeError,
     CameraConnectionProbeResult,
     apply_probe_failure,
     apply_probe_success,
@@ -90,6 +91,8 @@ async def probe_current_connection(
                 camera,
                 rtsp_timeout_us=runtime.rtsp_timeout_us,
             )
+    except CameraAdapterUnavailableProbeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (CameraAdapterProbeError, CameraProbeError) as exc:
         apply_probe_failure(camera, str(exc))
         camera.status = "offline"

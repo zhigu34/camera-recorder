@@ -5,6 +5,7 @@ from typing import Literal
 
 from app.core.database import SessionLocal
 from app.models.camera import Camera
+from app.services.camera_adapter_registry import get_camera_adapter_capability
 from app.services.camera_config import runtime_config
 from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.event_recording import event_recording_manager
@@ -13,7 +14,7 @@ from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import RecordingOwner, recording_schedule_manager
 from app.services.recording_start import start_regular_recorder
 
-RuntimeReloadResult = Literal["missing", "disabled", "running"]
+RuntimeReloadResult = Literal["missing", "disabled", "adapter_unavailable", "running"]
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,16 @@ class CameraRuntimeCoordinator:
         if not camera.enabled:
             recording_schedule_manager.forget(camera_id)
             return "disabled"
+
+        connection = getattr(camera, "connection", None)
+        adapter = getattr(connection, "adapter", None) or getattr(
+            camera,
+            "connection_type",
+            "manual_rtsp",
+        )
+        capability = await get_camera_adapter_capability(str(adapter))
+        if not capability.available:
+            return "adapter_unavailable"
 
         if (
             snapshot.recording_owner == "manual"

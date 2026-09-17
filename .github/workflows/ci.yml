@@ -194,20 +194,25 @@ jobs:
         env:
           GITHUB_PROXY_PROMPT: "0"
         run: bash scripts/download-ffmpeg.sh amd64
-      - run: docker compose config
+      - name: Validate core and HIK profile Compose models
+        run: |
+          docker compose config
+          docker compose --profile hik config
+          docker compose config --services | tee /tmp/core-services
+          if grep -qx 'hik-bridge' /tmp/core-services; then
+            echo 'hik-bridge must not be part of the default core service set' >&2
+            exit 1
+          fi
+          docker compose --profile hik config --services | grep -qx 'hik-bridge'
       - run: docker compose build backend frontend
       - run: docker compose up -d backend frontend
-      - name: Wait for HIK bridge health
+      - name: Verify HIK bridge is not started by core deployment
         run: |
-          for i in $(seq 1 30); do
-            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' camera-recorder-hik-bridge 2>/dev/null || true)"
-            if [ "$status" = "healthy" ]; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker compose logs hik-bridge
-          exit 1
+          if docker ps -a --format '{{.Names}}' | grep -qx 'camera-recorder-hik-bridge'; then
+            echo 'camera-recorder-hik-bridge must not be created by default core startup' >&2
+            docker ps -a
+            exit 1
+          fi
       - name: Wait for backend health
         run: |
           for i in $(seq 1 30); do
@@ -262,29 +267,23 @@ jobs:
 
           asyncio.run(main())
           PY
-      - name: Verify backend and HIK bridge are internal only
+      - name: Verify backend is internal only and HIK capability is disabled
         run: |
           python - <<'PY'
           import json
           import subprocess
 
-          for container_name, port in (
-              ('camera-recorder-backend', '8000/tcp'),
-              ('camera-recorder-hik-bridge', '8100/tcp'),
-          ):
-              container = json.loads(
-                  subprocess.check_output(
-                      ['docker', 'inspect', container_name],
-                      text=True,
-                  )
-              )[0]
-              bindings = container.get('HostConfig', {}).get('PortBindings') or {}
-              published = bindings.get(port) or []
-              if published:
-                  raise SystemExit(
-                      f"{container_name} {port} must not be published to the host: {published}"
-                  )
-          print('backend:8000 and hik-bridge:8100 are internal-only')
+          container = json.loads(
+              subprocess.check_output(
+                  ['docker', 'inspect', 'camera-recorder-backend'],
+                  text=True,
+              )
+          )[0]
+          bindings = container.get('HostConfig', {}).get('PortBindings') or {}
+          published = bindings.get('8000/tcp') or []
+          if published:
+              raise SystemExit(f"camera-recorder-backend 8000/tcp must not be published: {published}")
+          print('backend:8000 is internal-only')
           PY
           docker compose exec -T backend python - <<'PY'
           import json
@@ -292,10 +291,11 @@ jobs:
 
           with urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=5) as response:
               assert response.status == 200
-          with urllib.request.urlopen("http://hik-bridge:8100/health", timeout=5) as response:
+          with urllib.request.urlopen("http://127.0.0.1:8000/api/camera-adapters", timeout=5) as response:
               payload = json.load(response)
-              assert payload.get('ok') is True
-              assert isinstance(payload.get('runtime_available'), bool)
+          hik = next(item for item in payload if item.get('id') == 'hik_sdk')
+          assert hik.get('available') is False, hik
+          assert hik.get('unavailable_reason') == 'HIK SDK adapter is disabled by deployment configuration', hik
           PY
       - name: Wait for frontend
         run: |
@@ -347,4 +347,6 @@ jobs:
         run: docker compose ps
       - name: Cleanup
         if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v --remove-orphans || true
+          docker compose --profile hik down -v --remove-orphans || true

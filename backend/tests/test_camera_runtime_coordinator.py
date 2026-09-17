@@ -251,3 +251,64 @@ async def test_schedule_change_drops_manual_override_and_reconciles(monkeypatch)
         "event-reconcile",
         "motion-restart:7",
     ]
+
+
+@pytest.mark.asyncio
+async def test_reload_unavailable_hik_camera_stays_stopped(monkeypatch) -> None:
+    calls: list[str] = []
+    _patch_stop_dependencies(monkeypatch, calls, running=True, owner="manual")
+    camera = SimpleNamespace(
+        id=7,
+        enabled=True,
+        connection=SimpleNamespace(adapter="hik_sdk"),
+        connection_type="hik_sdk",
+    )
+    monkeypatch.setattr(runtime_module, "SessionLocal", lambda: _SessionContext(camera))
+    monkeypatch.setattr(runtime_module, "runtime_config", lambda item: ("runtime", item.id))
+
+    async def unavailable(adapter: str):
+        calls.append(f"capability:{adapter}")
+        return SimpleNamespace(
+            id=adapter,
+            available=False,
+            unavailable_reason="HIK SDK adapter is disabled by deployment configuration",
+        )
+
+    async def unexpected_start(config):
+        calls.append(f"unexpected-recorder-start:{config[1]}")
+        return {"camera_id": config[1], "state": "RECORDING"}
+
+    async def unexpected_reconcile() -> None:
+        calls.append("unexpected-schedule-reconcile")
+
+    async def unexpected_event() -> int:
+        calls.append("unexpected-event-reconcile")
+        return 0
+
+    async def unexpected_motion(camera_id: int) -> None:
+        calls.append(f"unexpected-motion-restart:{camera_id}")
+
+    monkeypatch.setattr(
+        runtime_module,
+        "get_camera_adapter_capability",
+        unavailable,
+        raising=False,
+    )
+    monkeypatch.setattr(runtime_module, "start_regular_recorder", unexpected_start)
+    monkeypatch.setattr(runtime_module.recording_schedule_manager, "reconcile", unexpected_reconcile)
+    monkeypatch.setattr(runtime_module.event_recording_manager, "reconcile_once", unexpected_event)
+    monkeypatch.setattr(runtime_module.motion_detection_manager, "restart_camera", unexpected_motion)
+
+    coordinator = runtime_module.CameraRuntimeCoordinator()
+    result = await coordinator.reload(7)
+
+    assert result == "adapter_unavailable"
+    assert calls[:6] == [
+        "media-stop:7",
+        "motion-stop:7",
+        "event-end:7",
+        "event-stop:7",
+        "recorder-stop:7",
+        "schedule-detach:7",
+    ]
+    assert calls[6:] == ["capability:hik_sdk"]

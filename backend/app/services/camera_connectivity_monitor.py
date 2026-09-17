@@ -10,6 +10,7 @@ from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.models.camera import Camera
+from app.services.camera_adapter_registry import get_camera_adapter_capability
 from app.services.event_log import add_event
 from app.services.hik_bridge_client import HikBridgeClient, HikBridgeClientError
 from app.services.recorder_manager import recorder_manager
@@ -306,6 +307,16 @@ class CameraConnectivityMonitor:
                 for camera in cameras
             ]
 
+        hik_available = True
+        if any(target.connection_type == "hik_sdk" for target in targets):
+            hik_capability = await get_camera_adapter_capability("hik_sdk")
+            hik_available = hik_capability.available
+        probe_targets = [
+            target
+            for target in targets
+            if target.connection_type != "hik_sdk" or hik_available
+        ]
+
         semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
 
         async def observe(target: _CameraTarget) -> tuple[int, ConnectivityObservation]:
@@ -345,7 +356,7 @@ class CameraConnectivityMonitor:
             )
             return target.camera_id, result
 
-        results = await asyncio.gather(*(observe(target) for target in targets))
+        results = await asyncio.gather(*(observe(target) for target in probe_targets))
         observed_at = datetime.now(timezone.utc)
 
         async with SessionLocal() as session:

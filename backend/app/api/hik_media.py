@@ -3,6 +3,10 @@ from fastapi.responses import StreamingResponse
 
 from app.core.database import SessionLocal
 from app.models.camera import Camera
+from app.services.camera_adapter_registry import (
+    CameraAdapterUnavailableError,
+    require_camera_adapter_available,
+)
 from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.hik_bridge_client import HikBridgeClient, HikBridgeClientError
 from app.services.hik_media_proxy import HikRegisteredStream, HikStreamRole, build_hik_target
@@ -16,6 +20,10 @@ async def hik_media(camera_id: int, role: HikStreamRole):
         camera = await db.get(Camera, camera_id)
         if camera is None:
             raise HTTPException(status_code=404, detail="camera not found")
+        try:
+            await require_camera_adapter_available("hik_sdk")
+        except CameraAdapterUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         try:
             target = build_hik_target(camera, role)
         except ValueError as exc:

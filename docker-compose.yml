@@ -2,6 +2,7 @@ name: camera-recorder
 
 services:
   hik-bridge:
+    profiles: ["hik"]
     image: camera-recorder-core:local
     container_name: camera-recorder-hik-bridge
     init: true
@@ -34,9 +35,6 @@ services:
     container_name: camera-recorder-backend
     init: true
     restart: unless-stopped
-    depends_on:
-      hik-bridge:
-        condition: service_started
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CAMREC_SECRET_KEY: ${CAMREC_SECRET_KEY:-camera-recorder-local-change-me}
@@ -47,6 +45,7 @@ services:
       CAMREC_FAILED_DIR: /app/failed
       CAMREC_LOGS_DIR: /app/logs
       CAMREC_OPENLIST_PUBLIC_PORT: ${OPENLIST_PORT:-5244}
+      CAMREC_HIK_ENABLED: ${CAMREC_HIK_ENABLED:-0}
       CAMREC_HIK_BRIDGE_URL: http://hik-bridge:8100
       CAMREC_INTERNAL_MEDIA_URL: http://127.0.0.1:8000
     volumes:

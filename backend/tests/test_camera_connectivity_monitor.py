@@ -1,5 +1,7 @@
 import asyncio
+import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -206,3 +208,86 @@ def test_manual_probe_reconciles_monitor_failure_streak() -> None:
 
     monitor.reconcile_manual_probe(9, success=False)
     assert monitor.failures_for(9) >= 1
+
+
+@pytest.mark.asyncio
+async def test_monitor_skips_unavailable_hik_without_mutating_connectivity(monkeypatch) -> None:
+    from app.core.database import SessionLocal
+    from app.services import camera_connectivity_monitor as monitor_module
+
+    observed_at = datetime.now(timezone.utc)
+    camera = Camera(
+        name=f"hik-unavailable-{uuid.uuid4().hex[:10]}",
+        connection_type="hik_sdk",
+        ip="192.0.2.90",
+        username="admin",
+        password_encrypted="must-not-be-decrypted",
+        rtsp_path="/hik-sdk/main",
+        enabled=True,
+        status="online",
+        connectivity_failures=2,
+        last_probe_at=observed_at,
+        last_online_at=observed_at,
+    )
+    async with SessionLocal() as db:
+        db.add(camera)
+        await db.commit()
+        await db.refresh(camera)
+        camera_id = camera.id
+
+    capability_calls = 0
+    decrypt_calls = 0
+    hik_probe_calls = 0
+
+    async def unavailable(adapter: str):
+        nonlocal capability_calls
+        capability_calls += 1
+        assert adapter == "hik_sdk"
+        return SimpleNamespace(
+            id="hik_sdk",
+            available=False,
+            unavailable_reason="HIK SDK adapter is disabled by deployment configuration",
+        )
+
+    def unexpected_decrypt(_value: str) -> str:
+        nonlocal decrypt_calls
+        decrypt_calls += 1
+        raise AssertionError("unavailable HIK must not decrypt credentials for probing")
+
+    async def unexpected_hik_probe(*args, **kwargs) -> bool:
+        nonlocal hik_probe_calls
+        hik_probe_calls += 1
+        raise AssertionError("unavailable HIK must not probe the bridge")
+
+    monkeypatch.setattr(monitor_module.recorder_manager, "status", lambda: [])
+    monkeypatch.setattr(
+        monitor_module,
+        "get_camera_adapter_capability",
+        unavailable,
+        raising=False,
+    )
+    monkeypatch.setattr(monitor_module, "decrypt_secret", unexpected_decrypt)
+    monkeypatch.setattr(monitor_module, "probe_hik_service", unexpected_hik_probe)
+
+    monitor = monitor_module.CameraConnectivityMonitor()
+    try:
+        await monitor.check_once()
+        async with SessionLocal() as db:
+            persisted = await db.get(Camera, camera_id)
+            assert persisted is not None
+            assert persisted.status == "online"
+            assert persisted.connectivity_failures == 2
+            assert persisted.last_probe_at is not None
+            assert persisted.last_online_at is not None
+            assert persisted.last_probe_at.replace(tzinfo=timezone.utc) == observed_at
+            assert persisted.last_online_at.replace(tzinfo=timezone.utc) == observed_at
+    finally:
+        async with SessionLocal() as db:
+            persisted = await db.get(Camera, camera_id)
+            if persisted is not None:
+                await db.delete(persisted)
+                await db.commit()
+
+    assert capability_calls == 1
+    assert decrypt_calls == 0
+    assert hik_probe_calls == 0

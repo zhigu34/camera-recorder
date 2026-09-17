@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 
 from app.api import hik_media as hik_media_api
 from app.services import hik_media_proxy
@@ -58,9 +59,18 @@ async def test_hik_route_registers_camera_stream_and_external_close(monkeypatch)
     registry = _TrackingRegistry()
     target = object()
 
+    async def available(_adapter: str) -> None:
+        return None
+
     monkeypatch.setattr(hik_media_api, "SessionLocal", _FakeDb)
     monkeypatch.setattr(hik_media_api, "build_hik_target", lambda _camera, _role: target)
     monkeypatch.setattr(hik_media_api, "HikBridgeClient", lambda: client)
+    monkeypatch.setattr(
+        hik_media_api,
+        "require_camera_adapter_available",
+        available,
+        raising=False,
+    )
     monkeypatch.setattr(
         hik_media_api,
         "camera_media_session_registry",
@@ -81,6 +91,24 @@ async def test_hik_route_registers_camera_stream_and_external_close(monkeypatch)
     await response.body_iterator.aclose()
     assert registry.unregistered == [(42, "registry-1")]
     assert client.stopped == ["stream-1"]
+
+
+@pytest.mark.asyncio
+async def test_disabled_hik_media_returns_503_without_stream_creation(monkeypatch) -> None:
+    from app.services import camera_adapter_registry as adapter_registry
+
+    client = _FakeBridgeClient()
+    monkeypatch.setattr(adapter_registry.settings, "hik_enabled", False)
+    monkeypatch.setattr(hik_media_api, "SessionLocal", _FakeDb)
+    monkeypatch.setattr(hik_media_api, "build_hik_target", lambda _camera, _role: object())
+    monkeypatch.setattr(hik_media_api, "HikBridgeClient", lambda: client)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await hik_media_api.hik_media(42, "main")
+
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.detail == adapter_registry.HIK_DISABLED_REASON
+    assert client.created == []
 
 
 @pytest.mark.asyncio

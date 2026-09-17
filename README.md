@@ -64,6 +64,21 @@ git pull && ./deploy.sh
 
 `deploy.sh` 会检查 Docker/Compose/Buildx、FFmpeg 本地包、Compose 配置、镜像构建和服务健康状态。已有且有效的 FFmpeg 包与 Docker 层会直接复用；普通前端改动只重建前端，不重启录像 backend。
 
+Hikvision HCNetSDK 支持**默认关闭**。普通 RTSP / ONVIF 部署不需要下载或放置任何厂商 SDK，核心 backend/frontend/OpenList 也不依赖 `hik-bridge`。需要启用 HIK SDK 时，在 `.env` 中设置：
+
+```dotenv
+CAMREC_HIK_ENABLED=1
+HIK_SDK_DIR=./hik-sdk-runtime
+```
+
+并把 Linux64 HCNetSDK runtime 放到对应目录，然后仍然执行普通的：
+
+```bash
+./deploy.sh
+```
+
+不需要手工传 `docker compose --profile hik`；部署脚本会先完成核心服务，再单独处理可选 HIK 阶段。关闭 HIK 时设置 `CAMREC_HIK_ENABLED=0`，下一次部署会移除旧 `hik-bridge`，不会影响核心录像服务。详细说明见：[Hikvision HCNetSDK runtime](docs/HIK_SDK_RUNTIME.md)。
+
 涉及正式升级、数据库迁移或回滚前，先阅读：[V1 发布、升级与回滚](docs/RELEASE.md)。运维页导出的 JSON 是脱敏配置备份，不替代 `.env`、SQLite 和 OpenList 持久化数据的完整灾备。
 
 服务默认地址：
@@ -72,6 +87,7 @@ git pull && ./deploy.sh
 Camera Recorder  http://127.0.0.1:8080
 FastAPI          backend:8000（仅 Docker 内部网络，通过前端 /api、/ws 和 /health 代理）
 OpenList         http://127.0.0.1:5244
+HIK Bridge       默认不启动；启用后 hik-bridge:8100（仅 Docker 内部网络）
 ```
 
 宿主机持久化目录：
@@ -139,6 +155,7 @@ WebDAV URL: http://openlist:5244/dav
 - [启动与开发](docs/GETTING_STARTED.md)
 - [系统架构](docs/ARCHITECTURE.md)
 - [开发设计](docs/DEVELOPMENT.md)
+- [Hikvision HCNetSDK runtime](docs/HIK_SDK_RUNTIME.md)
 - [OpenList / WebDAV](docs/OPENLIST.md)
 - [V1 当前状态](docs/V1_STATUS.md)
 - [V1 发布、升级与回滚](docs/RELEASE.md)
