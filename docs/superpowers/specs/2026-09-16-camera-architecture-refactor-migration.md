@@ -1,6 +1,6 @@
 # Camera Architecture Refactor — Migration Notes
 
-Status: **Switch slice complete for manual RTSP + ONVIF; RuntimeCoordinator lifecycle slice complete**
+Status: **Switch slice complete for manual RTSP + ONVIF; RuntimeCoordinator lifecycle and connection revision guard slices complete**
 
 Date: 2026-09-16
 
@@ -16,7 +16,7 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
-Phase 1, the manual-RTSP/ONVIF Switch slice, and the bounded RuntimeCoordinator lifecycle slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
+Phase 1, the manual-RTSP/ONVIF Switch slice, the bounded RuntimeCoordinator lifecycle slice, and the connection revision guard slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
 
 ### Expand
 
@@ -58,7 +58,7 @@ Phase 1, the manual-RTSP/ONVIF Switch slice, and the bounded RuntimeCoordinator 
 - [x] Preserve the event-buffer handoff invariant when manually starting normal recording by using `start_regular_recorder`.
 - [ ] Terminate already-active preview sessions when a Camera is disabled or reloaded.
 - [ ] Release adapter-specific temporary sessions on disable/reload, especially HIK bridge streams.
-- [ ] Add current-connection revision stale-worker invalidation inside long-running reconnect loops.
+- [x] Add current-connection revision stale-worker invalidation inside long-running reconnect loops.
 
 ### Contract
 
@@ -98,7 +98,15 @@ The production-code head for the RuntimeCoordinator slice was verified in CI `#1
 
 That verification covers recorder ownership, coordinated stop/reload sequencing, manual-recording restoration, schedule reconciliation, event-buffer/motion restore order, RTSP and ONVIF update routing, Camera deletion teardown, disabled-camera start/restart/preview guards, continued disabled-camera Probe access, and regular-recorder/event-buffer handoff.
 
-The slice intentionally does not claim active preview-session termination, HIK temporary-session lifecycle integration, or long-running worker revision invalidation; those remain explicit follow-up items above.
+The RuntimeCoordinator slice intentionally does not claim active preview-session termination or HIK temporary-session lifecycle integration; those remain explicit follow-up items above. Long-running worker revision invalidation is completed by the subsequent connection revision guard slice below.
+
+### Connection revision guard slice
+
+The production-code head for the connection revision guard slice was verified in CI `#1224` (`35166918738`). All four backend pytest shards, backend quality/Ruff, HIK bridge tests, Docker smoke/database migration compatibility, and the aggregate backend job completed successfully; frontend was correctly skipped because this slice has no frontend changes.
+
+That verification covers captured `CameraConnection.revision` values in recorder and motion runtime configs, tri-state current/stale/unknown revision checks, stale recorder and motion reconnect termination without converting lifecycle staleness into device failures, event pre-roll worker reconnect invalidation, and replacement of an event-buffer worker when the revision changes even if the resolved URI does not. The existing event-buffer handoff regression suite also remained green, preserving active-event capture ownership across normal-recorder transitions.
+
+Active preview-session termination, HIK temporary-session release, HIK connection-model migration, and adapter switching remain deliberate follow-up work.
 
 ## Why this is simpler than the generic migration
 
