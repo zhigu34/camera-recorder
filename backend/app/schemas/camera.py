@@ -3,7 +3,11 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
-from app.schemas.camera_connection import CameraConnectionRead
+from app.schemas.camera_connection import (
+    CameraConnectionCreate,
+    CameraConnectionRead,
+    CameraConnectionUpdate,
+)
 
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
@@ -150,6 +154,37 @@ class CameraCreate(CameraBase):
         return self
 
 
+class CameraUnifiedCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=128)
+    manufacturer: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    form_factor: CameraFormFactor = "unknown"
+    enabled: bool = True
+    auto_record: bool = False
+    recording_schedule_enabled: bool = False
+    recording_schedule: list[RecordingWindow] = Field(default_factory=list, max_length=32)
+    timestamp_mode: TimestampMode = "reconstruct"
+    connection: CameraConnectionCreate
+
+    @field_validator("manufacturer", "model", mode="before")
+    @classmethod
+    def normalize_optional_identity(cls, value: Any):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_schedule(self):
+        if self.recording_schedule_enabled and not self.recording_schedule:
+            raise ValueError("recording schedule requires at least one time window")
+        if self.recording_schedule_enabled:
+            self.auto_record = True
+        return self
+
+
 class CameraBatchCreate(BaseModel):
     cameras: list[CameraCreate] = Field(min_length=1, max_length=200)
     skip_existing: bool = True
@@ -222,6 +257,39 @@ class CameraUpdate(BaseModel):
     def normalize_schedule_policy(self):
         if self.connection_type not in {None, "manual_rtsp"}:
             raise ValueError("use the dedicated camera adapter endpoint")
+        if self.recording_schedule_enabled is True:
+            if self.recording_schedule == []:
+                raise ValueError("recording schedule requires at least one time window")
+            self.auto_record = True
+        elif self.auto_record is False:
+            self.recording_schedule_enabled = False
+        return self
+
+
+class CameraUnifiedUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    manufacturer: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    form_factor: CameraFormFactor | None = None
+    enabled: bool | None = None
+    auto_record: bool | None = None
+    recording_schedule_enabled: bool | None = None
+    recording_schedule: list[RecordingWindow] | None = Field(default=None, max_length=32)
+    timestamp_mode: TimestampMode | None = None
+    connection: CameraConnectionUpdate | None = None
+
+    @field_validator("manufacturer", "model", mode="before")
+    @classmethod
+    def normalize_optional_identity(cls, value: Any):
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def normalize_schedule_policy(self):
         if self.recording_schedule_enabled is True:
             if self.recording_schedule == []:
                 raise ValueError("recording schedule requires at least one time window")
