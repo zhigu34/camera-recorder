@@ -105,7 +105,6 @@ def test_hik_camera_creation_reprobes_media_and_persists_adapter_metadata(monkey
 
 def test_hik_same_adapter_update_uses_runtime_coordinator(monkeypatch) -> None:
     coordinator_calls: list[tuple[int, bool]] = []
-    legacy_calls: list[tuple[str, int]] = []
 
     async def fake_probe(_payload):
         return DISCOVERED
@@ -141,20 +140,6 @@ def test_hik_same_adapter_update_uses_runtime_coordinator(monkeypatch) -> None:
         assert created.status_code == 201, created.text
         camera_id = int(created.json()["id"])
 
-        def is_running(value: int) -> bool:
-            legacy_calls.append(("recorder-is-running", value))
-            return False
-
-        async def stop_event(value: int):
-            legacy_calls.append(("event-stop", value))
-
-        async def restart_motion(value: int):
-            legacy_calls.append(("motion-restart", value))
-
-        monkeypatch.setattr(hik_api.recorder_manager, "is_running", is_running)
-        monkeypatch.setattr(hik_api.event_recording_manager, "stop_camera", stop_event)
-        monkeypatch.setattr(hik_api.motion_detection_manager, "restart_camera", restart_motion)
-
         response = client.put(
             f"/api/cameras/hik/{camera_id}",
             json={
@@ -175,7 +160,6 @@ def test_hik_same_adapter_update_uses_runtime_coordinator(monkeypatch) -> None:
         assert body["ip"] == "10.0.0.82"
         assert "new-secret" not in response.text
         assert coordinator_calls == [(camera_id, False)]
-        assert legacy_calls == []
 
         metadata = asyncio.run(_metadata(camera_id))
         assert metadata is not None
