@@ -71,5 +71,8 @@ class HikRegisteredStream:
 
 async def iter_hik_stream(client, stream_id: str) -> AsyncIterator[bytes]:
     registered = HikRegisteredStream(client, stream_id)
-    async for chunk in registered.iter_bytes():
-        yield chunk
+    try:
+        async for chunk in registered.iter_bytes():
+            yield chunk
+    finally:
+        await registered.close()
