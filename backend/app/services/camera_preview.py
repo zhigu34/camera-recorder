@@ -1,7 +1,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from app.core.config import settings
@@ -104,6 +104,15 @@ async def _stop_process(process: asyncio.subprocess.Process) -> None:
 class PreviewSession:
     process: asyncio.subprocess.Process
     first_chunk: bytes
+    _closed: bool = False
+    _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            await _stop_process(self.process)
 
     async def stream(self) -> AsyncIterator[bytes]:
         try:
@@ -116,7 +125,7 @@ class PreviewSession:
                     break
                 yield chunk
         finally:
-            await _stop_process(self.process)
+            await self.close()
 
 
 async def open_mjpeg_preview(
