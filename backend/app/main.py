@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.camera_adapter_switch import router as camera_adapter_switch_router
+from app.api.camera_connections import router as camera_connections_router
 from app.api.cameras import router as cameras_router
 from app.api.event_detection import router as event_detection_router
 from app.api.events import router as events_router
@@ -129,6 +130,7 @@ app.add_middleware(
 app.add_middleware(PlaybackPrefetchMiddleware)
 
 app.include_router(hik_media_router)
+app.include_router(camera_connections_router)
 # Keep dedicated static adapter endpoints before /api/cameras/{camera_id} routes.
 app.include_router(hik_cameras_router)
 app.include_router(onvif_cameras_router)

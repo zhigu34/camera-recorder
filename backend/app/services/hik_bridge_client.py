@@ -66,6 +66,11 @@ class HikBridgeClient:
             raise HikBridgeClientError(message, status_code=response.status_code)
         return response
 
+    async def health(self) -> dict[str, Any]:
+        response = await self._request("GET", "/health")
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {}
+
     async def probe(
         self,
         *,

@@ -339,3 +339,91 @@ def test_onvif_camera_update_reuses_connection_and_replaces_current_config(monke
             )
             if uri
         )
+
+
+def test_onvif_rediscovery_reloads_runtime_without_incrementing_revision(monkeypatch) -> None:
+    refreshed = OnvifProbeResult.model_validate(
+        {
+            **DISCOVERED.model_dump(),
+            "profiles": [
+                {
+                    "token": "main-refreshed",
+                    "name": "Main refreshed",
+                    "encoding": "H265",
+                    "width": 3840,
+                    "height": 2160,
+                    "fps": 25,
+                    "uri": "rtsp://10.0.0.20:8554/main-refreshed",
+                },
+                {
+                    "token": "sub-refreshed",
+                    "name": "Sub refreshed",
+                    "encoding": "H264",
+                    "width": 640,
+                    "height": 360,
+                    "fps": 12,
+                    "uri": "rtsp://10.0.0.20:8554/sub-refreshed",
+                },
+            ],
+            "recording_profile_token": "main-refreshed",
+            "preview_profile_token": "sub-refreshed",
+            "detection_profile_token": "sub-refreshed",
+            "recording_uri": "rtsp://10.0.0.20:8554/main-refreshed",
+            "preview_uri": "rtsp://10.0.0.20:8554/sub-refreshed",
+            "detection_uri": "rtsp://10.0.0.20:8554/sub-refreshed",
+        }
+    )
+    discoveries = [DISCOVERED, refreshed]
+    runtime_reload_calls: list[tuple[int, bool]] = []
+
+    async def fake_onvif_probe(_payload):
+        return discoveries.pop(0)
+
+    async def fake_stream_probe(*, stream_uri: str, rtsp_timeout_us: int):
+        assert stream_uri
+        assert rtsp_timeout_us > 0
+        return _media_probe_result(codec="hevc", fps=25)
+
+    async def no_reconcile():
+        return None
+
+    async def reload_runtime(camera_id: int, *, schedule_changed: bool = False) -> str:
+        runtime_reload_calls.append((camera_id, schedule_changed))
+        return "running"
+
+    monkeypatch.setattr(onvif_api, "_probe_onvif", fake_onvif_probe)
+    monkeypatch.setattr(onvif_api, "probe_stream_uri", fake_stream_probe)
+    monkeypatch.setattr(onvif_api.recording_schedule_manager, "reconcile", no_reconcile)
+    monkeypatch.setattr(onvif_api.camera_runtime_coordinator, "reload", reload_runtime)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras/onvif",
+            json={
+                "name": "onvif-rediscovery-camera",
+                "host": "10.0.0.20",
+                "port": 80,
+                "username": "admin",
+                "password": "same-secret",
+            },
+        )
+        assert created.status_code == 201, created.text
+        camera_id = int(created.json()["id"])
+        before = asyncio.run(_connection_snapshot(camera_id))
+        assert before["revision"] == 1
+
+        response = client.put(
+            f"/api/cameras/onvif/{camera_id}",
+            json={
+                "host": "10.0.0.20",
+                "port": 80,
+                "username": "admin",
+                "password": "same-secret",
+            },
+        )
+        assert response.status_code == 200, response.text
+        after = asyncio.run(_connection_snapshot(camera_id))
+        assert after["revision"] == 1
+        assert after["config"]["recording_profile_token"] == "main-refreshed"
+        assert after["config"]["recording_uri"] == "rtsp://10.0.0.20:8554/main-refreshed"
+        assert runtime_reload_calls == [(camera_id, False)]

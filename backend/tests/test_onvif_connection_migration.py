@@ -9,6 +9,8 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PHASE1_HEAD = "20260916_0022"
 ONVIF_CONNECTION_REVISION = "20260916_0023"
+HIK_CONNECTION_REVISION = "20260917_0024"
+UNVERIFIED_ONVIF_REVISION = "20260917_0025"
 
 
 def _database_url(db_path: Path) -> str:
@@ -156,3 +158,80 @@ def test_0023_adds_empty_onvif_config_without_mutating_existing_connection_or_le
                 """
             ).fetchone()
         ) == before_legacy_onvif
+
+
+def test_0025_allows_unverified_onvif_cache_without_rewriting_existing_values(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "onvif-unverified.db"
+    _alembic(db_path, HIK_CONNECTION_REVISION)
+
+    with _connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO cameras (
+                id, name, ip, rtsp_port, username, password_encrypted, rtsp_path,
+                enabled, auto_record, timestamp_mode, status, connection_type
+            ) VALUES (
+                51, 'verified-onvif', '192.0.2.51', 554, 'viewer',
+                'ciphertext-51', '/main', 1, 0, 'reconstruct', 'online', 'onvif'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO camera_connections (
+                id, camera_id, adapter, host, username, password_encrypted,
+                revision, verification_status
+            ) VALUES (
+                501, 51, 'onvif', '192.0.2.51', 'viewer',
+                'ciphertext-51', 4, 'verified'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO onvif_connection_configs (
+                connection_id, device_service_url, device_uuid,
+                capabilities_json, profiles_json,
+                recording_profile_token, preview_profile_token,
+                detection_profile_token, recording_uri, preview_uri, detection_uri
+            ) VALUES (
+                501, 'http://192.0.2.51:80/onvif/device_service', 'uuid-51',
+                '{}', '[]', 'main', 'sub', 'sub',
+                'rtsp://192.0.2.51/main', 'rtsp://192.0.2.51/sub', 'rtsp://192.0.2.51/sub'
+            )
+            """
+        )
+        connection.commit()
+        before = tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       recording_profile_token, recording_uri
+                FROM onvif_connection_configs WHERE connection_id = 501
+                """
+            ).fetchone()
+        )
+
+    _alembic(db_path, "head")
+
+    with _connect(db_path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
+            UNVERIFIED_ONVIF_REVISION
+        )
+        columns = {
+            row[1]: row
+            for row in connection.execute("PRAGMA table_info(onvif_connection_configs)")
+        }
+        assert columns["recording_profile_token"][3] == 0
+        assert columns["recording_uri"][3] == 0
+        assert tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       recording_profile_token, recording_uri
+                FROM onvif_connection_configs WHERE connection_id = 501
+                """
+            ).fetchone()
+        ) == before
