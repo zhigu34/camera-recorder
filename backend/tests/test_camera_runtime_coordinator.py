@@ -35,6 +35,9 @@ def _patch_stop_dependencies(monkeypatch, calls: list[str], *, running=True, own
     )
     monkeypatch.setattr(runtime_module.recorder_manager, "is_running", lambda camera_id: running)
 
+    async def stop_media(camera_id: int) -> None:
+        calls.append(f"media-stop:{camera_id}")
+
     async def stop_motion(camera_id: int) -> None:
         calls.append(f"motion-stop:{camera_id}")
 
@@ -54,6 +57,12 @@ def _patch_stop_dependencies(monkeypatch, calls: list[str], *, running=True, own
     def forget(camera_id: int) -> None:
         calls.append(f"schedule-forget:{camera_id}")
 
+    monkeypatch.setattr(
+        runtime_module,
+        "camera_media_session_registry",
+        SimpleNamespace(stop_camera=stop_media),
+        raising=False,
+    )
     monkeypatch.setattr(runtime_module.motion_detection_manager, "stop_camera", stop_motion)
     monkeypatch.setattr(runtime_module.event_recording_manager, "end_event", end_event)
     monkeypatch.setattr(runtime_module.event_recording_manager, "stop_camera", stop_event)
@@ -73,6 +82,7 @@ async def test_stop_all_snapshots_owner_and_stops_device_runtime(monkeypatch) ->
     assert snapshot.was_recording is True
     assert snapshot.recording_owner == "manual"
     assert calls == [
+        "media-stop:7",
         "motion-stop:7",
         "event-end:7",
         "event-stop:7",
