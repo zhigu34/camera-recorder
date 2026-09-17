@@ -200,6 +200,9 @@ async def _snapshot(camera_id: int) -> dict:
             "video_codec": camera.video_codec,
             "width": camera.width,
             "status": camera.status,
+            "connectivity_failures": camera.connectivity_failures,
+            "last_probe_at": camera.last_probe_at,
+            "last_online_at": camera.last_online_at,
         }
 
 
@@ -287,3 +290,40 @@ def test_saved_current_connection_probe_failure_preserves_target_and_revision(
     assert after["verification_status"] == "failed"
     assert after["last_error"] == "saved connection probe failed"
     assert after["status"] == "offline"
+
+
+def test_disabled_hik_saved_probe_returns_503_without_mutating_camera(monkeypatch) -> None:
+    from app.services import camera_adapter_probe as adapter_probe
+    from app.services import camera_adapter_registry as registry
+    from app.services.hik_bridge_client import HikBridgeClientError
+
+    monkeypatch.setattr(registry.settings, "hik_enabled", False)
+    bridge_constructions = 0
+    bridge_probe_calls = 0
+
+    class UnexpectedBridge:
+        def __init__(self, *args, **kwargs) -> None:
+            nonlocal bridge_constructions
+            bridge_constructions += 1
+
+        async def probe(self, **kwargs):
+            nonlocal bridge_probe_calls
+            bridge_probe_calls += 1
+            raise HikBridgeClientError("bridge call observed")
+
+    monkeypatch.setattr(adapter_probe, "HikBridgeClient", UnexpectedBridge)
+
+    with TestClient(app) as client:
+        created = client.post("/api/cameras", json=_create_payload("hik_sdk"))
+        assert created.status_code == 201, created.text
+        camera_id = int(created.json()["id"])
+        before = asyncio.run(_snapshot(camera_id))
+
+        response = client.post(f"/api/cameras/{camera_id}/probe")
+        after = asyncio.run(_snapshot(camera_id))
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == registry.HIK_DISABLED_REASON
+    assert bridge_constructions == 0
+    assert bridge_probe_calls == 0
+    assert after == before
