@@ -92,7 +92,7 @@ def test_hik_upsert_reuses_connection_and_increments_revision_for_config_change(
 def test_hik_upsert_same_plaintext_password_preserves_ciphertext_and_revision() -> None:
     camera = _camera()
     first_ciphertext = encrypt_secret("stable-secret")
-    connection = _upsert(camera, password_encrypted=first_ciphertext)
+    _upsert(camera, password_encrypted=first_ciphertext)
 
     updated = _upsert(camera, password_encrypted=encrypt_secret("stable-secret"))
 
