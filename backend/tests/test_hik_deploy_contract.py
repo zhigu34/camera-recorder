@@ -3,13 +3,19 @@ from pathlib import Path
 import yaml
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 def _compose_config() -> dict:
-    compose_path = Path(__file__).resolve().parents[2] / "docker-compose.yml"
-    return yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+    return yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
 
 
 def _deploy_script() -> str:
-    return (Path(__file__).resolve().parents[2] / "deploy.sh").read_text(encoding="utf-8")
+    return (ROOT / "deploy.sh").read_text(encoding="utf-8")
+
+
+def _env_example() -> str:
+    return (ROOT / ".env.example").read_text(encoding="utf-8")
 
 
 def test_deploy_tracks_hik_bridge_and_private_runtime_changes() -> None:
@@ -31,16 +37,28 @@ def test_deploy_classifies_hik_runtime_paths_without_full_deploy() -> None:
     assert "hik-sdk-runtime/*) UPDATE_HIK=1 ;;" in script
 
 
-def test_hik_bridge_does_not_pollute_python_library_path() -> None:
+def test_hik_bridge_is_profile_scoped_and_runtime_mount_is_preserved() -> None:
     compose = _compose_config()
-    environment = compose["services"]["hik-bridge"].get("environment", {})
+    service = compose["services"]["hik-bridge"]
+    environment = service.get("environment", {})
 
+    assert service["profiles"] == ["hik"]
     assert environment["HIK_SDK_PATH"] == "/opt/hikvision/runtime"
     assert "LD_LIBRARY_PATH" not in environment
+    assert "${HIK_SDK_DIR:-./hik-sdk-runtime}:/opt/hikvision/runtime:ro" in service["volumes"]
 
 
-def test_backend_does_not_require_hik_bridge_health() -> None:
+def test_backend_is_independent_from_hik_bridge_and_defaults_hik_off() -> None:
     compose = _compose_config()
-    dependency = compose["services"]["backend"]["depends_on"]["hik-bridge"]
+    backend = compose["services"]["backend"]
+    dependencies = backend.get("depends_on", {})
 
-    assert dependency["condition"] == "service_started"
+    assert "hik-bridge" not in dependencies
+    assert backend["environment"]["CAMREC_HIK_ENABLED"] == "${CAMREC_HIK_ENABLED:-0}"
+    assert backend["environment"]["CAMREC_HIK_BRIDGE_URL"] == "http://hik-bridge:8100"
+
+
+def test_env_example_defaults_hik_support_off() -> None:
+    env_example = _env_example()
+
+    assert "CAMREC_HIK_ENABLED=0\nHIK_SDK_DIR=./hik-sdk-runtime" in env_example
