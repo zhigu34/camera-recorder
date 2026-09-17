@@ -95,12 +95,12 @@ async def _probe_legacy_connection(
     )
 
 
-def _model_name(discovered: HikProbeResult, fallback: str | None = None) -> str | None:
+def _model_name(discovered: HikProbeResult) -> str | None:
     if discovered.device_model:
         return discovered.device_model
     if discovered.device_type is not None:
         return f"HIK device type {discovered.device_type}"
-    return fallback
+    return None
 
 
 @router.post("/probe", response_model=HikProbeResult)
@@ -147,7 +147,6 @@ async def update_hik_camera(
     discovered, probe_result = await _probe_legacy_connection(payload, db)
     values = {
         "manufacturer": "Hikvision",
-        "model": _model_name(discovered),
         "connection": HikConnectionUpdate(
             host=payload.host,
             sdk_port=payload.port,
@@ -158,6 +157,9 @@ async def update_hik_camera(
             sub_stream_type=1,
         ),
     }
+    model = _model_name(discovered)
+    if model is not None:
+        values["model"] = model
     for field in ("name", "form_factor", "enabled", "auto_record", "timestamp_mode"):
         value = getattr(payload, field)
         if value is not None:
