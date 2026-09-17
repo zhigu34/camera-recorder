@@ -318,6 +318,7 @@ def upsert_hik_connection(
     last_error: str | None = None,
 ) -> CameraConnection:
     connection = camera.connection
+    target_changed = connection is None
     effective_password_encrypted = password_encrypted
     requested_status = _verification_status(verification_status, verified_at)
 
@@ -414,13 +415,10 @@ def upsert_hik_connection(
         metadata = HikDeviceMetadata()
         camera.hik_metadata = metadata
     if requested_status == "verified":
-        if device_serial is not None or connection.revision == 1:
-            metadata.device_serial = device_serial
-        if device_model is not None or connection.revision == 1:
-            metadata.device_model = device_model
-        if device_name is not None or connection.revision == 1:
-            metadata.device_name = device_name
-    elif connection.hik_config is not None and target_changed:
+        metadata.device_serial = device_serial
+        metadata.device_model = device_model
+        metadata.device_name = device_name
+    elif target_changed:
         metadata.device_serial = None
         metadata.device_model = None
         metadata.device_name = None
