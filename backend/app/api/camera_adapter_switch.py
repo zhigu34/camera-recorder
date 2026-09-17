@@ -77,9 +77,6 @@ async def update_or_switch_to_manual_rtsp(
     except CameraProbeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    coordinator = cameras_api.camera_runtime_coordinator
-    snapshot = await coordinator.stop_all(camera.id)
-
     values = payload.model_dump(exclude_unset=True)
     password = values.pop("password")
     values.pop("connection_type", None)
@@ -112,6 +109,9 @@ async def update_or_switch_to_manual_rtsp(
         )
     if camera.recording_schedule_enabled and not camera.recording_schedule:
         raise HTTPException(status_code=422, detail="启用录制时段后至少需要配置一个时间段")
+
+    coordinator = cameras_api.camera_runtime_coordinator
+    snapshot = await coordinator.stop_all(camera.id)
 
     now = datetime.now(timezone.utc)
     _apply_media_fields(camera, media)
