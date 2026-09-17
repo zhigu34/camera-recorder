@@ -4,7 +4,14 @@ from datetime import datetime
 from urllib.parse import urlsplit, urlunsplit
 
 from app.core.security import decrypt_secret
-from app.models import Camera, CameraConnection, OnvifConnectionConfig, RtspConnectionConfig
+from app.models import (
+    Camera,
+    CameraConnection,
+    HikConnectionConfig,
+    HikDeviceMetadata,
+    OnvifConnectionConfig,
+    RtspConnectionConfig,
+)
 
 
 class ConnectionAdapterMismatch(ValueError):
@@ -120,8 +127,6 @@ def upsert_manual_rtsp_connection(
             if last_error is not None:
                 connection.last_error = last_error
 
-    # Rollback-window compatibility: the current connection is canonical, while
-    # legacy Camera columns mirror it until the old read paths are retired.
     camera.connection_type = "manual_rtsp"
     camera.ip = host
     camera.rtsp_port = port
@@ -245,4 +250,106 @@ def upsert_onvif_connection(
     camera.password_encrypted = effective_password_encrypted
     camera.rtsp_path = legacy_main_path
     camera.sub_rtsp_path = legacy_sub_path
+    return connection
+
+
+def upsert_hik_connection(
+    camera: Camera,
+    *,
+    host: str,
+    username: str,
+    password_encrypted: str,
+    sdk_port: int,
+    channel: int,
+    main_stream_type: int,
+    sub_stream_type: int,
+    device_serial: str | None,
+    device_model: str | None,
+    device_name: str | None,
+    verified_at: datetime,
+) -> CameraConnection:
+    connection = camera.connection
+    effective_password_encrypted = password_encrypted
+
+    if connection is None:
+        connection = CameraConnection(
+            adapter="hik_sdk",
+            host=host,
+            username=username,
+            password_encrypted=password_encrypted,
+            revision=1,
+            verification_status="verified",
+            verified_at=verified_at,
+            last_error=None,
+        )
+        connection.hik_config = HikConnectionConfig(
+            sdk_port=sdk_port,
+            channel=channel,
+            main_stream_type=main_stream_type,
+            sub_stream_type=sub_stream_type,
+            device_serial=device_serial,
+            device_model=device_model,
+            device_name=device_name,
+        )
+        camera.connection = connection
+    else:
+        if connection.adapter != "hik_sdk":
+            raise ConnectionAdapterMismatch(
+                f"current connection adapter is {connection.adapter}, expected hik_sdk"
+            )
+        if _same_encrypted_secret(connection.password_encrypted, password_encrypted):
+            effective_password_encrypted = connection.password_encrypted
+
+        config = connection.hik_config
+        config_changed = config is None or (
+            connection.host != host
+            or connection.username != username
+            or connection.password_encrypted != effective_password_encrypted
+            or config.sdk_port != sdk_port
+            or config.channel != channel
+            or config.main_stream_type != main_stream_type
+            or config.sub_stream_type != sub_stream_type
+            or config.device_serial != device_serial
+            or config.device_model != device_model
+            or config.device_name != device_name
+        )
+        if config is None:
+            config = HikConnectionConfig()
+            connection.hik_config = config
+        if config_changed:
+            connection.revision += 1
+
+        connection.host = host
+        connection.username = username
+        connection.password_encrypted = effective_password_encrypted
+        connection.verification_status = "verified"
+        connection.verified_at = verified_at
+        connection.last_error = None
+        config.sdk_port = sdk_port
+        config.channel = channel
+        config.main_stream_type = main_stream_type
+        config.sub_stream_type = sub_stream_type
+        config.device_serial = device_serial
+        config.device_model = device_model
+        config.device_name = device_name
+
+    camera.connection_type = "hik_sdk"
+    camera.ip = host
+    camera.rtsp_port = 554
+    camera.username = username
+    camera.password_encrypted = effective_password_encrypted
+    camera.rtsp_path = "/hik-sdk/main"
+    camera.sub_rtsp_path = "/hik-sdk/sub"
+
+    metadata = camera.hik_metadata
+    if metadata is None:
+        metadata = HikDeviceMetadata()
+        camera.hik_metadata = metadata
+    metadata.sdk_port = sdk_port
+    metadata.channel = channel
+    metadata.main_stream_type = main_stream_type
+    metadata.sub_stream_type = sub_stream_type
+    metadata.device_serial = device_serial
+    metadata.device_model = device_model
+    metadata.device_name = device_name
     return connection
