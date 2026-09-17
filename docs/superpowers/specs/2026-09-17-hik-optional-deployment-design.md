@@ -1,6 +1,6 @@
 # HIK Optional Deployment Design
 
-Status: **Approved for implementation**
+Status: **Approved in chat — written spec pending review**
 
 Date: 2026-09-17
 
@@ -78,7 +78,7 @@ Deployment state should represent disabled HIK deterministically, for example wi
 
 When `CAMREC_HIK_ENABLED=1`:
 
-- automatically use the `hik` Compose profile;
+- automatically use the `hik` Compose profile for HIK-specific operations;
 - validate the configured SDK runtime directory before bridge deployment;
 - require `libhcnetsdk.so` and `HCNetSDKCom/`;
 - calculate the HIK runtime hash;
@@ -86,7 +86,14 @@ When `CAMREC_HIK_ENABLED=1`:
 - wait for bridge health after deployment;
 - prefer restarting only `hik-bridge` when only the SDK runtime changed.
 
-A HIK-specific deployment failure must produce an actionable error, but HIK must not become a Compose startup prerequisite for backend/frontend/openlist.
+Core service deployment and optional HIK deployment are separate execution stages. Core services MUST be brought to their requested healthy state without requiring the HIK profile. Only after the core stage succeeds may the script validate/start/update the optional bridge.
+
+If HIK is enabled but runtime validation or bridge health fails, the script MUST:
+
+1. leave successfully deployed core services running;
+2. report an actionable HIK-specific error;
+3. return a non-zero final exit status so automation knows the requested HIK capability is not healthy;
+4. never roll back or stop healthy core services because the optional HIK stage failed.
 
 ### 4. Disabling an already running bridge
 
@@ -121,12 +128,15 @@ Existing incremental deployment behavior is preserved, with HIK-aware gating.
 Expected classification:
 
 - `frontend/*`: frontend only; never touches HIK.
-- ordinary backend changes: rebuild/update backend; HIK update only if the shared image truly requires refresh and HIK is enabled.
-- `hik_bridge/*`: if HIK enabled, rebuild the required image and update bridge; if disabled, do not deploy bridge.
+- application-only backend Python changes that are not imported or executed by `hik-bridge`: rebuild/update backend only; do not restart a healthy HIK bridge solely because the shared image tag changed.
+- backend image/runtime dependency changes that alter the environment used by `hik-bridge` (for example `backend/Dockerfile`, backend dependency/venv inputs used by the bridge command, or equivalent shared-image build inputs): rebuild the shared image and, when HIK is enabled, recreate both affected backend and HIK bridge containers from that image.
+- `hik_bridge/*`: if HIK enabled, rebuild the required shared image and update bridge; if disabled, do not deploy bridge.
 - `hik-sdk-runtime/*`: if HIK enabled, update bridge only; if disabled, ignore for deployment execution.
 - documentation-only changes: no service restart.
-- `.env` transition `0 -> 1`: validate runtime and start HIK profile.
+- `.env` transition `0 -> 1`: deploy core as needed, then validate runtime and start HIK profile.
 - `.env` transition `1 -> 0`: remove existing bridge and leave core running.
+
+The implementation plan MUST map the repository's actual image-build inputs to these categories explicitly; it must not rely on a vague runtime guess.
 
 HIK-disabled planning MUST not hash or validate the proprietary runtime merely to determine a deployment plan.
 
@@ -287,8 +297,8 @@ Core deployment success and HIK capability success are separate concerns.
 Expected behavior:
 
 - HIK disabled: missing SDK is normal and produces no deployment failure.
-- HIK enabled + invalid runtime: HIK deployment fails with a clear runtime validation message.
-- HIK enabled + bridge unhealthy: capability reports unavailable and HIK-specific operations fail; core backend remains independently startable.
+- HIK enabled + invalid runtime: core deployment proceeds independently; the HIK stage reports failure and the overall deploy command exits non-zero after leaving core healthy.
+- HIK enabled + bridge unhealthy: capability reports unavailable and HIK-specific operations fail; core backend remains healthy and independent; deploy exits non-zero if bridge health was part of the requested deployment.
 - bridge disabled after previously running: bridge is explicitly removed, not left running.
 - existing HIK Camera: configuration persists regardless of deployment state.
 
@@ -320,17 +330,22 @@ Frontend and OpenList dependency structure stays unchanged.
                     /                 \
                   0                     1
                   |                     |
-          core compose only       enable profile hik
+          deploy core only        deploy core first
                   |                     |
-       no SDK check/hash          validate SDK runtime
+       no SDK check/hash          core healthy independently
                   |                     |
-       no bridge health            hash runtime
+       remove stale bridge        validate SDK runtime
                   |                     |
-       HIK unavailable             start/update bridge
-                  |                     |
-       remove stale bridge         wait for health
+       HIK unavailable             hash runtime
                                         |
-                              registry checks runtime_available
+                                  start/update bridge
+                                        |
+                                  wait for health
+                                   /          \
+                              healthy          failed
+                                |                |
+                       HIK available     core stays healthy
+                                         deploy exits non-zero
 ```
 
 No implicit transition is driven by filesystem presence.
@@ -359,11 +374,14 @@ Add shell/static tests that verify:
 - default flag is disabled;
 - disabled planning does not require SDK runtime;
 - disabled planning does not calculate the SDK runtime hash;
-- enabled planning requires SDK runtime validation;
-- enabled Compose operations include `--profile hik`;
+- enabled planning requires SDK runtime validation only after the core stage is independently deployable;
+- enabled HIK-specific Compose operations include `--profile hik`;
 - `1 -> 0` removes an existing HIK bridge;
 - SDK runtime-only changes update only HIK when enabled;
 - SDK runtime-only changes are ignored for deployment execution when disabled;
+- application-only backend changes do not unnecessarily restart HIK;
+- shared image/runtime input changes recreate HIK when enabled;
+- HIK-stage failure leaves core services running and returns non-zero;
 - ordinary core changes remain deployable with no HIK runtime present.
 
 ### Compose / CI smoke
@@ -375,7 +393,7 @@ Public CI has two layers.
 With no HIK enable flag set:
 
 - default is equivalent to `CAMREC_HIK_ENABLED=0`;
-- default active Compose services exclude `hik-bridge`;
+- default active Compose deployment excludes `hik-bridge`;
 - backend/frontend/openlist start without a proprietary SDK runtime;
 - backend health succeeds;
 - adapter registry reports HIK unavailable.
@@ -442,11 +460,12 @@ Phase 4 is complete when all of the following are true:
 
 1. A fresh default deployment with no HIK SDK runtime starts backend/frontend/openlist successfully.
 2. Default Compose operation does not start `hik-bridge`.
-3. `CAMREC_HIK_ENABLED=1` automatically activates the `hik` profile through `deploy.sh`.
-4. HIK enabled deployment validates the configured runtime and bridge health.
+3. `CAMREC_HIK_ENABLED=1` automatically activates the `hik` profile through `deploy.sh` for HIK-specific operations.
+4. HIK enabled deployment validates the configured runtime and bridge health after core deployment is independently healthy.
 5. Switching from enabled to disabled removes the running bridge without stopping core services.
-6. Backend adapter capability reports disabled/unhealthy HIK accurately without affecting RTSP/ONVIF.
-7. Existing HIK Camera configuration remains intact while HIK is unavailable.
-8. Runtime/background workers do not access the bridge when HIK is unavailable.
-9. Public CI proves core-only deployment without proprietary SDK binaries.
-10. Existing backend, HIK fake-runtime, migration, Docker, and frontend regression suites remain green.
+6. HIK-stage failure leaves core services healthy but causes the requested deployment command to return non-zero with an actionable error.
+7. Backend adapter capability reports disabled/unhealthy HIK accurately without affecting RTSP/ONVIF.
+8. Existing HIK Camera configuration remains intact while HIK is unavailable.
+9. Runtime/background workers do not access the bridge when HIK is unavailable.
+10. Public CI proves core-only deployment without proprietary SDK binaries.
+11. Existing backend, HIK fake-runtime, migration, Docker, and frontend regression suites remain green.
