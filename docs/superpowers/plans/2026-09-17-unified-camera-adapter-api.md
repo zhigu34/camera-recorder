@@ -33,18 +33,19 @@
 - Create: `backend/migrations/versions/20260917_0025_onvif_unverified_connection.py`
 - Modify: `backend/app/models/onvif_connection.py`
 - Modify: `backend/app/services/camera_connection.py`
-- Test: `backend/tests/test_camera_connection_write.py`
-- Test: `backend/tests/test_camera_connection_migration.py`
 - Create: `backend/tests/test_unverified_adapter_connection.py`
+- Modify: `backend/tests/test_camera_connection_write.py`
+- Modify: `backend/tests/test_onvif_connection_migration.py`
+- Modify: `backend/tests/test_hik_connection_write.py`
 
 **Interfaces:**
-- Produces: `upsert_onvif_connection(..., verification_status: str = "unverified", verified_at: datetime | None = None, last_error: str | None = None, device_uuid: str | None = None, capabilities: dict | None = None, profiles: list[dict] | None = None, recording_profile_token: str | None = None, preview_profile_token: str | None = None, detection_profile_token: str | None = None, recording_uri: str | None = None, preview_uri: str | None = None, detection_uri: str | None = None) -> CameraConnection`
-- Produces: `upsert_hik_connection(..., verification_status: str = "unverified", verified_at: datetime | None = None, last_error: str | None = None, device_serial: str | None = None, device_model: str | None = None, device_name: str | None = None) -> CameraConnection`
-- Preserves existing `switch_to_*_connection` identity/revision behavior.
+- Produce `upsert_onvif_connection(camera, *, host: str, username: str, password_encrypted: str, device_service_url: str, device_uuid: str | None = None, capabilities: dict | None = None, profiles: list[dict] | None = None, recording_profile_token: str | None = None, preview_profile_token: str | None = None, detection_profile_token: str | None = None, recording_uri: str | None = None, preview_uri: str | None = None, detection_uri: str | None = None, verification_status: str = "unverified", verified_at: datetime | None = None, last_error: str | None = None) -> CameraConnection`.
+- Produce `upsert_hik_connection(camera, *, host: str, username: str, password_encrypted: str, sdk_port: int, channel: int, main_stream_type: int, sub_stream_type: int, device_serial: str | None = None, device_model: str | None = None, device_name: str | None = None, verification_status: str = "unverified", verified_at: datetime | None = None, last_error: str | None = None) -> CameraConnection`.
+- Preserve strict adapter mismatch checks and existing switch identity semantics.
 
 - [ ] **Step 1: Write RED tests for unverified ONVIF/HIK persistence**
 
-Add tests proving an ONVIF connection can be created with only host/username/password/device service URL and null discovery cache, and a HIK connection can be created with host/username/password/sdk_port/channel without discovered serial/model/name. Assert `verification_status == "unverified"`, `verified_at is None`, adapter config rows exist, and legacy rollback shadows are still written.
+Add `test_unverified_adapter_connection.py` with direct service tests that call the new keyword arguments against today's implementation. The RED must occur in test bodies, not during collection.
 
 ```python
 def test_onvif_connection_can_be_saved_unverified_without_discovery_cache():
@@ -81,49 +82,52 @@ def test_hik_connection_can_be_saved_unverified_without_discovered_metadata():
     )
     assert connection.adapter == "hik_sdk"
     assert connection.verification_status == "unverified"
+    assert connection.verified_at is None
     assert connection.hik_config is not None
     assert connection.hik_config.device_serial is None
 ```
 
+Also add a no-op regression for each adapter: re-submit identical canonical fields with default unverified arguments to an already verified connection and assert revision, verification status, and verified discovery cache stay unchanged.
+
 - [ ] **Step 2: Run focused RED tests**
 
-Run:
-
 ```bash
-cd backend && pytest -q tests/test_unverified_adapter_connection.py tests/test_camera_connection_write.py
+cd backend && pytest -q tests/test_unverified_adapter_connection.py tests/test_camera_connection_write.py tests/test_hik_connection_write.py
 ```
 
-Expected: FAIL because ONVIF required cache fields and the current service signatures require a successful discovery timestamp/cache.
+Expected: FAIL in test bodies because the ONVIF/HIK service signatures require successful-discovery arguments and always write `verified`.
 
-- [ ] **Step 3: Add the expand-only nullable ONVIF cache migration**
+- [ ] **Step 3: Write RED migration test for nullable ONVIF discovery cache**
 
-Create revision `20260917_0025`, down_revision `20260917_0024`, using SQLite-safe `batch_alter_table` to make only these columns nullable:
+Extend `test_onvif_connection_migration.py` to upgrade a database from revision `20260917_0024` to head and assert `PRAGMA table_info(onvif_connection_configs)` reports `notnull=0` for `recording_profile_token` and `recording_uri`, while an existing populated ONVIF row retains its values.
+
+- [ ] **Step 4: Add expand-only migration and ORM nullability**
+
+Create revision `20260917_0025`, down_revision `20260917_0024`. Use SQLite-safe `batch_alter_table` to alter exactly:
 
 ```text
-onvif_connection_configs.recording_profile_token
-onvif_connection_configs.recording_uri
+onvif_connection_configs.recording_profile_token -> nullable=True
+onvif_connection_configs.recording_uri -> nullable=True
 ```
 
-Do not rewrite or backfill existing rows. Update ORM annotations for those two fields to `str | None` and `nullable=True`.
+Do not backfill, clear, or rewrite existing ONVIF rows. Update the ORM annotations for those two fields to `Mapped[str | None]` with `nullable=True`.
 
-- [ ] **Step 4: Generalize strict ONVIF/HIK upserts without weakening adapter mismatch checks**
+- [ ] **Step 5: Generalize strict ONVIF/HIK upserts**
 
-Keep strict same-adapter mismatch behavior. Normalize `capabilities=None` to `{}` and `profiles=None` to `[]`. When connection-defining fields change, increment revision once and replace verification state with the supplied state; an unverified ONVIF write must clear stale discovery-derived UUID/profile/token/URI cache. A no-op payload must preserve revision and existing verified/cache state.
+Normalize `capabilities=None` to `{}` and `profiles=None` to `[]`. When connection-defining fields truly change, increment revision once and apply the requested verification state. An unverified ONVIF connection change clears discovery-derived UUID/profile/token/URI cache. A no-op write preserves the existing verified state/cache and does not increment revision. Keep rollback shadow writes intact.
 
-- [ ] **Step 5: Verify migration + write GREEN**
-
-Run:
+- [ ] **Step 6: Run Task 1 GREEN**
 
 ```bash
-cd backend && pytest -q tests/test_unverified_adapter_connection.py tests/test_camera_connection_write.py tests/test_camera_connection_migration.py
+cd backend && pytest -q tests/test_unverified_adapter_connection.py tests/test_camera_connection_write.py tests/test_hik_connection_write.py tests/test_onvif_connection_migration.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit Task 1**
+- [ ] **Step 7: Commit Task 1**
 
 ```bash
-git add backend/migrations/versions/20260917_0025_onvif_unverified_connection.py backend/app/models/onvif_connection.py backend/app/services/camera_connection.py backend/tests/test_unverified_adapter_connection.py backend/tests/test_camera_connection_write.py backend/tests/test_camera_connection_migration.py
+git add backend/migrations/versions/20260917_0025_onvif_unverified_connection.py backend/app/models/onvif_connection.py backend/app/services/camera_connection.py backend/tests/test_unverified_adapter_connection.py backend/tests/test_camera_connection_write.py backend/tests/test_hik_connection_write.py backend/tests/test_onvif_connection_migration.py
 git commit -m "feat: allow unverified adapter connections"
 ```
 
@@ -138,27 +142,20 @@ git commit -m "feat: allow unverified adapter connections"
 - Modify: `backend/tests/test_camera_connection_type.py`
 
 **Interfaces:**
-- Produces create drafts:
-  - `ManualRtspConnectionCreate`
-  - `OnvifConnectionCreate`
-  - `HikConnectionCreate`
-  - `CameraConnectionCreate = Annotated[union, Field(discriminator="adapter")]`
-- Produces edit drafts with optional password:
-  - `ManualRtspConnectionUpdate`
-  - `OnvifConnectionUpdate`
-  - `HikConnectionUpdate`
-  - `CameraConnectionUpdate = Annotated[union, Field(discriminator="adapter")]`
-- Produces `CameraConnectionRead` with `id`, `adapter`, `host`, `username`, `password_set`, `revision`, `verification_status`, `verified_at`, `last_error`, and adapter-specific `config`.
-- Extends `CameraRead` with canonical `connection: CameraConnectionRead | None` while preserving current legacy response fields during the compatibility window.
+- Produce `ManualRtspConnectionCreate`, `OnvifConnectionCreate`, `HikConnectionCreate` and `CameraConnectionCreate = Annotated[ManualRtspConnectionCreate | OnvifConnectionCreate | HikConnectionCreate, Field(discriminator="adapter")]`.
+- Produce `ManualRtspConnectionUpdate`, `OnvifConnectionUpdate`, `HikConnectionUpdate` and `CameraConnectionUpdate = Annotated[ManualRtspConnectionUpdate | OnvifConnectionUpdate | HikConnectionUpdate, Field(discriminator="adapter")]`.
+- Produce adapter-specific read config models and `CameraConnectionRead` with `id`, `adapter`, `host`, `username`, `password_set`, `revision`, `verification_status`, `verified_at`, `last_error`, and `config`.
+- Extend `CameraRead` with `connection: CameraConnectionRead | None` while preserving current legacy response fields during the compatibility window.
 
 - [ ] **Step 1: Write RED schema tests**
 
-Cover discriminator validation for all three adapters, required create passwords, optional update passwords, adapter-specific field rejection, and ORM-to-read projection that never returns plaintext/encrypted passwords.
-
-Example assertions:
+Cover all three discriminators, required create passwords, optional update passwords, adapter-specific field rejection, and ORM-to-read projection that never returns plaintext/encrypted passwords.
 
 ```python
-payload = CameraConnectionCreateAdapter.validate_python({
+from pydantic import TypeAdapter
+
+adapter = TypeAdapter(CameraConnectionCreate)
+payload = adapter.validate_python({
     "adapter": "manual_rtsp",
     "host": "192.0.2.10",
     "username": "admin",
@@ -183,11 +180,11 @@ assert "password_encrypted" not in read.connection.model_dump()
 cd backend && pytest -q tests/test_camera_connection_schema.py tests/test_camera_connection_type.py
 ```
 
-Expected: FAIL because canonical nested connection schemas/read projection do not exist.
+Expected: FAIL because nested connection schemas/read projection do not exist.
 
 - [ ] **Step 3: Implement focused schema module**
 
-Use adapter literals and validation rules already present in legacy schemas:
+Use exact adapter fields:
 
 ```text
 manual_rtsp: host, username, password, port=554, main_path, sub_path
@@ -195,13 +192,13 @@ onvif: host, username, password, port=80
 hik_sdk: host, username, password, sdk_port=8000, channel=1, main_stream_type=0, sub_stream_type=1
 ```
 
-Normalize host as hostname/IP only; reject schemes/paths. Keep `password` write-only by omitting it from all read models.
+Create variants require `password`; update variants allow `password=None`. Normalize host as hostname/IP only and reject schemes/paths. Read models never expose `password` or `password_encrypted`.
 
 - [ ] **Step 4: Add canonical connection projection to `CameraRead`**
 
-Use a Pydantic `model_validator(mode="before")` or equivalent focused helper to project SQLAlchemy `CameraConnection` plus its adapter config into `CameraConnectionRead`; retain legacy flat fields unchanged so the current frontend continues working until Phase 5.
+Add a focused projection helper that reads `CameraConnection` and its active adapter config. Keep legacy flat fields unchanged so the current frontend remains functional until Phase 5.
 
-- [ ] **Step 5: Run schema GREEN**
+- [ ] **Step 5: Run Task 2 GREEN**
 
 ```bash
 cd backend && pytest -q tests/test_camera_connection_schema.py tests/test_camera_connection_type.py
@@ -231,48 +228,50 @@ git commit -m "feat: expose canonical camera connection contract"
 - Create: `backend/tests/test_camera_adapter_registry.py`
 - Create: `backend/tests/test_camera_connection_probe_api.py`
 - Modify: `backend/tests/test_hik_bridge_client.py`
+- Modify: `backend/tests/test_onvif_camera_api.py`
+- Modify: `backend/tests/test_hik_camera_api.py`
 
 **Interfaces:**
-- Produces `CameraAdapterCapability(id: str, label: str, available: bool, unavailable_reason: str | None)`.
-- Produces `async def list_camera_adapter_capabilities() -> list[CameraAdapterCapability]`.
-- Produces `async def probe_connection_draft(draft: CameraConnectionCreate | CameraConnectionUpdate, *, stored_password: str | None, rtsp_timeout_us: int) -> CameraConnectionProbeResult`.
-- Produces public routes:
-  - `GET /api/camera-adapters`
-  - `POST /api/camera-connections/probe`
-- Adds `HikBridgeClient.health() -> dict[str, object]` implemented as `GET /health`.
+- Produce `CameraAdapterCapability(id: str, label: str, available: bool, unavailable_reason: str | None)`.
+- Produce `async def list_camera_adapter_capabilities() -> list[CameraAdapterCapability]`.
+- Produce `CameraConnectionProbeResult(adapter: CameraConnectionType, ok: bool, device: dict[str, object], media: dict[str, object], connection_cache: dict[str, object])`.
+- Produce `async def probe_connection_draft(draft: CameraConnectionCreate | CameraConnectionUpdate, *, password: str, rtsp_timeout_us: int) -> CameraConnectionProbeResult`.
+- Add `HikBridgeClient.health() -> dict[str, object]` implemented as `GET /health`.
+- Add public `GET /api/camera-adapters` and `POST /api/camera-connections/probe`.
 
 - [ ] **Step 1: Write RED registry tests**
 
-Assert manual RTSP and ONVIF are reported available. Mock HIK bridge health success/failure and assert HIK remains visible in both cases, with `available=false` plus a reason on failure.
+Assert manual RTSP and ONVIF report `available=true`. Mock HIK bridge `/health` success and transport/error responses; HIK must remain present and switch to `available=false` with a non-empty reason when unhealthy.
 
-- [ ] **Step 2: Write RED unified probe tests**
+- [ ] **Step 2: Write RED unified draft-probe tests**
 
-Cover:
+Cover these exact cases:
 
 ```text
-manual draft -> media summary, no DB persistence
-onvif draft -> device/discovery + media summary, no DB persistence
-hik draft -> bridge discovery + media summary, no DB persistence
-existing camera + omitted update password -> decrypt/reuse current stored password
-new draft + omitted password -> 422
-probe failure -> 502/adapter-specific error without mutating CameraConnection verification state
+manual create draft with password -> standardized media result, no DB mutation
+onvif create draft with password -> standardized device/media/cache result, no DB mutation
+hik create draft with password -> standardized device/media/cache result, no DB mutation
+same-adapter existing camera + update draft without password -> route decrypts/reuses current stored password
+cross-adapter existing camera + target draft without password -> 422
+create draft without password -> 422 at schema validation
+probe failure -> 502/adapter-specific error, no CameraConnection verification/revision mutation
 ```
 
-Snapshot the relevant Camera/CameraConnection before and after draft probe and assert equality.
+Snapshot CameraConnection fields before/after draft probe and assert exact equality.
 
-- [ ] **Step 3: Run RED tests**
+- [ ] **Step 3: Run RED**
 
 ```bash
 cd backend && pytest -q tests/test_camera_adapter_registry.py tests/test_camera_connection_probe_api.py tests/test_hik_bridge_client.py
 ```
 
-Expected: FAIL because registry, endpoint, and HIK health client method are absent.
+Expected: FAIL because the registry, unified endpoint, and HIK health method are absent.
 
-- [ ] **Step 4: Extract adapter probe/discovery logic into services**
+- [ ] **Step 4: Extract adapter probe/discovery logic into `camera_adapter_probe.py`**
 
-Move ONVIF discovery/media validation and HIK bridge discovery/media validation out of route-private helpers into `camera_adapter_probe.py`. Dedicated `/api/cameras/onvif/probe` and `/api/cameras/hik/probe` become wrappers calling the same service primitives so there is one probe implementation.
+Move ONVIF discovery/media validation and HIK bridge discovery/media validation out of route-private helpers. The legacy `/api/cameras/onvif/probe` and `/api/cameras/hik/probe` route handlers call these service functions rather than owning separate probe implementations.
 
-`CameraConnectionProbeResult` must use one stable envelope:
+Return one envelope:
 
 ```json
 {
@@ -284,16 +283,16 @@ Move ONVIF discovery/media validation and HIK bridge discovery/media validation 
 }
 ```
 
-Manual RTSP may return an empty `device`; ONVIF `connection_cache` contains credential-free discovery cache; HIK contains discovered serial/model/name/channel metadata. Never return credentials.
+Manual RTSP uses an empty `device`; ONVIF `connection_cache` contains credential-free discovery values; HIK `device`/cache contains bridge-discovered non-secret metadata. No response field may contain username/password credentials embedded into stream URIs.
 
-- [ ] **Step 5: Implement capability route and draft probe route**
+- [ ] **Step 5: Implement capability and draft-probe routes**
 
-For an update draft with `camera_id`, only reuse the stored password when the current connection exists and its adapter matches the draft adapter; otherwise require an explicit target password for a cross-adapter probe.
+The request contains `camera_id: int | None` plus a discriminated `connection` draft. If an update draft omits password, reuse the stored password only when the referenced Camera exists and the current adapter matches the draft adapter. Cross-adapter draft probe requires explicit target password.
 
 - [ ] **Step 6: Run Task 3 GREEN**
 
 ```bash
-cd backend && pytest -q tests/test_camera_adapter_registry.py tests/test_camera_connection_probe_api.py tests/test_hik_bridge_client.py tests/test_onvif_cameras.py tests/test_hik_cameras.py
+cd backend && pytest -q tests/test_camera_adapter_registry.py tests/test_camera_connection_probe_api.py tests/test_hik_bridge_client.py tests/test_onvif_camera_api.py tests/test_hik_camera_api.py
 ```
 
 Expected: PASS.
@@ -301,7 +300,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit Task 3**
 
 ```bash
-git add backend/app/services/camera_adapter_registry.py backend/app/services/camera_adapter_probe.py backend/app/api/camera_connections.py backend/app/services/hik_bridge_client.py backend/app/main.py backend/app/api/onvif_cameras.py backend/app/api/hik_cameras.py backend/tests/test_camera_adapter_registry.py backend/tests/test_camera_connection_probe_api.py backend/tests/test_hik_bridge_client.py backend/tests/test_onvif_cameras.py backend/tests/test_hik_cameras.py
+git add backend/app/services/camera_adapter_registry.py backend/app/services/camera_adapter_probe.py backend/app/api/camera_connections.py backend/app/services/hik_bridge_client.py backend/app/main.py backend/app/api/onvif_cameras.py backend/app/api/hik_cameras.py backend/tests/test_camera_adapter_registry.py backend/tests/test_camera_connection_probe_api.py backend/tests/test_hik_bridge_client.py backend/tests/test_onvif_camera_api.py backend/tests/test_hik_camera_api.py
 git commit -m "feat: add unified camera adapter probe api"
 ```
 
@@ -322,43 +321,43 @@ git commit -m "feat: add unified camera adapter probe api"
 - Modify: `backend/tests/test_adapter_edit_guard.py`
 
 **Interfaces:**
-- Produces `CameraUnifiedCreate` containing stable Camera metadata/policy plus required `connection: CameraConnectionCreate`.
-- Produces `CameraUnifiedUpdate` containing optional metadata/policy plus optional `connection: CameraConnectionUpdate`.
-- Produces `async def create_camera_from_unified_payload(db, payload) -> Camera`.
-- Produces `async def update_camera_from_unified_payload(db, camera, payload) -> Camera`.
-- `POST /api/cameras` accepts both the new nested unified create contract and the existing legacy flat manual RTSP create contract during the compatibility window.
-- `PUT/PATCH /api/cameras/{id}` accepts the nested unified update contract; existing legacy flat manual RTSP update remains supported for the current frontend.
+- Produce `CameraUnifiedCreate` containing Camera identity/policy fields plus required `connection: CameraConnectionCreate`.
+- Produce `CameraUnifiedUpdate` containing optional identity/policy fields plus optional `connection: CameraConnectionUpdate`.
+- Keep current legacy `CameraCreate`/`CameraUpdate` as flat manual RTSP compatibility models.
+- Define `CameraCreateRequest = CameraUnifiedCreate | CameraCreate` and `CameraUpdateRequest = CameraUnifiedUpdate | CameraUpdate` for route compatibility.
+- Produce `async def create_camera_from_unified_payload(db: AsyncSession, payload: CameraUnifiedCreate) -> Camera`.
+- Produce `async def update_camera_from_unified_payload(db: AsyncSession, camera: Camera, payload: CameraUnifiedUpdate) -> Camera`.
 
-- [ ] **Step 1: Write RED unified create tests**
+- [ ] **Step 1: Write RED unified-create tests**
 
-Create one disabled Camera for each adapter without monkeypatching network probes. Assert status 201, stable canonical `connection.adapter`, `verification_status="unverified"`, exactly one adapter config row, and password never appears in the response.
+Create one disabled Camera for each adapter through `POST /api/cameras` with nested `connection` and no monkeypatched network probe. Assert 201, correct canonical adapter, `verification_status="unverified"`, exactly one target config row, and no credential data in response.
 
 - [ ] **Step 2: Write RED same-adapter edit tests**
 
-For each adapter assert:
+For each adapter prove:
 
 ```text
-metadata-only edit -> no revision bump, no runtime teardown
-identical connection payload -> no revision bump and preserves verified/cache state
-real connection change -> revision +1, verification becomes unverified
-omitted password -> keeps existing encrypted password
+metadata-only edit -> no revision bump and no runtime teardown
+identical connection draft -> no revision bump and preserves verified/cache state
+real connection change -> revision +1 and verification becomes unverified
+omitted update password -> keeps existing encrypted password
 ```
 
 - [ ] **Step 3: Write RED cross-adapter switch tests**
 
-Exercise all target adapters through `PUT/PATCH /api/cameras/{id}` using nested `connection`. Assert Camera ID and CameraConnection ID stay stable, revision increments once, stale adapter config is removed, invalid schedule fails before coordinator teardown, and the new adapter can be saved unverified without a network probe.
+Exercise switches to each target adapter through `PUT /api/cameras/{id}` using nested `connection`. Assert Camera ID and CameraConnection ID stay stable, revision increments once, stale adapter config is removed, invalid schedule fails before coordinator teardown, and the target connection can be persisted unverified without network access.
 
-- [ ] **Step 4: Preserve the proven switch transaction failure tests**
+- [ ] **Step 4: Port existing transaction-failure assertions to the unified endpoint**
 
-Adapt existing transaction tests to call the unified endpoint and keep these exact invariants:
+Keep these invariants exactly:
 
 ```text
 persistence failure -> rollback -> restore old runtime/config
 post-commit restore failure -> new connection remains persisted and failure surfaces
-stop_all happens once for a real cross-adapter switch
+stop_all occurs once for a real cross-adapter switch
 ```
 
-Do not replace these with commit-before-stop semantics.
+Do not implement commit-before-stop semantics.
 
 - [ ] **Step 5: Run Task 4 RED**
 
@@ -366,36 +365,22 @@ Do not replace these with commit-before-stop semantics.
 cd backend && pytest -q tests/test_unified_camera_api.py tests/test_camera_adapter_switch_api.py tests/test_camera_adapter_switch_transaction.py tests/test_adapter_edit_guard.py
 ```
 
-Expected: FAIL because the generic endpoint cannot yet create/update ONVIF/HIK through nested connection drafts.
+Expected: FAIL because the generic endpoint cannot create/update ONVIF/HIK through nested connection drafts.
 
-- [ ] **Step 6: Implement `camera_mutation.py` as the only frontend-facing mutation orchestration**
+- [ ] **Step 6: Implement `camera_mutation.py`**
 
-Responsibilities:
+The service owns these exact responsibilities: prevalidate recording schedule/payload before teardown; resolve create/update password rules; apply Camera metadata/policy; choose strict same-adapter upsert vs explicit `switch_to_manual_rtsp_connection` / `switch_to_onvif_connection` / `switch_to_hik_connection`; write `unverified` when no persisted probe result is being applied; preserve rollback shadow fields through existing writers; emit non-secret audit/event summaries; coordinate `stop_all -> commit -> restore` for adapter changes; use existing coordinator reload behavior for same-adapter connection/policy changes.
 
-```text
-validate schedule/payload before runtime teardown
-resolve create/update password rules
-apply Camera metadata/policy
-choose strict same-adapter upsert vs explicit switch_to_* function
-write unverified connection state when no persisted probe result is being applied
-preserve rollback shadow fields through existing camera_connection writers
-emit non-secret audit/event summaries
-coordinate stop/commit/restore only when the connection adapter changes
-reload current runtime for same-adapter connection changes or policy changes using existing coordinator semantics
-```
+Adapter field writes remain inside `camera_connection.py`; route modules must not duplicate them.
 
-Do not duplicate adapter config field writes in API modules.
+- [ ] **Step 7: Convert dedicated routes to compatibility wrappers**
 
-- [ ] **Step 7: Make dedicated adapter routes compatibility wrappers**
-
-Convert ONVIF/HIK create/update routes to translate their legacy request schema into the unified mutation service. Preserve their existing URLs and response shape for the current frontend/tests, but remove independent persistence/orchestration logic.
-
-`camera_adapter_switch.py` should no longer own a separate manual-switch implementation once the generic camera endpoint can switch to manual RTSP.
+Translate legacy ONVIF/HIK create/update payloads into the unified mutation service. Preserve their URLs and successful response shape. Remove independent adapter persistence/orchestration from those routes. Once the generic endpoint handles switches to manual RTSP, `camera_adapter_switch.py` becomes a thin compatibility delegation or is removed from router registration if all legacy generic requests are handled directly by `cameras.py`.
 
 - [ ] **Step 8: Run Task 4 GREEN**
 
 ```bash
-cd backend && pytest -q tests/test_unified_camera_api.py tests/test_camera_adapter_switch_api.py tests/test_camera_adapter_switch_transaction.py tests/test_adapter_edit_guard.py tests/test_camera_connection_switch.py tests/test_camera_connection_write.py
+cd backend && pytest -q tests/test_unified_camera_api.py tests/test_camera_adapter_switch_api.py tests/test_camera_adapter_switch_transaction.py tests/test_adapter_edit_guard.py tests/test_camera_connection_switch.py tests/test_camera_connection_write.py tests/test_onvif_camera_api.py tests/test_hik_camera_api.py tests/test_hik_canonical_api.py
 ```
 
 Expected: PASS.
@@ -403,48 +388,46 @@ Expected: PASS.
 - [ ] **Step 9: Commit Task 4**
 
 ```bash
-git add backend/app/services/camera_mutation.py backend/app/schemas/camera.py backend/app/api/cameras.py backend/app/api/camera_adapter_switch.py backend/app/api/onvif_cameras.py backend/app/api/hik_cameras.py backend/tests/test_unified_camera_api.py backend/tests/test_camera_adapter_switch_api.py backend/tests/test_camera_adapter_switch_transaction.py backend/tests/test_adapter_edit_guard.py backend/tests/test_camera_connection_switch.py backend/tests/test_camera_connection_write.py
+git add backend/app/services/camera_mutation.py backend/app/schemas/camera.py backend/app/api/cameras.py backend/app/api/camera_adapter_switch.py backend/app/api/onvif_cameras.py backend/app/api/hik_cameras.py backend/tests/test_unified_camera_api.py backend/tests/test_camera_adapter_switch_api.py backend/tests/test_camera_adapter_switch_transaction.py backend/tests/test_adapter_edit_guard.py backend/tests/test_camera_connection_switch.py backend/tests/test_camera_connection_write.py backend/tests/test_onvif_camera_api.py backend/tests/test_hik_camera_api.py backend/tests/test_hik_canonical_api.py
 git commit -m "feat: unify camera create and adapter updates"
 ```
 
 ---
 
-### Task 5: Make persisted current-connection probe adapter-aware and update verification/cache safely
+### Task 5: Make persisted current-connection probe adapter-aware
 
 **Files:**
 - Modify: `backend/app/services/camera_adapter_probe.py`
 - Modify: `backend/app/api/cameras.py`
 - Create: `backend/tests/test_camera_current_connection_probe.py`
-- Modify: `backend/tests/test_camera_probe_state.py`
-- Modify: `backend/tests/test_camera_runtime_coordinator.py`
+- Modify: `backend/tests/test_camera_probe.py`
+- Modify: `backend/tests/test_camera_probe_adapter.py`
 
 **Interfaces:**
-- Existing `POST /api/cameras/{camera_id}/probe` becomes adapter-aware for the saved current connection.
-- Successful probe updates `verification_status="verified"`, `verified_at`, clears `last_error`, refreshes device/media cache and Camera media fields, then reloads runtime only when newly materialized adapter cache is required by runtime.
-- Failed probe updates `verification_status="failed"`, `last_error`, Camera connectivity observation, but does not alter target endpoint/credentials/revision.
+- `POST /api/cameras/{camera_id}/probe` probes the saved canonical current connection regardless of adapter.
+- Success sets `verification_status="verified"`, sets `verified_at`, clears `last_error`, refreshes non-secret adapter discovery cache and Camera media fields, and never bumps connection revision solely for probe-derived cache refresh.
+- Failure sets `verification_status="failed"` and `last_error`, updates connectivity observation, and leaves endpoint/credentials/revision unchanged.
 
-- [ ] **Step 1: Write RED persisted probe tests**
+- [ ] **Step 1: Write RED persisted-probe tests**
 
-Start from unverified manual, ONVIF, and HIK connections. Mock adapter probe success and assert verification state and cache become verified/materialized without a connection revision bump. Mock failure and assert revision/endpoint/credentials stay unchanged while status becomes failed.
+Start from unverified manual RTSP, ONVIF, and HIK connections. Mock standardized service probe success and assert verification/cache/media fields become materialized without revision change. Mock failure and assert revision, adapter target fields, and credentials remain unchanged while verification becomes failed.
 
 - [ ] **Step 2: Run RED**
 
 ```bash
-cd backend && pytest -q tests/test_camera_current_connection_probe.py tests/test_camera_probe_state.py
+cd backend && pytest -q tests/test_camera_current_connection_probe.py tests/test_camera_probe.py tests/test_camera_probe_adapter.py
 ```
 
 Expected: FAIL for ONVIF/HIK because the current endpoint still assumes an already-materialized runtime stream.
 
 - [ ] **Step 3: Implement adapter-aware persisted probe**
 
-Reuse `camera_adapter_probe.py`; do not call dedicated route handlers. For ONVIF, persist credential-free discovery cache into the existing `OnvifConnectionConfig`; for HIK, persist serial/model/name discovery metadata; for all adapters update Camera media capability fields from the standardized probe result.
+Reuse `camera_adapter_probe.py`, never dedicated route handlers. ONVIF success persists credential-free device/profile/token/URI cache into `OnvifConnectionConfig`; HIK success persists serial/model/name discovery metadata; all adapters refresh Camera media capability fields. Probe-derived cache refresh does not increment revision because it is verification metadata, not a user target edit.
 
-Probe-derived cache refresh is verification data, not a user connection edit: it must not increment connection revision unless the user-visible connection target itself changed.
-
-- [ ] **Step 4: Run GREEN**
+- [ ] **Step 4: Run Task 5 GREEN**
 
 ```bash
-cd backend && pytest -q tests/test_camera_current_connection_probe.py tests/test_camera_probe_state.py tests/test_camera_runtime_coordinator.py
+cd backend && pytest -q tests/test_camera_current_connection_probe.py tests/test_camera_probe.py tests/test_camera_probe_adapter.py tests/test_camera_runtime_coordinator.py
 ```
 
 Expected: PASS.
@@ -452,7 +435,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit Task 5**
 
 ```bash
-git add backend/app/services/camera_adapter_probe.py backend/app/api/cameras.py backend/tests/test_camera_current_connection_probe.py backend/tests/test_camera_probe_state.py backend/tests/test_camera_runtime_coordinator.py
+git add backend/app/services/camera_adapter_probe.py backend/app/api/cameras.py backend/tests/test_camera_current_connection_probe.py backend/tests/test_camera_probe.py backend/tests/test_camera_probe_adapter.py
 git commit -m "feat: probe saved camera connections by adapter"
 ```
 
@@ -462,35 +445,30 @@ git commit -m "feat: probe saved camera connections by adapter"
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md`
-- Modify only if tests prove necessary: `backend/app/main.py`
-- Test: all backend camera/adapter tests plus Docker migration smoke.
 
 **Interfaces:**
 - Dedicated ONVIF/HIK endpoints remain working wrappers.
 - Legacy manual flat create/update remains working until Phase 5 migrates the frontend.
-- Canonical nested `connection` is present in Camera reads and is the source Phase 5 will consume.
-- Phase 3 checklist items in the architecture migration/status docs are marked complete only after final CI is green.
+- Canonical nested `connection` is present in Camera reads and is the source Phase 5 consumes.
+- Mark Phase 3 complete only after final-head CI is green.
 
 - [ ] **Step 1: Run focused adapter/camera regression suite**
 
 ```bash
-cd backend && pytest -q \
-  tests/test_unified_camera_api.py \
-  tests/test_camera_adapter_registry.py \
-  tests/test_camera_connection_probe_api.py \
-  tests/test_camera_current_connection_probe.py \
-  tests/test_camera_adapter_switch_api.py \
-  tests/test_camera_adapter_switch_transaction.py \
-  tests/test_camera_connection_write.py \
-  tests/test_camera_connection_switch.py \
-  tests/test_camera_runtime_coordinator.py \
-  tests/test_onvif_cameras.py \
-  tests/test_hik_cameras.py
+cd backend && pytest -q tests/test_unified_camera_api.py tests/test_camera_adapter_registry.py tests/test_camera_connection_probe_api.py tests/test_camera_current_connection_probe.py tests/test_camera_adapter_switch_api.py tests/test_camera_adapter_switch_transaction.py tests/test_camera_connection_write.py tests/test_hik_connection_write.py tests/test_camera_connection_switch.py tests/test_camera_runtime_coordinator.py tests/test_onvif_camera_api.py tests/test_hik_camera_api.py tests/test_hik_canonical_api.py
 ```
 
 Expected: PASS.
 
-- [ ] **Step 2: Run backend quality and full backend tests**
+- [ ] **Step 2: Run exact migration compatibility tests**
+
+```bash
+cd backend && pytest -q tests/test_camera_connection_migration.py tests/test_onvif_connection_migration.py tests/test_hik_connection_migration.py tests/test_camera_connection_phase1_upgrade.py
+```
+
+Expected: PASS, including `0024 -> 0025` upgrade with unchanged Camera/CameraConnection identities and preserved populated ONVIF cache values.
+
+- [ ] **Step 3: Run backend quality and complete backend suite**
 
 ```bash
 cd backend && python -m compileall app tests
@@ -500,24 +478,9 @@ cd backend && pytest -q
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify Alembic upgrade compatibility**
-
-Run the repository's existing migration compatibility test/smoke path and confirm revision `0025` upgrades an existing `0024` database without changing Camera IDs, CameraConnection IDs, or existing ONVIF cache values.
-
 - [ ] **Step 4: Update migration status documentation**
 
-Mark these Phase 3 items complete:
-
-```text
-adapter capability registry + API
-unified adapter-aware draft probe
-unified create API connection object
-unified update/same-adapter/switch API
-frontend-facing deprecation of adapter-specific persistence semantics (routes retained as wrappers)
-structured deletion-impact remains already complete
-```
-
-Do not mark Phase 4 HIK optional deployment or Phase 5 UI items complete.
+Record Phase 3 completion for adapter capability registry/API, unified draft probe, nested connection create/update, same-adapter edit and explicit adapter switching through the generic Camera API, and dedicated adapter routes as compatibility wrappers. Keep Phase 4 HIK optional deployment, Phase 5 split-view UI, and Contract cleanup explicitly open.
 
 - [ ] **Step 5: Commit Task 6**
 
@@ -526,12 +489,6 @@ git add docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration
 git commit -m "docs: mark unified camera adapter api complete"
 ```
 
-- [ ] **Step 6: Open/update PR and require final head CI**
+- [ ] **Step 6: Open/update PR and require final-head CI**
 
-PR title:
-
-```text
-feat: unify camera adapter api
-```
-
-Final evidence must be from the PR's latest head and include all backend pytest shards, backend quality/Ruff, HIK bridge tests, Docker build/start smoke, database migration compatibility, and aggregate backend success. Frontend may be skipped when no frontend source changes are included.
+Use PR title `feat: unify camera adapter api`. Final evidence must be from the PR's latest head and include all backend pytest shards, backend quality/Ruff, HIK bridge tests, Docker build/start smoke, database migration compatibility, and aggregate backend success. Frontend may be skipped when no frontend source changes are included.
