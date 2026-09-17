@@ -1,13 +1,17 @@
 import asyncio
+import importlib
 
 import pytest
 
-from app.services.camera_media_session_registry import CameraMediaSessionRegistry
+
+def _registry_class():
+    module = importlib.import_module("app.services.camera_media_session_registry")
+    return module.CameraMediaSessionRegistry
 
 
 @pytest.mark.asyncio
 async def test_stop_camera_closes_only_target_camera_sessions() -> None:
-    registry = CameraMediaSessionRegistry()
+    registry = _registry_class()()
     calls: list[str] = []
 
     async def close_a1() -> None:
@@ -32,7 +36,7 @@ async def test_stop_camera_closes_only_target_camera_sessions() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_camera_detaches_before_awaiting_closers() -> None:
-    registry = CameraMediaSessionRegistry()
+    registry = _registry_class()()
     close_started = asyncio.Event()
     allow_close = asyncio.Event()
     calls: list[str] = []
@@ -59,7 +63,7 @@ async def test_stop_camera_detaches_before_awaiting_closers() -> None:
 
 @pytest.mark.asyncio
 async def test_unregister_is_idempotent() -> None:
-    registry = CameraMediaSessionRegistry()
+    registry = _registry_class()()
 
     async def closer() -> None:
         return None
@@ -73,7 +77,7 @@ async def test_unregister_is_idempotent() -> None:
 
 @pytest.mark.asyncio
 async def test_closer_failure_does_not_block_remaining_sessions() -> None:
-    registry = CameraMediaSessionRegistry()
+    registry = _registry_class()()
     calls: list[str] = []
 
     async def failing() -> None:
@@ -94,7 +98,7 @@ async def test_closer_failure_does_not_block_remaining_sessions() -> None:
 
 @pytest.mark.asyncio
 async def test_stop_all_drains_every_camera() -> None:
-    registry = CameraMediaSessionRegistry()
+    registry = _registry_class()()
     calls: list[str] = []
 
     async def close_a() -> None:
