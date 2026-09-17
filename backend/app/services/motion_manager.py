@@ -16,6 +16,7 @@ from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
+from app.services.camera_connection_revision import connection_revision_state
 from app.services.event_recording_link import (
     begin_recording_event,
     end_recording_event,
@@ -272,6 +273,11 @@ class MotionDetectionManager:
         camera_id = config.camera_id
         attempt = 0
         while self._running:
+            revision_state = await connection_revision_state(camera_id, config.connection_revision)
+            if revision_state == "stale":
+                self._set_status(camera_id, "stopped", stream=None, last_error=None)
+                break
+
             def on_status(
                 state: str,
                 stream: str | None,
