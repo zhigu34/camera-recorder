@@ -1,13 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import cameraSource from './CamerasView.vue?raw'
 import workspaceSource from './CamerasWorkspace.vue?raw'
 import mainSource from './main.ts?raw'
-
-const splitStylePath = fileURLToPath(new URL('./styles/camera-split-view.css', import.meta.url))
-const splitStyleSource = existsSync(splitStylePath) ? readFileSync(splitStylePath, 'utf8') : ''
+import splitStyleSource from './styles/camera-split-view.css?raw'
 
 describe('camera split view', () => {
   it('uses a permanent desktop list/detail workspace instead of the legacy camera drawer', () => {
