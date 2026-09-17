@@ -1,6 +1,6 @@
 # Camera Architecture Refactor — Migration Notes
 
-Status: **Switch slice complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator lifecycle, connection revision guard, active media-session lifecycle, and Phase 3 unified adapter API slices complete**
+Status: **Switch slice complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator lifecycle, connection revision guard, active media-session lifecycle, Phase 3 unified adapter API, and Phase 4 optional HIK deployment slices complete**
 
 Date: 2026-09-16
 
@@ -16,7 +16,7 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
-Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, the connection revision guard slice, the active media-session lifecycle slice, and the Phase 3 unified adapter API slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
+Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, the connection revision guard slice, the active media-session lifecycle slice, the Phase 3 unified adapter API slice, and the Phase 4 optional HIK deployment slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
 
 ### Expand
 
@@ -65,6 +65,19 @@ Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator 
 - [x] Terminate already-active preview sessions when a Camera is disabled or reloaded.
 - [x] Release adapter-specific temporary sessions on disable/reload, especially HIK bridge streams.
 - [x] Add current-connection revision stale-worker invalidation inside long-running reconnect loops.
+
+### Optional HIK deployment
+
+- [x] Make HIK SDK support default-off with `CAMREC_HIK_ENABLED=0`.
+- [x] Keep `hik-bridge` behind the Compose `hik` profile and remove it from core backend dependencies.
+- [x] Keep manual RTSP, ONVIF, backend, frontend, and OpenList operational without proprietary HCNetSDK runtime files.
+- [x] Use one canonical HIK capability guard across runtime restore, connectivity monitoring, Probe, and media startup.
+- [x] Preserve persisted HIK connectivity state when the deployment capability is unavailable instead of rewriting the camera as offline or incrementing failure counters.
+- [x] Keep canonical HIK configuration saveable as `unverified` while runtime capability is unavailable.
+- [x] Refactor `deploy.sh` into a core-first stage plus an optional HIK stage, with `0 -> 1` / `1 -> 0` state tracking.
+- [x] Do not inspect or hash the private HCNetSDK runtime when HIK is disabled.
+- [x] Ensure an optional HIK startup/runtime failure cannot roll back or stop healthy core services.
+- [x] Verify public CI in core-only mode without proprietary SDK binaries while separately validating the HIK Compose profile configuration.
 
 ### Contract
 
@@ -132,8 +145,16 @@ The production-code head for the Phase 3 unified camera adapter API slice was ve
 
 That verification covers the shared adapter capability registry, discriminated nested connection schemas, credential-safe draft probing, canonical generic create/update/switch transactions, offline/unverified ONVIF/HIK saves, stable Camera and `CameraConnection` identity, single-step revision changes, adapter validation before runtime teardown, rollback/runtime restoration behavior, persisted current-connection Probe without revision mutation, ONVIF rediscovery runtime reload without revision inflation, and ONVIF/HIK legacy routes acting as compatibility wrappers rather than independent persistence implementations.
 
+### Phase 4 optional HIK deployment slice
+
+The implementation head `09d48845735661cf5e1a559fd6ce9375795e4de2` was verified in CI `#1354` (`35257054928`). All four backend pytest shards, backend quality/Ruff and HIK bridge tests, frontend lint/tests/build, aggregate backend verification, and the redesigned core-only Docker smoke completed successfully.
+
+The Docker smoke verified both default and `hik` profile Compose configuration, proved default core startup does not create `hik-bridge`, validated database migration compatibility, confirmed backend remains internal-only, and checked `/api/camera-adapters` reports HIK unavailable with the deployment-disabled reason. The same verification preserved runtime timezone/frontend routes, backend proxying, and upload WebSocket behavior without any proprietary SDK runtime in CI.
+
+The Phase 4 implementation also verifies that deployment-disabled HIK capability does not access the bridge, does not mutate persisted camera connectivity into an offline failure, and remains an optional post-core deployment stage. The status-only closeout commit following this implementation verification must still pass the normal exact-head PR CI before merge.
+
 ## Why this is simpler than the generic migration
 
 Because there is no legacy ONVIF/HIK production data to preserve, the migration does not need to reconcile existing `onvif_device_metadata` or `hik_device_metadata` into active connections. ONVIF and HIK can use the new adapter implementations without risking existing camera history, while legacy metadata stays outside the canonical current-connection source of truth.
 
-The migration concern therefore remains narrow: preserve Camera IDs/history, move existing RTSP connection data out of `Camera` safely, keep new manual RTSP/ONVIF/HIK state canonical in the current connection layer, support explicit adapter replacement on the same stable identities, centralize the bounded recorder/schedule/motion/event/media lifecycle, and expose one unified adapter contract without inferring historical adapter state.
+The migration concern therefore remains narrow: preserve Camera IDs/history, move existing RTSP connection data out of `Camera` safely, keep new manual RTSP/ONVIF/HIK state canonical in the current connection layer, support explicit adapter replacement on the same stable identities, centralize the bounded recorder/schedule/motion/event/media lifecycle, expose one unified adapter contract without inferring historical adapter state, and keep proprietary HIK runtime capability optional at deployment time.
