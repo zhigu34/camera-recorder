@@ -64,3 +64,20 @@ async def test_stop_stream_uses_opaque_id_only() -> None:
     )
     await client.stop_stream("opaque-id")
     assert calls == [("DELETE", "/streams/opaque-id")]
+
+
+@pytest.mark.asyncio
+async def test_health_reads_bridge_health_endpoint() -> None:
+    calls = []
+
+    def handler(request: httpx.Request):
+        calls.append((request.method, request.url.path))
+        return httpx.Response(200, json={"status": "ok", "sdk": "loaded"})
+
+    client = HikBridgeClient(
+        "http://hik-bridge:8100",
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert await client.health() == {"status": "ok", "sdk": "loaded"}
+    assert calls == [("GET", "/health")]
