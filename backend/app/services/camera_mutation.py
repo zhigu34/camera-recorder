@@ -9,7 +9,6 @@ from app.models.camera import Camera
 from app.schemas.camera import CameraUnifiedCreate, CameraUnifiedUpdate
 from app.schemas.camera_connection import (
     HikConnectionCreate,
-    HikConnectionUpdate,
     ManualRtspConnectionCreate,
     ManualRtspConnectionUpdate,
     OnvifConnectionCreate,
