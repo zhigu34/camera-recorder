@@ -103,7 +103,7 @@ class WallPreviewSource:
     width: int
 
 
-async def stream_preview_frames(source: WallPreviewSource, on_frame: FrameCallback) -> None:
+async def _open_wall_process(source: WallPreviewSource) -> asyncio.subprocess.Process:
     command = build_wall_preview_command(
         ip=source.ip,
         port=source.port,
@@ -115,7 +115,7 @@ async def stream_preview_frames(source: WallPreviewSource, on_frame: FrameCallba
         width=source.width,
     )
     try:
-        process = await asyncio.create_subprocess_exec(
+        return await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -123,25 +123,64 @@ async def stream_preview_frames(source: WallPreviewSource, on_frame: FrameCallba
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg not found") from exc
 
-    assert process.stdout is not None
-    parser = JpegFrameParser()
-    first_frame_timeout = max(8.0, source.rtsp_timeout_us / 1_000_000 + 3.0)
 
-    try:
-        while True:
-            try:
-                chunk = await asyncio.wait_for(
-                    process.stdout.read(64 * 1024),
-                    timeout=first_frame_timeout,
-                )
-            except TimeoutError as exc:
-                raise RuntimeError("实时预览连接超时") from exc
-            if not chunk:
-                if process.returncode is None:
-                    await process.wait()
-                raise RuntimeError("实时预览码流已结束")
-            for frame in parser.feed(chunk):
-                await on_frame(frame)
-                first_frame_timeout = 30.0
-    finally:
-        await _stop_process(process)
+class WallPreviewSession:
+    def __init__(self, source: WallPreviewSource) -> None:
+        self.source = source
+        self._process: asyncio.subprocess.Process | None = None
+        self._closed = False
+        self._close_lock = asyncio.Lock()
+
+    async def _start(self) -> asyncio.subprocess.Process | None:
+        async with self._close_lock:
+            if self._closed:
+                return None
+            process = await _open_wall_process(self.source)
+            self._process = process
+            return process
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            if self._process is not None:
+                await _stop_process(self._process)
+
+    async def stream(self, on_frame: FrameCallback) -> None:
+        try:
+            process = await self._start()
+            if process is None:
+                return
+            assert process.stdout is not None
+            parser = JpegFrameParser()
+            read_timeout = max(8.0, self.source.rtsp_timeout_us / 1_000_000 + 3.0)
+
+            while True:
+                try:
+                    chunk = await asyncio.wait_for(
+                        process.stdout.read(64 * 1024),
+                        timeout=read_timeout,
+                    )
+                except TimeoutError as exc:
+                    if self._closed:
+                        return
+                    raise RuntimeError("实时预览连接超时") from exc
+                if not chunk:
+                    if self._closed:
+                        return
+                    if process.returncode is None:
+                        await process.wait()
+                    if self._closed:
+                        return
+                    raise RuntimeError("实时预览码流已结束")
+                for frame in parser.feed(chunk):
+                    await on_frame(frame)
+                    read_timeout = 30.0
+        finally:
+            await self.close()
+
+
+async def stream_preview_frames(source: WallPreviewSource, on_frame: FrameCallback) -> None:
+    session = WallPreviewSession(source)
+    await session.stream(on_frame)
