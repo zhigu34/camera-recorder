@@ -62,6 +62,14 @@ function formatMs(value: number | null | undefined) {
   return `${Math.round(value)} ms`
 }
 
+function formatBytes(value: number | null | undefined) {
+  const amount = Math.max(0, Number(value || 0))
+  if (amount >= 1024 ** 4) return `${(amount / 1024 ** 4).toFixed(2)} TB`
+  if (amount >= 1024 ** 3) return `${(amount / 1024 ** 3).toFixed(1)} GB`
+  if (amount >= 1024 ** 2) return `${(amount / 1024 ** 2).toFixed(0)} MB`
+  return `${Math.round(amount / 1024)} KB`
+}
+
 async function loadPlaybackMetrics() {
   try {
     playbackMetrics.value = (await axios.get<PlaybackMetrics>('/api/playback/metrics')).data
@@ -87,7 +95,7 @@ onBeforeUnmount(() => {
     <div class="services">
       <button type="button" @click="emit('operations')">
         <i :class="statusClass(realtime ? realtime.storage.state !== 'critical' : null)"></i>
-        <span><strong>录像存储</strong><small>{{ realtime ? `${realtime.storage.used_percent}% 已使用` : '等待状态' }}</small></span><b>›</b>
+        <span><strong>磁盘空间</strong><small>{{ realtime ? `${realtime.storage.used_percent}% 已使用 · 本地录像 ${formatBytes(realtime.storage.local_recordings_bytes)}` : '等待状态' }}</small></span><b>›</b>
       </button>
       <button type="button" @click="emit('operations')">
         <i :class="statusClass(realtime ? (!realtime.upload.enabled || realtime.upload.configured) : null)"></i>
