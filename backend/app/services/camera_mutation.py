@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +16,7 @@ from app.schemas.camera_connection import (
     OnvifConnectionCreate,
     OnvifConnectionUpdate,
 )
+from app.services.camera_adapter_probe import CameraConnectionProbeResult, apply_probe_success
 from app.services.camera_connection import (
     switch_to_hik_connection,
     switch_to_manual_rtsp_connection,
@@ -130,7 +133,20 @@ def _write_create_connection(
     )
 
 
-async def create_unified_camera(payload: CameraUnifiedCreate, db: AsyncSession) -> Camera:
+def _mark_probe_success(camera: Camera, result: CameraConnectionProbeResult) -> None:
+    now = datetime.now(timezone.utc)
+    apply_probe_success(camera, result, verified_at=now)
+    camera.status = "online"
+    camera.last_probe_at = now
+    camera.last_online_at = now
+
+
+async def create_unified_camera(
+    payload: CameraUnifiedCreate,
+    db: AsyncSession,
+    *,
+    probe_result: CameraConnectionProbeResult | None = None,
+) -> Camera:
     password_encrypted = encrypt_secret(payload.connection.password)
     camera = _seed_camera(payload, password_encrypted)
     _write_create_connection(
@@ -138,6 +154,9 @@ async def create_unified_camera(payload: CameraUnifiedCreate, db: AsyncSession) 
         payload.connection,
         password_encrypted=password_encrypted,
     )
+    if probe_result is not None:
+        _mark_probe_success(camera, probe_result)
+
     db.add(camera)
     try:
         await db.flush()
@@ -276,7 +295,11 @@ async def update_unified_camera(
     camera_id: int,
     payload: CameraUnifiedUpdate,
     db: AsyncSession,
+    *,
+    probe_result: CameraConnectionProbeResult | None = None,
+    coordinator=None,
 ) -> Camera:
+    runtime_coordinator = coordinator or camera_runtime_coordinator
     camera = await db.get(Camera, camera_id)
     if camera is None:
         raise HTTPException(status_code=404, detail="camera not found")
@@ -294,7 +317,7 @@ async def update_unified_camera(
             raise HTTPException(status_code=409, detail="camera name already exists") from exc
         await db.refresh(camera)
         if policy_changed:
-            await camera_runtime_coordinator.reload(
+            await runtime_coordinator.reload(
                 camera.id,
                 schedule_changed=bool(
                     {"auto_record", "recording_schedule_enabled", "recording_schedule"}
@@ -314,7 +337,9 @@ async def update_unified_camera(
         before_revision = current.revision
         written = _upsert_same_adapter(camera, draft, password_encrypted)
         connection_changed = written.revision != before_revision
-        if connection_changed:
+        if probe_result is not None:
+            _mark_probe_success(camera, probe_result)
+        elif connection_changed:
             camera.status = "unknown"
             camera.last_probe_at = None
         add_event(
@@ -339,17 +364,20 @@ async def update_unified_camera(
             raise HTTPException(status_code=409, detail="camera name already exists") from exc
         await db.refresh(camera)
         if connection_changed or policy_changed:
-            await camera_runtime_coordinator.reload(
+            await runtime_coordinator.reload(
                 camera.id,
                 schedule_changed=schedule_changed,
             )
         return camera
 
-    snapshot = await camera_runtime_coordinator.stop_all(camera.id)
+    snapshot = await runtime_coordinator.stop_all(camera.id)
     try:
         written = _switch_adapter(camera, draft, password_encrypted)
-        camera.status = "unknown"
-        camera.last_probe_at = None
+        if probe_result is not None:
+            _mark_probe_success(camera, probe_result)
+        else:
+            camera.status = "unknown"
+            camera.last_probe_at = None
         add_event(
             db,
             level="info",
@@ -368,7 +396,7 @@ async def update_unified_camera(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
-        await camera_runtime_coordinator.restore(
+        await runtime_coordinator.restore(
             camera_id,
             snapshot,
             schedule_changed=schedule_changed,
@@ -376,7 +404,7 @@ async def update_unified_camera(
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
     except Exception:
         await db.rollback()
-        await camera_runtime_coordinator.restore(
+        await runtime_coordinator.restore(
             camera_id,
             snapshot,
             schedule_changed=schedule_changed,
@@ -384,7 +412,7 @@ async def update_unified_camera(
         raise
 
     await db.refresh(camera)
-    await camera_runtime_coordinator.restore(
+    await runtime_coordinator.restore(
         camera.id,
         snapshot,
         schedule_changed=schedule_changed,
