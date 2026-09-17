@@ -1,8 +1,11 @@
 from collections.abc import AsyncIterator
+from typing import Literal
 
 from app.core.security import decrypt_secret
 from app.services.hik_bridge_client import HikBridgeClient
-from app.services.hik_media_adapter import HikBridgeTarget, HikStreamRole
+from app.services.hik_media_adapter import HikBridgeTarget
+
+HikStreamRole = Literal["main", "sub"]
 
 
 def build_hik_target(camera, role: HikStreamRole) -> HikBridgeTarget:
