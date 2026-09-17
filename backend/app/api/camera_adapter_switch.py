@@ -17,6 +17,7 @@ from app.schemas.camera import (
 )
 from app.services.camera_adapter_probe import (
     CameraAdapterProbeError,
+    CameraConnectionProbeResult,
     apply_probe_failure,
     apply_probe_success,
     probe_saved_connection,
@@ -65,14 +66,31 @@ async def probe_current_connection(
 ):
     camera = await cameras_api._camera_or_404(camera_id, db)
     runtime = await cameras_api.load_runtime_settings(db)
-    saved_probe = getattr(cameras_api, "probe_saved_connection", probe_saved_connection)
+    saved_probe = getattr(cameras_api, "probe_saved_connection", None)
     now = datetime.now(timezone.utc)
     try:
-        result = await saved_probe(
-            camera,
-            rtsp_timeout_us=runtime.rtsp_timeout_us,
-        )
-    except CameraAdapterProbeError as exc:
+        if saved_probe is not None:
+            result = await saved_probe(
+                camera,
+                rtsp_timeout_us=runtime.rtsp_timeout_us,
+            )
+        elif camera.connection is not None and camera.connection.adapter == "manual_rtsp":
+            media = await cameras_api.probe_camera_media(
+                camera,
+                rtsp_timeout_us=runtime.rtsp_timeout_us,
+            )
+            result = CameraConnectionProbeResult(
+                adapter="manual_rtsp",
+                device={},
+                media=media,
+                connection_cache={},
+            )
+        else:
+            result = await probe_saved_connection(
+                camera,
+                rtsp_timeout_us=runtime.rtsp_timeout_us,
+            )
+    except (CameraAdapterProbeError, CameraProbeError) as exc:
         apply_probe_failure(camera, str(exc))
         camera.status = "offline"
         camera.last_probe_at = now
@@ -85,7 +103,8 @@ async def probe_current_connection(
             camera_id=camera.id,
         )
         await db.commit()
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        status_code = exc.status_code if isinstance(exc, CameraAdapterProbeError) else 502
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
     apply_probe_success(camera, result, verified_at=now)
     camera.status = "online"
