@@ -8,6 +8,10 @@ from app.schemas.camera import CameraRead, CameraUnifiedCreate, CameraUnifiedUpd
 from app.schemas.camera_connection import HikConnectionCreate, HikConnectionUpdate
 from app.schemas.hikvision import HikCameraCreate, HikCameraUpdate, HikProbeRequest, HikProbeResult
 from app.services.camera_adapter_probe import CameraConnectionProbeResult
+from app.services.camera_adapter_registry import (
+    CameraAdapterUnavailableError,
+    require_camera_adapter_available,
+)
 from app.services.camera_mutation import create_unified_camera, update_unified_camera
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
 from app.services.camera_runtime_coordinator import camera_runtime_coordinator
@@ -27,6 +31,11 @@ def _bridge_http_status(exc: HikBridgeClientError) -> int:
 
 
 async def _probe_hik(payload: HikProbeRequest) -> HikProbeResult:
+    try:
+        await require_camera_adapter_available("hik_sdk")
+    except CameraAdapterUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     client = HikBridgeClient()
     try:
         value = await client.probe(
