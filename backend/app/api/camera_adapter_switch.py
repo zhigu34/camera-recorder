@@ -9,10 +9,17 @@ from app.core.database import get_db
 from app.core.security import encrypt_secret
 from app.schemas.camera import (
     CameraCreate,
+    CameraProbeResult,
     CameraRead,
     CameraUnifiedCreate,
     CameraUnifiedUpdate,
     CameraUpdate,
+)
+from app.services.camera_adapter_probe import (
+    CameraAdapterProbeError,
+    apply_probe_failure,
+    apply_probe_success,
+    probe_saved_connection,
 )
 from app.services.camera_connection import switch_to_manual_rtsp_connection
 from app.services.camera_mutation import create_unified_camera, update_unified_camera
@@ -49,6 +56,60 @@ async def create_camera_compat(
     if isinstance(payload, CameraUnifiedCreate):
         return await create_unified_camera(payload, db)
     return await cameras_api.create_camera(payload, db)
+
+
+@router.post("/{camera_id}/probe", response_model=CameraProbeResult)
+async def probe_current_connection(
+    camera_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    camera = await cameras_api._camera_or_404(camera_id, db)
+    runtime = await cameras_api.load_runtime_settings(db)
+    saved_probe = getattr(cameras_api, "probe_saved_connection", probe_saved_connection)
+    now = datetime.now(timezone.utc)
+    try:
+        result = await saved_probe(
+            camera,
+            rtsp_timeout_us=runtime.rtsp_timeout_us,
+        )
+    except CameraAdapterProbeError as exc:
+        apply_probe_failure(camera, str(exc))
+        camera.status = "offline"
+        camera.last_probe_at = now
+        cameras_api.add_event(
+            db,
+            level="error",
+            category="camera",
+            code="camera.probe_failed",
+            message=f"摄像头 {camera.name} Probe 失败: {str(exc)[-500:]}",
+            camera_id=camera.id,
+        )
+        await db.commit()
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    apply_probe_success(camera, result, verified_at=now)
+    camera.status = "online"
+    camera.last_probe_at = now
+    camera.last_online_at = now
+    cameras_api.add_event(
+        db,
+        level="info",
+        category="camera",
+        code="camera.probe_ok",
+        message=f"摄像头 {camera.name} Probe 成功",
+        camera_id=camera.id,
+        metadata={
+            "adapter": result.adapter,
+            "video_codec": result.media.get("video_codec"),
+            "width": result.media.get("width"),
+            "height": result.media.get("height"),
+            "fps": result.media.get("fps"),
+            "audio_codec": result.media.get("audio_codec"),
+            "sample_rate": result.media.get("sample_rate"),
+        },
+    )
+    await db.commit()
+    return result.media
 
 
 @router.put("/{camera_id}", response_model=CameraRead)
