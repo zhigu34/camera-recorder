@@ -2,7 +2,7 @@ from app.models.camera import Camera
 from app.models.camera_connection import CameraConnection, RtspConnectionConfig
 from app.models.event import Event
 from app.models.health_sample import CameraHealthSample
-from app.models.hikvision import HikDeviceMetadata
+from app.models.hikvision import HikConnectionConfig, HikDeviceMetadata
 from app.models.motion import MotionDetectionSettings, MotionEvent, MotionZone
 from app.models.notification_settings import NotificationSettings
 from app.models.onvif import OnvifDeviceMetadata
@@ -17,6 +17,7 @@ __all__ = [
     "CameraConnection",
     "RtspConnectionConfig",
     "OnvifConnectionConfig",
+    "HikConnectionConfig",
     "OnvifDeviceMetadata",
     "HikDeviceMetadata",
     "Recording",
