@@ -277,8 +277,10 @@ async def test_monitor_skips_unavailable_hik_without_mutating_connectivity(monke
             assert persisted is not None
             assert persisted.status == "online"
             assert persisted.connectivity_failures == 2
-            assert persisted.last_probe_at == observed_at
-            assert persisted.last_online_at == observed_at
+            assert persisted.last_probe_at is not None
+            assert persisted.last_online_at is not None
+            assert persisted.last_probe_at.replace(tzinfo=timezone.utc) == observed_at
+            assert persisted.last_online_at.replace(tzinfo=timezone.utc) == observed_at
     finally:
         async with SessionLocal() as db:
             persisted = await db.get(Camera, camera_id)
