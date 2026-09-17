@@ -15,6 +15,7 @@ from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings
 from app.models.recording import Recording
+from app.services.camera_connection_revision import connection_revision_state
 from app.services.media_input import media_input_from_uri
 from app.services.recorder_manager import recorder_manager
 from app.services.segment_processor import (
@@ -134,11 +135,19 @@ def _concat_line(path: Path) -> str:
 
 
 class EventBufferWorker:
-    def __init__(self, camera_id: int, stream_uri: str, output_dir: Path, rtsp_timeout_us: int):
+    def __init__(
+        self,
+        camera_id: int,
+        stream_uri: str,
+        output_dir: Path,
+        rtsp_timeout_us: int,
+        connection_revision: int | None = None,
+    ):
         self.camera_id = camera_id
         self.stream_uri = stream_uri
         self.output_dir = output_dir
         self.rtsp_timeout_us = rtsp_timeout_us
+        self.connection_revision = connection_revision
         self.task: asyncio.Task[None] | None = None
         self.process: asyncio.subprocess.Process | None = None
         self._stop = asyncio.Event()
@@ -179,6 +188,12 @@ class EventBufferWorker:
 
     async def _run(self) -> None:
         while not self._stop.is_set():
+            revision_state = await connection_revision_state(
+                self.camera_id,
+                self.connection_revision,
+            )
+            if revision_state == "stale":
+                break
             try:
                 command = build_event_buffer_command(
                     stream_uri=self.stream_uri,
@@ -294,7 +309,7 @@ class EventRecordingManager:
                 )
             )
 
-        eligible: dict[int, tuple[Camera, str]] = {}
+        eligible: dict[int, tuple[Camera, str, int | None]] = {}
         for camera in cameras:
             if not should_buffer_event_camera(
                 camera_enabled=camera.enabled,
@@ -307,22 +322,35 @@ class EventRecordingManager:
                 stream_uri = resolve_stream(camera, "recording").uri
             except Exception:
                 continue
-            eligible[camera.id] = (camera, stream_uri)
+            connection = getattr(camera, "connection", None)
+            connection_revision = connection.revision if connection is not None else None
+            eligible[camera.id] = (camera, stream_uri, connection_revision)
 
         async with self._worker_lock:
             for camera_id in list(self._workers):
                 if camera_id not in eligible:
                     await self._stop_camera_unlocked(camera_id)
 
-            for camera_id, (_camera, stream_uri) in eligible.items():
+            for camera_id, (_camera, stream_uri, connection_revision) in eligible.items():
                 worker = self._workers.get(camera_id)
-                if worker is not None and worker.running and worker.stream_uri == stream_uri:
+                if (
+                    worker is not None
+                    and worker.running
+                    and worker.stream_uri == stream_uri
+                    and getattr(worker, "connection_revision", None) == connection_revision
+                ):
                     self._cleanup_ring(camera_id, worker.output_dir)
                     continue
                 if worker is not None:
                     await self._stop_camera_unlocked(camera_id)
                 output_dir = self.buffer_root / f"camera-{camera_id}"
-                worker = EventBufferWorker(camera_id, stream_uri, output_dir, runtime.rtsp_timeout_us)
+                worker = EventBufferWorker(
+                    camera_id,
+                    stream_uri,
+                    output_dir,
+                    runtime.rtsp_timeout_us,
+                    connection_revision=connection_revision,
+                )
                 self._workers[camera_id] = worker
                 await worker.start()
                 self._cleanup_ring(camera_id, output_dir)
