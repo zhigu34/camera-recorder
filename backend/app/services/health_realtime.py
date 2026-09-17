@@ -3,11 +3,13 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.camera import Camera
+from app.models.recording import Recording
 from app.models.system_settings import SystemSettings
 from app.services.camera_connectivity_monitor import (
     camera_connectivity_monitor,
@@ -26,6 +28,9 @@ _EXPECTED_RECORDING_STATES = {
     "error",
 }
 _TIMESTAMP_GUIDANCE_THRESHOLD = 5
+_LOCAL_RECORDINGS_BYTES_TTL_SECONDS = 10.0
+_local_recordings_bytes = 0
+_local_recordings_bytes_cached_at = 0.0
 
 
 def _timestamp_guidance(mode: str, warning_count: int) -> dict | None:
@@ -47,7 +52,34 @@ def _timestamp_guidance(mode: str, warning_count: int) -> dict | None:
     }
 
 
-def _storage_snapshot(row: SystemSettings | None) -> dict[str, Any]:
+async def _get_local_recordings_bytes(session: AsyncSession) -> int:
+    """Return logical bytes for finalized recordings that still have a local copy.
+
+    The realtime status feed is emitted every few seconds, so the SQLite aggregate is
+    cached briefly instead of scanning recording history on every websocket frame.
+    """
+
+    global _local_recordings_bytes, _local_recordings_bytes_cached_at
+
+    now = time.monotonic()
+    if now - _local_recordings_bytes_cached_at < _LOCAL_RECORDINGS_BYTES_TTL_SECONDS:
+        return _local_recordings_bytes
+
+    value = await session.scalar(
+        select(func.coalesce(func.sum(Recording.file_size), 0)).where(
+            Recording.status != "deleted"
+        )
+    )
+    _local_recordings_bytes = max(0, int(value or 0))
+    _local_recordings_bytes_cached_at = now
+    return _local_recordings_bytes
+
+
+def _storage_snapshot(
+    row: SystemSettings | None,
+    *,
+    local_recordings_bytes: int,
+) -> dict[str, Any]:
     settings.recordings_dir.mkdir(parents=True, exist_ok=True)
     usage = shutil.disk_usage(settings.recordings_dir)
     used_percent = (usage.used / usage.total * 100.0) if usage.total else 0.0
@@ -62,8 +94,10 @@ def _storage_snapshot(row: SystemSettings | None) -> dict[str, Any]:
     return {
         "used_percent": round(used_percent, 2),
         "state": state,
+        "used_bytes": usage.used,
         "free_bytes": usage.free,
         "total_bytes": usage.total,
+        "local_recordings_bytes": local_recordings_bytes,
     }
 
 
@@ -86,8 +120,9 @@ def _upload_snapshot(row: SystemSettings | None) -> dict[str, Any]:
 async def realtime_health_snapshot() -> dict[str, Any]:
     """Build the cheap current-state health contract used by the global status feed.
 
-    This intentionally does not query Recording or UploadTask history. Historical
-    availability, completeness and gap diagnosis belong to the reliability read model.
+    Historical availability, completeness and gap diagnosis belong to the reliability
+    read model. The only recording-history aggregate here is a short-lived cached byte
+    total used to distinguish app-managed local recordings from whole-volume usage.
     """
 
     now = datetime.now(timezone.utc)
@@ -101,6 +136,7 @@ async def realtime_health_snapshot() -> dict[str, Any]:
     async with SessionLocal() as session:
         cameras = list(await session.scalars(select(Camera).order_by(Camera.id)))
         system_settings = await session.get(SystemSettings, 1)
+        local_recordings_bytes = await _get_local_recordings_bytes(session)
 
     camera_rows: list[dict[str, Any]] = []
     enabled_count = 0
@@ -195,7 +231,10 @@ async def realtime_health_snapshot() -> dict[str, Any]:
             "offline": offline_count,
             "unknown": unknown_count,
         },
-        "storage": _storage_snapshot(system_settings),
+        "storage": _storage_snapshot(
+            system_settings,
+            local_recordings_bytes=local_recordings_bytes,
+        ),
         "upload": _upload_snapshot(system_settings),
         "connectivity_monitor": camera_connectivity_monitor.snapshot(),
         "camera_health": camera_rows,
