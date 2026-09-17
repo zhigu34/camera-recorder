@@ -150,7 +150,7 @@ async def update_or_switch_to_manual_rtsp(
     except IntegrityError as exc:
         await db.rollback()
         await coordinator.restore(
-            camera.id,
+            camera_id,
             snapshot,
             schedule_changed=schedule_changed,
         )
