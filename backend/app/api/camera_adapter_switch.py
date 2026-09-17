@@ -7,8 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import cameras as cameras_api
 from app.core.database import get_db
 from app.core.security import encrypt_secret
-from app.schemas.camera import CameraRead, CameraUpdate
+from app.schemas.camera import (
+    CameraCreate,
+    CameraRead,
+    CameraUnifiedCreate,
+    CameraUnifiedUpdate,
+    CameraUpdate,
+)
 from app.services.camera_connection import switch_to_manual_rtsp_connection
+from app.services.camera_mutation import create_unified_camera, update_unified_camera
 from app.services.camera_probe import CameraProbeError, probe_camera
 
 router = APIRouter(prefix="/api/cameras", tags=["cameras"])
@@ -34,12 +41,31 @@ def _apply_media_fields(camera, media: dict) -> None:
         setattr(camera, key, media.get(key))
 
 
+@router.post("", response_model=CameraRead, status_code=201)
+async def create_camera_compat(
+    payload: CameraUnifiedCreate | CameraCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    if isinstance(payload, CameraUnifiedCreate):
+        return await create_unified_camera(payload, db)
+    return await cameras_api.create_camera(payload, db)
+
+
 @router.put("/{camera_id}", response_model=CameraRead)
 async def update_or_switch_to_manual_rtsp(
     camera_id: int,
-    payload: CameraUpdate,
+    payload: CameraUnifiedUpdate | CameraUpdate,
     db: AsyncSession = Depends(get_db),
 ):
+    if isinstance(payload, CameraUnifiedUpdate):
+        camera = await cameras_api._camera_or_404(camera_id, db)
+        connection = camera.connection
+        current_adapter = connection.adapter if connection is not None else camera.connection_type
+        if payload.connection is None and current_adapter == "manual_rtsp":
+            legacy = CameraUpdate.model_validate(payload.model_dump(exclude_unset=True))
+            return await cameras_api.update_camera(camera_id, legacy, db)
+        return await update_unified_camera(camera_id, payload, db)
+
     camera = await cameras_api._camera_or_404(camera_id, db)
     connection = camera.connection
     current_adapter = connection.adapter if connection is not None else camera.connection_type
