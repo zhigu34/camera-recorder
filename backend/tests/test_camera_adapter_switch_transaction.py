@@ -386,3 +386,51 @@ def test_manual_switch_missing_target_fields_does_not_stop_or_mutate_old_connect
     assert response.status_code == 422, response.text
     assert spy.calls == []
     assert after == before
+
+
+def test_manual_switch_invalid_schedule_does_not_stop_or_mutate_old_connection(monkeypatch) -> None:
+    spy = _CoordinatorSpy()
+
+    async def fake_manual_probe(**_kwargs):
+        return _media()
+
+    monkeypatch.setattr(onvif_api, "_validated_discovery", _validated_onvif)
+    monkeypatch.setattr(onvif_api.recording_schedule_manager, "reconcile", _no_schedule_reconcile)
+    monkeypatch.setattr(cameras_api, "probe_camera", fake_manual_probe, raising=False)
+    monkeypatch.setattr(cameras_api, "camera_runtime_coordinator", spy)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras/onvif",
+            json={
+                "name": f"manual-invalid-schedule-{uuid.uuid4().hex[:10]}",
+                "host": "198.51.100.65",
+                "port": 80,
+                "username": "onvif-user",
+                "password": "onvif-secret",
+                "enabled": False,
+                "auto_record": False,
+                "timestamp_mode": "native",
+            },
+        )
+        assert created.status_code == 201, created.text
+        camera_id = int(created.json()["id"])
+        before = asyncio.run(_snapshot(camera_id))
+
+        response = client.put(
+            f"/api/cameras/{camera_id}",
+            json={
+                "ip": "192.0.2.65",
+                "rtsp_port": 9554,
+                "username": "manual-user",
+                "password": "manual-secret",
+                "rtsp_path": "/new/main",
+                "sub_rtsp_path": "/new/sub",
+                "recording_schedule_enabled": True,
+            },
+        )
+        after = asyncio.run(_snapshot(camera_id))
+
+    assert response.status_code == 422, response.text
+    assert spy.calls == []
+    assert after == before
