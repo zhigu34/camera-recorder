@@ -3,6 +3,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from app.schemas.camera_connection import CameraConnectionRead
+
 TimestampMode = Literal["native", "reconstruct", "wallclock"]
 PreviewStream = Literal["auto", "main", "sub"]
 CameraConnectionType = Literal["manual_rtsp", "onvif", "hik_sdk"]
@@ -234,6 +236,7 @@ class CameraRead(CameraBase):
 
     id: int
     password_set: bool = True
+    connection: CameraConnectionRead | None = None
 
     video_codec: str | None = None
     video_profile: str | None = None
