@@ -16,6 +16,13 @@ class CameraAdapterCapability(BaseModel):
     unavailable_reason: str | None = None
 
 
+class CameraAdapterUnavailableError(RuntimeError):
+    def __init__(self, adapter: str, reason: str) -> None:
+        self.adapter = adapter
+        self.reason = reason
+        super().__init__(reason)
+
+
 async def get_camera_adapter_capability(adapter: str) -> CameraAdapterCapability:
     if adapter == "manual_rtsp":
         return CameraAdapterCapability(id="manual_rtsp", label="Manual RTSP", available=True)
@@ -51,6 +58,16 @@ async def get_camera_adapter_capability(adapter: str) -> CameraAdapterCapability
         )
 
     return CameraAdapterCapability(id="hik_sdk", label="Hikvision SDK", available=True)
+
+
+async def require_camera_adapter_available(adapter: str) -> CameraAdapterCapability:
+    capability = await get_camera_adapter_capability(adapter)
+    if not capability.available:
+        raise CameraAdapterUnavailableError(
+            adapter,
+            capability.unavailable_reason or f"camera adapter {adapter} is unavailable",
+        )
+    return capability
 
 
 async def list_camera_adapter_capabilities() -> list[CameraAdapterCapability]:
