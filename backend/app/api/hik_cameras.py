@@ -283,7 +283,7 @@ async def update_hik_camera(
         await db.rollback()
         if snapshot is not None:
             await camera_runtime_coordinator.restore(
-                camera.id,
+                camera_id,
                 snapshot,
                 schedule_changed=schedule_changed,
             )
