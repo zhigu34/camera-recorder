@@ -50,7 +50,9 @@ export interface RealtimeHealthSnapshot {
   }
   storage: {
     total_bytes: number
+    used_bytes: number
     free_bytes: number
+    local_recordings_bytes: number
     used_percent: number
     state: 'healthy' | 'warning' | 'critical'
   }
