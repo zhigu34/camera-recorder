@@ -166,7 +166,42 @@ def test_hik_same_adapter_update_uses_runtime_coordinator(monkeypatch) -> None:
         assert metadata.channel == 3
 
 
+def test_hik_probe_is_blocked_when_deployment_disables_adapter(monkeypatch) -> None:
+    from app.services import camera_adapter_registry as registry
+
+    monkeypatch.setattr(registry.settings, "hik_enabled", False)
+    probe_calls = 0
+
+    async def unexpected_probe(_self, **_kwargs):
+        nonlocal probe_calls
+        probe_calls += 1
+        raise hik_api.HikBridgeClientError("bridge call observed", status_code=502)
+
+    monkeypatch.setattr(hik_api.HikBridgeClient, "probe", unexpected_probe)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/cameras/hik/probe",
+            json={
+                "host": "10.0.0.89",
+                "port": 8000,
+                "username": "admin",
+                "password": "private-secret",
+                "channel": 1,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == registry.HIK_DISABLED_REASON
+    assert probe_calls == 0
+    assert "private-secret" not in response.text
+
+
 def test_hik_probe_preserves_bridge_runtime_unavailable_status(monkeypatch) -> None:
+    from app.services import camera_adapter_registry as registry
+
+    monkeypatch.setattr(registry.settings, "hik_enabled", True)
+
     async def fail_probe(_self, **_kwargs):
         raise hik_api.HikBridgeClientError(
             "HCNetSDK runtime is unavailable",
