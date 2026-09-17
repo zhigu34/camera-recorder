@@ -10,7 +10,11 @@ from app.core.security import decrypt_secret
 from app.models.camera import Camera
 from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.camera_preview import resolve_preview_path
-from app.services.preview_wall import WallPreviewSession, WallPreviewSource
+from app.services.preview_wall import (
+    WallPreviewSession,
+    WallPreviewSource,
+    stream_preview_frames,  # noqa: F401
+)
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(tags=["preview-wall"])
