@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from typing import Literal
@@ -44,11 +45,31 @@ def build_hik_target(camera, role: HikStreamRole) -> HikBridgeTarget:
     )
 
 
+class HikRegisteredStream:
+    def __init__(self, client, stream_id: str) -> None:
+        self._client = client
+        self._stream_id = stream_id
+        self._closed = False
+        self._close_lock = asyncio.Lock()
+
+    async def close(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            with suppress(Exception):
+                await self._client.stop_stream(self._stream_id)
+
+    async def iter_bytes(self) -> AsyncIterator[bytes]:
+        try:
+            async for chunk in self._client.iter_media(self._stream_id):
+                if chunk:
+                    yield chunk
+        finally:
+            await self.close()
+
+
 async def iter_hik_stream(client, stream_id: str) -> AsyncIterator[bytes]:
-    try:
-        async for chunk in client.iter_media(stream_id):
-            if chunk:
-                yield chunk
-    finally:
-        with suppress(Exception):
-            await client.stop_stream(stream_id)
+    registered = HikRegisteredStream(client, stream_id)
+    async for chunk in registered.iter_bytes():
+        yield chunk
