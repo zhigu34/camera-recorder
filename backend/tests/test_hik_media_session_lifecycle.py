@@ -73,6 +73,7 @@ async def test_hik_route_registers_camera_stream_and_external_close(monkeypatch)
     assert client.created == [target]
     assert registry.registered_camera_ids == [42]
     assert registry.closer is not None
+    assert await anext(response.body_iterator) == b"payload"
 
     await registry.closer()
     assert client.stopped == ["stream-1"]
