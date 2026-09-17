@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,22 @@ from app.services.system_settings import load_runtime_settings
 router = APIRouter(prefix="/api/cameras/onvif", tags=["onvif-cameras"])
 
 
+def _rtsp_legacy_fields(uri: str, fallback_host: str) -> tuple[str, int, str]:
+    parsed = urlsplit(uri)
+    if parsed.scheme.lower() != "rtsp":
+        raise HTTPException(status_code=502, detail="ONVIF 返回的主码流不是 RTSP")
+    host = parsed.hostname or fallback_host
+    port = parsed.port or 554
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    return host, port, path
+
+
+def _profile(result: OnvifProbeResult, token: str):
+    return next((item for item in result.profiles if item.token == token), None)
+
+
 async def _probe_onvif(payload: OnvifProbeRequest) -> OnvifProbeResult:
     client = OnvifClient(
         device_service_url=payload.device_service_url,
@@ -40,11 +58,26 @@ async def _probe_onvif(payload: OnvifProbeRequest) -> OnvifProbeResult:
     return OnvifProbeResult.model_validate(value)
 
 
-async def _probe_legacy_connection(
+async def _validated_discovery(
     payload: OnvifProbeRequest,
     db: AsyncSession,
-) -> tuple[OnvifProbeResult, CameraConnectionProbeResult]:
+):
+    """Compatibility validation seam for the legacy ONVIF endpoint.
+
+    Persistence is intentionally handled only by the unified mutation service.
+    The tuple shape remains stable for existing callers/tests during the
+    compatibility window.
+    """
     discovered = await _probe_onvif(payload)
+    main_profile = _profile(discovered, discovered.recording_profile_token)
+    host, rtsp_port, rtsp_path = _rtsp_legacy_fields(discovered.recording_uri, payload.host)
+    sub_rtsp_path = None
+    if discovered.preview_profile_token != discovered.recording_profile_token:
+        _sub_host, _sub_port, sub_rtsp_path = _rtsp_legacy_fields(
+            discovered.preview_uri,
+            payload.host,
+        )
+
     runtime = await load_runtime_settings(db)
     try:
         media = await probe_stream_uri(
@@ -60,7 +93,16 @@ async def _probe_legacy_connection(
             status_code=502,
             detail=f"ONVIF 设备可访问，但主码流验证失败: {exc}",
         ) from exc
+    return discovered, media, main_profile, host, rtsp_port, rtsp_path, sub_rtsp_path
 
+
+async def _probe_legacy_connection(
+    payload: OnvifProbeRequest,
+    db: AsyncSession,
+) -> tuple[OnvifProbeResult, CameraConnectionProbeResult]:
+    discovered, media, _main_profile, _host, _rtsp_port, _rtsp_path, _sub_path = (
+        await _validated_discovery(payload, db)
+    )
     result = CameraConnectionProbeResult(
         adapter="onvif",
         device={
