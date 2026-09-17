@@ -37,7 +37,7 @@
 - Produces: `CameraRuntimeConfig.connection_revision: int | None = None`
 - Produces: `MotionWorkerConfig.connection_revision: int | None = None`
 
-- [ ] **Step 1: Write failing checker/runtime-config tests**
+- [x] **Step 1: Write failing checker/runtime-config tests**
 
 Cover these exact cases in `test_camera_connection_revision_guard.py`:
 
@@ -52,7 +52,7 @@ assert runtime_config(camera).connection_revision == camera.connection.revision
 
 Also assert `_default_config_loader()` produces `MotionWorkerConfig.connection_revision` from `camera.connection.revision`.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run through CI or locally:
 
@@ -63,7 +63,7 @@ uv run pytest tests/test_camera_connection_revision_guard.py -q
 
 Expected: import/attribute failures because the checker and config fields do not exist.
 
-- [ ] **Step 3: Implement the tri-state checker**
+- [x] **Step 3: Implement the tri-state checker**
 
 Create `camera_connection_revision.py` with this contract:
 
@@ -87,7 +87,7 @@ async def connection_revision_state(camera_id: int, expected_revision: int | Non
 
 Do not mutate Camera or connection rows.
 
-- [ ] **Step 4: Propagate revision into runtime configs**
+- [x] **Step 4: Propagate revision into runtime configs**
 
 Add optional fields at the end of both dataclasses:
 
@@ -103,7 +103,7 @@ connection_revision=(camera.connection.revision if camera.connection is not None
 
 in `camera_config.runtime_config()` and `motion_manager._default_config_loader()`.
 
-- [ ] **Step 5: Run focused tests and existing config tests**
+- [x] **Step 5: Run focused tests and existing config tests**
 
 ```bash
 cd backend
@@ -112,7 +112,7 @@ uv run pytest tests/test_camera_connection_revision_guard.py tests/test_ffmpeg_b
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/services/camera_connection_revision.py backend/app/services/ffmpeg_builder.py backend/app/services/camera_config.py backend/app/services/motion_worker.py backend/app/services/motion_manager.py backend/tests/test_camera_connection_revision_guard.py
@@ -131,7 +131,7 @@ git commit -m "feat: propagate camera connection revision"
 - Consumes: `connection_revision_state(camera_id, expected_revision)` from Task 1.
 - Behavior: `CameraWorker` may spawn FFmpeg only when revision state is not `stale`.
 
-- [ ] **Step 1: Write failing recorder tests**
+- [x] **Step 1: Write failing recorder tests**
 
 Use a `CameraRuntimeConfig(connection_revision=7)` and monkeypatch the revision checker plus `asyncio.create_subprocess_exec`.
 
@@ -148,7 +148,7 @@ assert worker.state == "STOPPED"
 
 Add a reconnect test where first check is `current`, the fake process exits, and the next check is `stale`; assert only one FFmpeg spawn occurs. Add a `None` revision test proving legacy config still reaches spawn logic.
 
-- [ ] **Step 2: Run test and verify RED**
+- [x] **Step 2: Run test and verify RED**
 
 ```bash
 cd backend
@@ -157,7 +157,7 @@ uv run pytest tests/test_recorder_revision_guard.py -q
 
 Expected: stale configs still reach FFmpeg spawn/reconnect.
 
-- [ ] **Step 3: Guard each recorder spawn**
+- [x] **Step 3: Guard each recorder spawn**
 
 At the top of each `_run_loop()` iteration, before state changes/spawn failure accounting:
 
@@ -174,7 +174,7 @@ if revision_state == "unknown":
 
 Do not call `_mark_disconnected`, `_check_failure_streak`, or increment counters for stale exit.
 
-- [ ] **Step 4: Run recorder tests**
+- [x] **Step 4: Run recorder tests**
 
 ```bash
 cd backend
@@ -183,7 +183,7 @@ uv run pytest tests/test_recorder_revision_guard.py tests/test_camera_enabled_ru
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/recorder_manager.py backend/tests/test_recorder_revision_guard.py
@@ -202,7 +202,7 @@ git commit -m "feat: stop stale recorder reconnects"
 - Consumes: `MotionWorkerConfig.connection_revision` and `connection_revision_state()`.
 - Behavior: confirmed stale revision ends `_supervise()` before another worker attempt.
 
-- [ ] **Step 1: Write failing motion tests**
+- [x] **Step 1: Write failing motion tests**
 
 Construct `MotionDetectionManager` with a fake worker factory and `MotionWorkerConfig(connection_revision=11)`.
 
@@ -217,7 +217,7 @@ assert manager.status(config.camera_id)["state"] == "stopped"
 
 Add a reconnect case where the first worker raises a device error, retry delay completes, and the next revision check returns `stale`; assert a second worker is never created. Add `unknown` coverage proving it does not become the worker's device error.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cd backend
@@ -226,7 +226,7 @@ uv run pytest tests/test_motion_revision_guard.py -q
 
 Expected: worker factory is still called for stale revisions.
 
-- [ ] **Step 3: Add supervisor guard**
+- [x] **Step 3: Add supervisor guard**
 
 Before `worker_factory(...)` in every loop iteration:
 
@@ -239,7 +239,7 @@ if revision_state == "stale":
 
 For `unknown`, preserve the existing supervisor path and do not overwrite `last_error` with a revision-check/database error.
 
-- [ ] **Step 4: Run motion tests**
+- [x] **Step 4: Run motion tests**
 
 ```bash
 cd backend
@@ -248,7 +248,7 @@ uv run pytest tests/test_motion_revision_guard.py tests/test_motion_manager.py t
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/app/services/motion_manager.py backend/tests/test_motion_revision_guard.py
@@ -268,7 +268,7 @@ git commit -m "feat: stop stale motion reconnects"
 - `EventBufferWorker.__init__` gains `connection_revision: int | None = None`.
 - Reconcile compares both `worker.stream_uri` and `worker.connection_revision`.
 
-- [ ] **Step 1: Write failing event-ring tests**
+- [x] **Step 1: Write failing event-ring tests**
 
 Required cases:
 
@@ -286,7 +286,7 @@ assert new_worker.connection_revision == 5
 
 Also cover `None` compatibility and verify active-event capture ownership is not cleared by worker replacement logic.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 cd backend
@@ -295,7 +295,7 @@ uv run pytest tests/test_event_recording_revision_guard.py tests/test_event_reco
 
 Expected: stale event worker still spawns and reconcile reuses same-URI old worker.
 
-- [ ] **Step 3: Add event worker guard**
+- [x] **Step 3: Add event worker guard**
 
 Store `connection_revision` on `EventBufferWorker`. At the top of its reconnect loop:
 
@@ -307,7 +307,7 @@ if revision_state == "stale":
 
 `unknown` preserves current retry behavior.
 
-- [ ] **Step 4: Make reconcile revision-aware**
+- [x] **Step 4: Make reconcile revision-aware**
 
 Build eligibility as `(camera, stream_uri, connection_revision)` where:
 
@@ -319,7 +319,7 @@ Reuse an existing running worker only when both URI and revision match. Pass rev
 
 Do not alter `_capture_required`, `event_capture_required()`, or PR #60 handoff ordering.
 
-- [ ] **Step 5: Run focused and handoff tests**
+- [x] **Step 5: Run focused and handoff tests**
 
 ```bash
 cd backend
@@ -330,7 +330,7 @@ If `test_event_recording.py` does not exist, run the existing event recording te
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/app/services/event_recording.py backend/tests/test_event_recording_revision_guard.py
@@ -345,11 +345,11 @@ git commit -m "feat: stop stale event buffer reconnects"
 - Modify: `docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md`
 - Modify: `docs/superpowers/plans/2026-09-17-camera-connection-revision-guard.md`
 
-- [ ] **Step 1: Mark only this guard complete**
+- [x] **Step 1: Mark only this guard complete**
 
 Update the migration checklist to mark long-running recorder/motion/event reconnects protected by `CameraConnection.revision`. Keep preview-session termination, HIK session release, adapter switching, and other remaining work unchecked.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 CI must show:
 
@@ -366,7 +366,7 @@ frontend: success or correctly skipped by path filter when no frontend diff
 
 Specifically confirm `test_event_recording_handoff.py` remains green.
 
-- [ ] **Step 3: Update plan checkboxes and commit docs**
+- [x] **Step 3: Update plan checkboxes and commit docs**
 
 ```bash
 git add docs/superpowers/specs/2026-09-16-camera-architecture-refactor-migration.md docs/superpowers/plans/2026-09-17-camera-connection-revision-guard.md
