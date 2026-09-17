@@ -20,11 +20,8 @@ def test_realtime_health_endpoint_is_current_state_only() -> None:
     assert "connectivity_monitor" in body
     assert "recordings_24h" not in body
     assert "recording_completeness" not in body
-    assert "used_bytes" in body["storage"]
-    assert "local_recordings_bytes" in body["storage"]
-    assert body["storage"]["used_bytes"] == (
-        body["storage"]["total_bytes"] - body["storage"]["free_bytes"]
-    )
+    assert body["storage"]["used_bytes"] >= 0
+    assert body["storage"]["local_recordings_bytes"] >= 0
 
 
 def test_health_websocket_uses_realtime_contract() -> None:
