@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     failed_dir: Path = BASE_DIR / "failed"
     logs_dir: Path = BASE_DIR / "logs"
     openlist_public_port: int = 5244
+    hik_enabled: bool = False
     hik_bridge_url: str = "http://hik-bridge:8100"
     internal_media_url: str = "http://127.0.0.1:8000"
 
