@@ -6,6 +6,7 @@ from typing import Literal
 from app.core.database import SessionLocal
 from app.models.camera import Camera
 from app.services.camera_config import runtime_config
+from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.event_recording import event_recording_manager
 from app.services.motion_manager import motion_detection_manager
 from app.services.recorder_manager import recorder_manager
@@ -34,6 +35,8 @@ class CameraRuntimeCoordinator:
             was_recording=recorder_manager.is_running(camera_id),
             recording_owner=recording_schedule_manager.recording_owner(camera_id),
         )
+
+        await camera_media_session_registry.stop_camera(camera_id)
 
         # Stop the detector first so it cannot confirm another event while the
         # pre-roll worker is being torn down. A runtime reload intentionally

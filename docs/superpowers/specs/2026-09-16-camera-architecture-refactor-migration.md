@@ -1,6 +1,6 @@
 # Camera Architecture Refactor — Migration Notes
 
-Status: **Switch slice complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator lifecycle and connection revision guard slices complete**
+Status: **Switch slice complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator lifecycle, connection revision guard, and active media-session lifecycle slices complete**
 
 Date: 2026-09-16
 
@@ -16,7 +16,7 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
-Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, and the connection revision guard slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
+Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, the connection revision guard slice, and the active media-session lifecycle slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
 
 ### Expand
 
@@ -56,8 +56,8 @@ Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator 
 - [x] Route manual RTSP connection/policy edits, ONVIF re-discovery updates, and Camera deletion through the runtime coordinator.
 - [x] Treat `Camera.enabled=false` as the runtime master switch for manual start, restart, and new preview requests while still allowing explicit one-shot Probe.
 - [x] Preserve the event-buffer handoff invariant when manually starting normal recording by using `start_regular_recorder`.
-- [ ] Terminate already-active preview sessions when a Camera is disabled or reloaded.
-- [ ] Release adapter-specific temporary sessions on disable/reload, especially HIK bridge streams.
+- [x] Terminate already-active preview sessions when a Camera is disabled or reloaded.
+- [x] Release adapter-specific temporary sessions on disable/reload, especially HIK bridge streams.
 - [x] Add current-connection revision stale-worker invalidation inside long-running reconnect loops.
 
 ### Contract
@@ -98,7 +98,7 @@ The production-code head for the RuntimeCoordinator slice was verified in CI `#1
 
 That verification covers recorder ownership, coordinated stop/reload sequencing, manual-recording restoration, schedule reconciliation, event-buffer/motion restore order, RTSP and ONVIF update routing, Camera deletion teardown, disabled-camera start/restart/preview guards, continued disabled-camera Probe access, and regular-recorder/event-buffer handoff.
 
-The RuntimeCoordinator slice intentionally does not claim active preview-session termination or HIK temporary-session lifecycle integration; those remain explicit follow-up items above. Long-running worker revision invalidation is completed by the subsequent connection revision guard slice below.
+The RuntimeCoordinator slice itself intentionally did not claim active preview-session termination or HIK temporary-session lifecycle integration; those are completed by the later active media-session lifecycle slice below. Long-running worker revision invalidation is completed by the subsequent connection revision guard slice below.
 
 ### Connection revision guard slice
 
@@ -112,10 +112,16 @@ The production-code head for the HIK canonical connection and adapter switching 
 
 That verification covers the Expand-only `hik_connection_configs` migration with no historical HIK backfill, strict HIK current-connection writes, current-first HIK runtime resolution, canonical HIK API persistence with rollback shadows, stable Camera and `CameraConnection` identity across three-way adapter switching, single-step revision increments, stale adapter-config removal, target validation before runtime stop/persistence, rollback plus old-runtime restoration on commit failure, persisted new connection state when post-commit runtime restoration fails, and schedule validation before stopping an existing runtime. HIK media proxy regressions also preserve empty-chunk filtering and best-effort bridge cleanup.
 
-Active preview-session termination and adapter-specific temporary-session release remain deliberate follow-up work. Contract-phase legacy-field/shadow-write/route cleanup also remains deferred until the new model has run successfully for a stable release window.
+Active preview-session termination and adapter-specific temporary-session release are completed by the active media-session lifecycle slice below. Contract-phase legacy-field/shadow-write/route cleanup remains deferred until the new model has run successfully for a stable release window.
+
+### Active media-session lifecycle slice
+
+The production-code head for the active media-session lifecycle slice was verified in CI `#1290` (`35201540794`). All four backend pytest shards, backend quality/Ruff, HIK bridge tests, Docker build/start smoke, database migration compatibility, and the aggregate backend job completed successfully; frontend was correctly skipped because this slice has no frontend changes.
+
+That verification covers process-local camera-scoped media-session ownership, idempotent detail-preview FFmpeg teardown, independent preview-wall slot teardown without closing unrelated camera slots or the WebSocket, HIK bridge `stream_id` registration and best-effort DELETE cleanup, media-session teardown before motion/event/recorder/schedule runtime teardown, and a preview/media-agnostic `restore()` path. Existing preview fallback behavior, HIK empty-chunk filtering, early-consumer-close cleanup, and adapter target validation before runtime teardown remained covered by regression tests.
 
 ## Why this is simpler than the generic migration
 
 Because there is no legacy ONVIF/HIK production data to preserve, the migration does not need to reconcile existing `onvif_device_metadata` or `hik_device_metadata` into active connections. ONVIF and HIK can use the new adapter implementations without risking existing camera history, while legacy metadata stays outside the canonical current-connection source of truth.
 
-The migration concern therefore remains narrow: preserve Camera IDs/history, move existing RTSP connection data out of `Camera` safely, keep new manual RTSP/ONVIF/HIK state canonical in the current connection layer, support explicit adapter replacement on the same stable identities, and centralize the bounded recorder/schedule/motion/event lifecycle without inferring historical adapter state.
+The migration concern therefore remains narrow: preserve Camera IDs/history, move existing RTSP connection data out of `Camera` safely, keep new manual RTSP/ONVIF/HIK state canonical in the current connection layer, support explicit adapter replacement on the same stable identities, and centralize the bounded recorder/schedule/motion/event/media lifecycle without inferring historical adapter state.

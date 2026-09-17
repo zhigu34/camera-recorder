@@ -8,8 +8,13 @@ from pydantic import BaseModel, Field
 from app.core.database import SessionLocal
 from app.core.security import decrypt_secret
 from app.models.camera import Camera
+from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.camera_preview import resolve_preview_path
-from app.services.preview_wall import WallPreviewSource, stream_preview_frames
+from app.services.preview_wall import (
+    WallPreviewSession,
+    WallPreviewSource,
+    stream_preview_frames,  # noqa: F401
+)
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(tags=["preview-wall"])
@@ -61,6 +66,18 @@ def _source_for_camera(
     )
 
 
+async def run_registered_session(
+    camera_id: int,
+    session: WallPreviewSession,
+    on_frame,
+) -> None:
+    session_id = await camera_media_session_registry.register(camera_id, session.close)
+    try:
+        await session.stream(on_frame)
+    finally:
+        await camera_media_session_registry.unregister(camera_id, session_id)
+
+
 @router.websocket("/ws/preview-wall")
 async def preview_wall(websocket: WebSocket) -> None:
     await websocket.accept()
@@ -90,7 +107,11 @@ async def preview_wall(websocket: WebSocket) -> None:
                 await send_json(_stream_status_payload("slot_ready", slot.index, active_stream))
 
         try:
-            await stream_preview_frames(source, on_frame)
+            await run_registered_session(
+                slot.camera_id,
+                WallPreviewSession(source),
+                on_frame,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as primary_exc:
@@ -107,7 +128,11 @@ async def preview_wall(websocket: WebSocket) -> None:
                         )
                     )
                 try:
-                    await stream_preview_frames(fallback, on_frame)
+                    await run_registered_session(
+                        slot.camera_id,
+                        WallPreviewSession(fallback),
+                        on_frame,
+                    )
                     return
                 except asyncio.CancelledError:
                     raise
