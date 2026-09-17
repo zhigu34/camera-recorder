@@ -202,12 +202,16 @@ def test_hik_probe_preserves_bridge_runtime_unavailable_status(monkeypatch) -> N
 
     monkeypatch.setattr(registry.settings, "hik_enabled", True)
 
+    async def capability_available(_adapter: str):
+        return None
+
     async def fail_probe(_self, **_kwargs):
         raise hik_api.HikBridgeClientError(
             "HCNetSDK runtime is unavailable",
             status_code=503,
         )
 
+    monkeypatch.setattr(hik_api, "require_camera_adapter_available", capability_available)
     monkeypatch.setattr(hik_api.HikBridgeClient, "probe", fail_probe)
 
     with TestClient(app) as client:
