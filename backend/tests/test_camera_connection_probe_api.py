@@ -182,3 +182,40 @@ def test_new_draft_without_password_is_rejected_before_probe(monkeypatch) -> Non
 
     assert response.status_code == 422
     assert called is False
+
+
+def test_disabled_hik_draft_probe_returns_503_without_bridge_call(monkeypatch) -> None:
+    from app.services import camera_adapter_probe as adapter_probe
+    from app.services import camera_adapter_registry as registry
+
+    monkeypatch.setattr(registry.settings, "hik_enabled", False)
+    bridge_constructions = 0
+
+    def unexpected_bridge(*args, **kwargs):
+        nonlocal bridge_constructions
+        bridge_constructions += 1
+        raise AssertionError("disabled HIK draft probe must not construct a bridge client")
+
+    monkeypatch.setattr(adapter_probe, "HikBridgeClient", unexpected_bridge)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/camera-connections/probe",
+            json={
+                "connection": {
+                    "adapter": "hik_sdk",
+                    "host": "192.0.2.74",
+                    "username": "admin",
+                    "password": "draft-secret",
+                    "sdk_port": 8000,
+                    "channel": 1,
+                    "main_stream_type": 0,
+                    "sub_stream_type": 1,
+                }
+            },
+        )
+
+    assert response.status_code == 503, response.text
+    assert response.json()["detail"] == registry.HIK_DISABLED_REASON
+    assert bridge_constructions == 0
+    assert "draft-secret" not in response.text
