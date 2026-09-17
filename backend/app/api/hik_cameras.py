@@ -281,6 +281,12 @@ async def update_hik_camera(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
+        if snapshot is not None:
+            await camera_runtime_coordinator.restore(
+                camera.id,
+                snapshot,
+                schedule_changed=schedule_changed,
+            )
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
 
     await db.refresh(camera)
