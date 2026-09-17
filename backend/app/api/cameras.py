@@ -24,6 +24,7 @@ from app.services.camera_config import runtime_config
 from app.services.camera_connection import ConnectionAdapterMismatch, upsert_manual_rtsp_connection
 from app.services.camera_deletion import camera_deletion_impact
 from app.services.camera_identity import infer_camera_form_factor
+from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.camera_preview import CameraPreviewError, PreviewStream, open_mjpeg_preview
 from app.services.camera_probe import CameraProbeError, probe_camera_media
 from app.services.camera_runtime_coordinator import camera_runtime_coordinator
@@ -313,8 +314,17 @@ async def preview_camera(
             ) from fallback_exc
         selected_stream = "main"
 
+    session_id = await camera_media_session_registry.register(camera_id, session.close)
+
+    async def registered_stream():
+        try:
+            async for chunk in session.stream():
+                yield chunk
+        finally:
+            await camera_media_session_registry.unregister(camera_id, session_id)
+
     return StreamingResponse(
-        session.stream(),
+        registered_stream(),
         media_type="multipart/x-mixed-replace; boundary=ffmpeg",
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",
