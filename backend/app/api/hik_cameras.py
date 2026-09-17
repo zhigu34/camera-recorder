@@ -10,17 +10,17 @@ from app.core.security import encrypt_secret
 from app.models.camera import Camera
 from app.schemas.camera import CameraRead
 from app.schemas.hikvision import HikCameraCreate, HikCameraUpdate, HikProbeRequest, HikProbeResult
-from app.services.camera_config import runtime_config
-from app.services.camera_connection import ConnectionAdapterMismatch, upsert_hik_connection
+from app.services.camera_connection import (
+    ConnectionAdapterMismatch,
+    switch_to_hik_connection,
+    upsert_hik_connection,
+)
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
+from app.services.camera_runtime_coordinator import camera_runtime_coordinator
 from app.services.event_log import add_audit_event, add_event
-from app.services.event_recording import event_recording_manager
 from app.services.hik_bridge_client import HikBridgeClient, HikBridgeClientError
 from app.services.hik_media_adapter import HikBridgeTarget
-from app.services.motion_manager import motion_detection_manager
-from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import recording_schedule_manager
-from app.services.recording_start import start_regular_recorder
 from app.services.system_settings import load_runtime_settings
 
 router = APIRouter(prefix="/api/cameras/hik", tags=["hik-cameras"])
@@ -104,8 +104,10 @@ def _write_current_connection(
     *,
     password_encrypted: str,
     verified_at: datetime,
+    switch: bool = False,
 ) -> None:
-    upsert_hik_connection(
+    writer = switch_to_hik_connection if switch else upsert_hik_connection
+    writer(
         camera,
         host=payload.host,
         username=payload.username,
@@ -211,14 +213,18 @@ async def update_hik_camera(
         raise HTTPException(status_code=404, detail="camera not found")
     connection = camera.connection
     current_adapter = connection.adapter if connection is not None else camera.connection_type
-    if current_adapter != "hik_sdk":
-        raise HTTPException(status_code=409, detail="camera is not a HIK SDK device")
+    switching = current_adapter != "hik_sdk"
+    if switching and connection is None:
+        raise HTTPException(status_code=409, detail="camera has no current connection to switch")
 
-    was_recording = recorder_manager.is_running(camera.id)
     discovered = await _probe_hik(payload)
     media = await _validate_main_stream(payload, db)
-    schedule_changed = False
 
+    snapshot = None
+    if switching:
+        snapshot = await camera_runtime_coordinator.stop_all(camera.id)
+
+    schedule_changed = False
     if payload.name is not None:
         camera.name = payload.name
     camera.manufacturer = "Hikvision"
@@ -244,6 +250,7 @@ async def update_hik_camera(
             discovered,
             password_encrypted=encrypt_secret(payload.password),
             verified_at=now,
+            switch=switching,
         )
     except ConnectionAdapterMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -277,13 +284,12 @@ async def update_hik_camera(
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
 
     await db.refresh(camera)
-    if was_recording:
-        await recorder_manager.stop(camera.id)
-    await event_recording_manager.stop_camera(camera.id)
-    await motion_detection_manager.restart_camera(camera.id)
-    if schedule_changed:
-        recording_schedule_manager.reset_for_schedule_change(camera.id)
-        await recording_schedule_manager.reconcile()
-    elif was_recording:
-        await start_regular_recorder(runtime_config(camera))
+    if snapshot is not None:
+        await camera_runtime_coordinator.restore(
+            camera.id,
+            snapshot,
+            schedule_changed=schedule_changed,
+        )
+    else:
+        await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
     return camera
