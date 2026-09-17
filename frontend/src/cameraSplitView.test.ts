@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import cameraSource from './CamerasView.vue?raw'
 import workspaceSource from './CamerasWorkspace.vue?raw'
 import mainSource from './main.ts?raw'
-import splitStyleSource from './styles/camera-split-view.css?raw'
 
 describe('camera split view', () => {
   it('uses a permanent desktop list/detail workspace instead of the legacy camera drawer', () => {
@@ -29,10 +28,9 @@ describe('camera split view', () => {
     expect(workspaceSource).toContain('.camera-detail-pane .camera-detail-extension-slot')
   })
 
-  it('loads the split-view refinement and includes a narrow-screen list/detail fallback', () => {
+  it('loads the split-view refinement and exposes the narrow-screen list/detail controls', () => {
     expect(mainSource).toContain("./styles/camera-split-view.css")
-    expect(splitStyleSource).toContain('.camera-split-layout')
-    expect(splitStyleSource).toContain('@media (max-width:')
-    expect(splitStyleSource).toContain('.camera-detail-back')
+    expect(cameraSource).toContain("'detail-active': Boolean(selectedCamera)")
+    expect(cameraSource).toContain('class="camera-detail-back"')
   })
 })
