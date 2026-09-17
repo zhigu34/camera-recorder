@@ -48,6 +48,15 @@ def _rtsp_shadow_fields(uri: str, fallback_host: str) -> tuple[str, int, str]:
     return host, port, path
 
 
+def _verification_status(
+    requested: str | None,
+    verified_at: datetime | None,
+) -> str:
+    if requested is not None:
+        return requested
+    return "verified" if verified_at is not None else "unverified"
+
+
 def upsert_manual_rtsp_connection(
     camera: Camera,
     *,
@@ -144,22 +153,25 @@ def upsert_onvif_connection(
     username: str,
     password_encrypted: str,
     device_service_url: str,
-    device_uuid: str | None,
-    capabilities: dict,
-    profiles: list[dict],
-    recording_profile_token: str,
-    preview_profile_token: str | None,
-    detection_profile_token: str | None,
-    recording_uri: str,
-    preview_uri: str | None,
-    detection_uri: str | None,
-    verified_at: datetime,
+    device_uuid: str | None = None,
+    capabilities: dict | None = None,
+    profiles: list[dict] | None = None,
+    recording_profile_token: str | None = None,
+    preview_profile_token: str | None = None,
+    detection_profile_token: str | None = None,
+    recording_uri: str | None = None,
+    preview_uri: str | None = None,
+    detection_uri: str | None = None,
+    verification_status: str | None = None,
+    verified_at: datetime | None = None,
+    last_error: str | None = None,
 ) -> CameraConnection:
-    safe_recording_uri = _credential_free_uri(recording_uri)
+    safe_recording_uri = _credential_free_uri(recording_uri) if recording_uri else None
     safe_preview_uri = _credential_free_uri(preview_uri) if preview_uri else None
     safe_detection_uri = _credential_free_uri(detection_uri) if detection_uri else None
     connection = camera.connection
     effective_password_encrypted = password_encrypted
+    requested_status = _verification_status(verification_status, verified_at)
 
     if connection is None:
         connection = CameraConnection(
@@ -168,21 +180,25 @@ def upsert_onvif_connection(
             username=username,
             password_encrypted=password_encrypted,
             revision=1,
-            verification_status="verified",
-            verified_at=verified_at,
-            last_error=None,
+            verification_status=requested_status,
+            verified_at=verified_at if requested_status == "verified" else None,
+            last_error=None if requested_status == "verified" else last_error,
         )
         connection.onvif_config = OnvifConnectionConfig(
             device_service_url=device_service_url,
-            device_uuid=device_uuid,
-            capabilities_json=capabilities,
-            profiles_json=profiles,
-            recording_profile_token=recording_profile_token,
-            preview_profile_token=preview_profile_token,
-            detection_profile_token=detection_profile_token,
-            recording_uri=safe_recording_uri,
-            preview_uri=safe_preview_uri,
-            detection_uri=safe_detection_uri,
+            device_uuid=device_uuid if requested_status == "verified" else None,
+            capabilities_json=(capabilities or {}) if requested_status == "verified" else {},
+            profiles_json=(profiles or []) if requested_status == "verified" else [],
+            recording_profile_token=(
+                recording_profile_token if requested_status == "verified" else None
+            ),
+            preview_profile_token=(preview_profile_token if requested_status == "verified" else None),
+            detection_profile_token=(
+                detection_profile_token if requested_status == "verified" else None
+            ),
+            recording_uri=safe_recording_uri if requested_status == "verified" else None,
+            preview_uri=safe_preview_uri if requested_status == "verified" else None,
+            detection_uri=safe_detection_uri if requested_status == "verified" else None,
         )
         camera.connection = connection
     else:
@@ -194,54 +210,85 @@ def upsert_onvif_connection(
             effective_password_encrypted = connection.password_encrypted
 
         config = connection.onvif_config
-        config_changed = config is None or (
+        target_changed = config is None or (
             connection.host != host
             or connection.username != username
             or connection.password_encrypted != effective_password_encrypted
             or config.device_service_url != device_service_url
-            or config.device_uuid != device_uuid
-            or config.capabilities_json != capabilities
-            or config.profiles_json != profiles
-            or config.recording_profile_token != recording_profile_token
-            or config.preview_profile_token != preview_profile_token
-            or config.detection_profile_token != detection_profile_token
-            or config.recording_uri != safe_recording_uri
-            or config.preview_uri != safe_preview_uri
-            or config.detection_uri != safe_detection_uri
         )
         if config is None:
-            config = OnvifConnectionConfig()
+            config = OnvifConnectionConfig(
+                device_service_url=device_service_url,
+                capabilities_json={},
+                profiles_json=[],
+            )
             connection.onvif_config = config
-        if config_changed:
+
+        if target_changed:
             connection.revision += 1
+            connection.verification_status = requested_status
+            connection.verified_at = verified_at if requested_status == "verified" else None
+            connection.last_error = None if requested_status == "verified" else last_error
+            config.device_uuid = device_uuid if requested_status == "verified" else None
+            config.capabilities_json = (capabilities or {}) if requested_status == "verified" else {}
+            config.profiles_json = (profiles or []) if requested_status == "verified" else []
+            config.recording_profile_token = (
+                recording_profile_token if requested_status == "verified" else None
+            )
+            config.preview_profile_token = (
+                preview_profile_token if requested_status == "verified" else None
+            )
+            config.detection_profile_token = (
+                detection_profile_token if requested_status == "verified" else None
+            )
+            config.recording_uri = safe_recording_uri if requested_status == "verified" else None
+            config.preview_uri = safe_preview_uri if requested_status == "verified" else None
+            config.detection_uri = safe_detection_uri if requested_status == "verified" else None
+        elif requested_status == "verified" and (
+            verified_at is not None
+            or device_uuid is not None
+            or capabilities is not None
+            or profiles is not None
+            or recording_profile_token is not None
+            or recording_uri is not None
+        ):
+            connection.verification_status = "verified"
+            connection.verified_at = verified_at
+            connection.last_error = None
+            config.device_uuid = device_uuid
+            config.capabilities_json = capabilities or {}
+            config.profiles_json = profiles or []
+            config.recording_profile_token = recording_profile_token
+            config.preview_profile_token = preview_profile_token
+            config.detection_profile_token = detection_profile_token
+            config.recording_uri = safe_recording_uri
+            config.preview_uri = safe_preview_uri
+            config.detection_uri = safe_detection_uri
+        elif verification_status == "failed":
+            connection.verification_status = "failed"
+            connection.last_error = last_error
 
         connection.host = host
         connection.username = username
         connection.password_encrypted = effective_password_encrypted
-        connection.verification_status = "verified"
-        connection.verified_at = verified_at
-        connection.last_error = None
         config.device_service_url = device_service_url
-        config.device_uuid = device_uuid
-        config.capabilities_json = capabilities
-        config.profiles_json = profiles
-        config.recording_profile_token = recording_profile_token
-        config.preview_profile_token = preview_profile_token
-        config.detection_profile_token = detection_profile_token
-        config.recording_uri = safe_recording_uri
-        config.preview_uri = safe_preview_uri
-        config.detection_uri = safe_detection_uri
 
-    legacy_host, legacy_port, legacy_main_path = _rtsp_shadow_fields(
-        safe_recording_uri,
-        host,
-    )
-    legacy_sub_path = None
-    if safe_preview_uri and preview_profile_token != recording_profile_token:
-        _preview_host, _preview_port, legacy_sub_path = _rtsp_shadow_fields(
-            safe_preview_uri,
+    if safe_recording_uri:
+        legacy_host, legacy_port, legacy_main_path = _rtsp_shadow_fields(
+            safe_recording_uri,
             host,
         )
+        legacy_sub_path = None
+        if safe_preview_uri and preview_profile_token != recording_profile_token:
+            _preview_host, _preview_port, legacy_sub_path = _rtsp_shadow_fields(
+                safe_preview_uri,
+                host,
+            )
+    else:
+        legacy_host = host
+        legacy_port = 554
+        legacy_main_path = "/"
+        legacy_sub_path = None
 
     camera.connection_type = "onvif"
     camera.ip = legacy_host
@@ -263,13 +310,16 @@ def upsert_hik_connection(
     channel: int,
     main_stream_type: int,
     sub_stream_type: int,
-    device_serial: str | None,
-    device_model: str | None,
-    device_name: str | None,
-    verified_at: datetime,
+    device_serial: str | None = None,
+    device_model: str | None = None,
+    device_name: str | None = None,
+    verification_status: str | None = None,
+    verified_at: datetime | None = None,
+    last_error: str | None = None,
 ) -> CameraConnection:
     connection = camera.connection
     effective_password_encrypted = password_encrypted
+    requested_status = _verification_status(verification_status, verified_at)
 
     if connection is None:
         connection = CameraConnection(
@@ -278,18 +328,18 @@ def upsert_hik_connection(
             username=username,
             password_encrypted=password_encrypted,
             revision=1,
-            verification_status="verified",
-            verified_at=verified_at,
-            last_error=None,
+            verification_status=requested_status,
+            verified_at=verified_at if requested_status == "verified" else None,
+            last_error=None if requested_status == "verified" else last_error,
         )
         connection.hik_config = HikConnectionConfig(
             sdk_port=sdk_port,
             channel=channel,
             main_stream_type=main_stream_type,
             sub_stream_type=sub_stream_type,
-            device_serial=device_serial,
-            device_model=device_model,
-            device_name=device_name,
+            device_serial=device_serial if requested_status == "verified" else None,
+            device_model=device_model if requested_status == "verified" else None,
+            device_name=device_name if requested_status == "verified" else None,
         )
         camera.connection = connection
     else:
@@ -301,7 +351,7 @@ def upsert_hik_connection(
             effective_password_encrypted = connection.password_encrypted
 
         config = connection.hik_config
-        config_changed = config is None or (
+        target_changed = config is None or (
             connection.host != host
             or connection.username != username
             or connection.password_encrypted != effective_password_encrypted
@@ -309,29 +359,47 @@ def upsert_hik_connection(
             or config.channel != channel
             or config.main_stream_type != main_stream_type
             or config.sub_stream_type != sub_stream_type
-            or config.device_serial != device_serial
-            or config.device_model != device_model
-            or config.device_name != device_name
         )
         if config is None:
-            config = HikConnectionConfig()
+            config = HikConnectionConfig(
+                sdk_port=sdk_port,
+                channel=channel,
+                main_stream_type=main_stream_type,
+                sub_stream_type=sub_stream_type,
+            )
             connection.hik_config = config
-        if config_changed:
+
+        if target_changed:
             connection.revision += 1
+            connection.verification_status = requested_status
+            connection.verified_at = verified_at if requested_status == "verified" else None
+            connection.last_error = None if requested_status == "verified" else last_error
+            config.device_serial = device_serial if requested_status == "verified" else None
+            config.device_model = device_model if requested_status == "verified" else None
+            config.device_name = device_name if requested_status == "verified" else None
+        elif requested_status == "verified" and (
+            verified_at is not None
+            or device_serial is not None
+            or device_model is not None
+            or device_name is not None
+        ):
+            connection.verification_status = "verified"
+            connection.verified_at = verified_at
+            connection.last_error = None
+            config.device_serial = device_serial
+            config.device_model = device_model
+            config.device_name = device_name
+        elif verification_status == "failed":
+            connection.verification_status = "failed"
+            connection.last_error = last_error
 
         connection.host = host
         connection.username = username
         connection.password_encrypted = effective_password_encrypted
-        connection.verification_status = "verified"
-        connection.verified_at = verified_at
-        connection.last_error = None
         config.sdk_port = sdk_port
         config.channel = channel
         config.main_stream_type = main_stream_type
         config.sub_stream_type = sub_stream_type
-        config.device_serial = device_serial
-        config.device_model = device_model
-        config.device_name = device_name
 
     camera.connection_type = "hik_sdk"
     camera.ip = host
@@ -345,13 +413,21 @@ def upsert_hik_connection(
     if metadata is None:
         metadata = HikDeviceMetadata()
         camera.hik_metadata = metadata
+    if requested_status == "verified":
+        if device_serial is not None or connection.revision == 1:
+            metadata.device_serial = device_serial
+        if device_model is not None or connection.revision == 1:
+            metadata.device_model = device_model
+        if device_name is not None or connection.revision == 1:
+            metadata.device_name = device_name
+    elif connection.hik_config is not None and target_changed:
+        metadata.device_serial = None
+        metadata.device_model = None
+        metadata.device_name = None
     metadata.sdk_port = sdk_port
     metadata.channel = channel
     metadata.main_stream_type = main_stream_type
     metadata.sub_stream_type = sub_stream_type
-    metadata.device_serial = device_serial
-    metadata.device_model = device_model
-    metadata.device_name = device_name
     return connection
 
 
@@ -406,16 +482,18 @@ def switch_to_onvif_connection(
     username: str,
     password_encrypted: str,
     device_service_url: str,
-    device_uuid: str | None,
-    capabilities: dict,
-    profiles: list[dict],
-    recording_profile_token: str,
-    preview_profile_token: str | None,
-    detection_profile_token: str | None,
-    recording_uri: str,
-    preview_uri: str | None,
-    detection_uri: str | None,
-    verified_at: datetime,
+    device_uuid: str | None = None,
+    capabilities: dict | None = None,
+    profiles: list[dict] | None = None,
+    recording_profile_token: str | None = None,
+    preview_profile_token: str | None = None,
+    detection_profile_token: str | None = None,
+    recording_uri: str | None = None,
+    preview_uri: str | None = None,
+    detection_uri: str | None = None,
+    verification_status: str | None = None,
+    verified_at: datetime | None = None,
+    last_error: str | None = None,
 ) -> CameraConnection:
     _prepare_connection_switch(camera, "onvif")
     return upsert_onvif_connection(
@@ -433,7 +511,9 @@ def switch_to_onvif_connection(
         recording_uri=recording_uri,
         preview_uri=preview_uri,
         detection_uri=detection_uri,
+        verification_status=verification_status,
         verified_at=verified_at,
+        last_error=last_error,
     )
 
 
@@ -447,10 +527,12 @@ def switch_to_hik_connection(
     channel: int,
     main_stream_type: int,
     sub_stream_type: int,
-    device_serial: str | None,
-    device_model: str | None,
-    device_name: str | None,
-    verified_at: datetime,
+    device_serial: str | None = None,
+    device_model: str | None = None,
+    device_name: str | None = None,
+    verification_status: str | None = None,
+    verified_at: datetime | None = None,
+    last_error: str | None = None,
 ) -> CameraConnection:
     _prepare_connection_switch(camera, "hik_sdk")
     return upsert_hik_connection(
@@ -465,5 +547,7 @@ def switch_to_hik_connection(
         device_serial=device_serial,
         device_model=device_model,
         device_name=device_name,
+        verification_status=verification_status,
         verified_at=verified_at,
+        last_error=last_error,
     )
