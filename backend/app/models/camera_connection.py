@@ -10,6 +10,7 @@ from app.core.database import Base
 
 if TYPE_CHECKING:
     from app.models.camera import Camera
+    from app.models.hikvision import HikConnectionConfig
     from app.models.onvif_connection import OnvifConnectionConfig
 
 
@@ -48,6 +49,12 @@ class CameraConnection(Base):
         lazy="joined",
     )
     onvif_config: Mapped["OnvifConnectionConfig | None"] = relationship(
+        back_populates="connection",
+        cascade="all, delete-orphan",
+        uselist=False,
+        lazy="joined",
+    )
+    hik_config: Mapped["HikConnectionConfig | None"] = relationship(
         back_populates="connection",
         cascade="all, delete-orphan",
         uselist=False,

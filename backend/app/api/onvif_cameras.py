@@ -16,7 +16,11 @@ from app.schemas.camera import (
     OnvifProbeRequest,
     OnvifProbeResult,
 )
-from app.services.camera_connection import ConnectionAdapterMismatch, upsert_onvif_connection
+from app.services.camera_connection import (
+    ConnectionAdapterMismatch,
+    switch_to_onvif_connection,
+    upsert_onvif_connection,
+)
 from app.services.camera_identity import infer_camera_form_factor
 from app.services.camera_probe import CameraProbeError, probe_stream_uri
 from app.services.camera_runtime_coordinator import camera_runtime_coordinator
@@ -151,8 +155,10 @@ def _write_current_connection(
     *,
     password_encrypted: str,
     verified_at: datetime,
+    switch: bool = False,
 ) -> None:
-    upsert_onvif_connection(
+    writer = switch_to_onvif_connection if switch else upsert_onvif_connection
+    writer(
         camera,
         host=payload.host,
         username=payload.username,
@@ -272,8 +278,9 @@ async def update_onvif_camera(
         raise HTTPException(status_code=404, detail="camera not found")
     connection = camera.connection
     current_adapter = connection.adapter if connection is not None else camera.connection_type
-    if current_adapter != "onvif":
-        raise HTTPException(status_code=409, detail="camera is not an ONVIF device")
+    switching = current_adapter != "onvif"
+    if switching and connection is None:
+        raise HTTPException(status_code=409, detail="camera has no current connection to switch")
 
     (
         discovered,
@@ -284,6 +291,10 @@ async def update_onvif_camera(
         _rtsp_path,
         _sub_rtsp_path,
     ) = await _validated_discovery(payload, db)
+
+    snapshot = None
+    if switching:
+        snapshot = await camera_runtime_coordinator.stop_all(camera.id)
 
     schedule_changed = False
     if payload.name is not None:
@@ -313,6 +324,7 @@ async def update_onvif_camera(
             discovered,
             password_encrypted=encrypt_secret(payload.password),
             verified_at=now,
+            switch=switching,
         )
     except ConnectionAdapterMismatch as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -345,8 +357,21 @@ async def update_onvif_camera(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
+        if snapshot is not None:
+            await camera_runtime_coordinator.restore(
+                camera_id,
+                snapshot,
+                schedule_changed=schedule_changed,
+            )
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
 
     await db.refresh(camera)
-    await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
+    if snapshot is not None:
+        await camera_runtime_coordinator.restore(
+            camera.id,
+            snapshot,
+            schedule_changed=schedule_changed,
+        )
+    else:
+        await camera_runtime_coordinator.reload(camera.id, schedule_changed=schedule_changed)
     return camera

@@ -103,9 +103,8 @@ def test_hik_camera_creation_reprobes_media_and_persists_adapter_metadata(monkey
         assert metadata.device_serial == "HIK-SN-42"
 
 
-def test_hik_update_restarts_active_recorder_and_auxiliary_workers(monkeypatch) -> None:
-    recorder_calls: list[tuple[str, int]] = []
-    worker_calls: list[tuple[str, int]] = []
+def test_hik_same_adapter_update_uses_runtime_coordinator(monkeypatch) -> None:
+    coordinator_calls: list[tuple[int, bool]] = []
 
     async def fake_probe(_payload):
         return DISCOVERED
@@ -116,15 +115,15 @@ def test_hik_update_restarts_active_recorder_and_auxiliary_workers(monkeypatch) 
     async def no_reconcile():
         return None
 
-    async def no_event_stop(camera_id: int):
-        worker_calls.append(("event", camera_id))
-
-    async def no_motion_restart(camera_id: int):
-        worker_calls.append(("motion", camera_id))
+    class Coordinator:
+        async def reload(self, camera_id: int, *, schedule_changed: bool = False) -> str:
+            coordinator_calls.append((camera_id, schedule_changed))
+            return "running"
 
     monkeypatch.setattr(hik_api, "_probe_hik", fake_probe)
     monkeypatch.setattr(hik_api, "_validate_main_stream", fake_validate)
     monkeypatch.setattr(hik_api.recording_schedule_manager, "reconcile", no_reconcile)
+    monkeypatch.setattr(hik_api, "camera_runtime_coordinator", Coordinator(), raising=False)
 
     with TestClient(app) as client:
         created = client.post(
@@ -140,21 +139,6 @@ def test_hik_update_restarts_active_recorder_and_auxiliary_workers(monkeypatch) 
         )
         assert created.status_code == 201, created.text
         camera_id = int(created.json()["id"])
-
-        monkeypatch.setattr(hik_api.recorder_manager, "is_running", lambda _camera_id: True)
-
-        async def stop_recorder(value: int):
-            recorder_calls.append(("stop", value))
-            return {"camera_id": value, "state": "STOPPED", "pid": None}
-
-        async def start_regular(camera):
-            recorder_calls.append(("start", int(camera.id)))
-            return {"camera_id": int(camera.id), "state": "RECORDING", "pid": 1}
-
-        monkeypatch.setattr(hik_api.recorder_manager, "stop", stop_recorder)
-        monkeypatch.setattr(hik_api.event_recording_manager, "stop_camera", no_event_stop)
-        monkeypatch.setattr(hik_api.motion_detection_manager, "restart_camera", no_motion_restart)
-        monkeypatch.setattr(hik_api, "start_regular_recorder", start_regular)
 
         response = client.put(
             f"/api/cameras/hik/{camera_id}",
@@ -175,8 +159,7 @@ def test_hik_update_restarts_active_recorder_and_auxiliary_workers(monkeypatch) 
         assert body["name"] == "hik-update-camera-renamed"
         assert body["ip"] == "10.0.0.82"
         assert "new-secret" not in response.text
-        assert recorder_calls == [("stop", camera_id), ("start", camera_id)]
-        assert worker_calls == [("event", camera_id), ("motion", camera_id)]
+        assert coordinator_calls == [(camera_id, False)]
 
         metadata = asyncio.run(_metadata(camera_id))
         assert metadata is not None

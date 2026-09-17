@@ -51,14 +51,13 @@ class CameraRuntimeCoordinator:
             recording_schedule_manager.detach_for_runtime_reload(camera_id)
         return snapshot
 
-    async def reload(
+    async def restore(
         self,
         camera_id: int,
+        snapshot: RuntimeStopSnapshot,
         *,
         schedule_changed: bool = False,
     ) -> RuntimeReloadResult:
-        snapshot = await self.stop_all(camera_id)
-
         async with SessionLocal() as db:
             camera = await db.get(Camera, camera_id)
 
@@ -85,6 +84,19 @@ class CameraRuntimeCoordinator:
         await event_recording_manager.reconcile_once()
         await motion_detection_manager.restart_camera(camera_id)
         return "running"
+
+    async def reload(
+        self,
+        camera_id: int,
+        *,
+        schedule_changed: bool = False,
+    ) -> RuntimeReloadResult:
+        snapshot = await self.stop_all(camera_id)
+        return await self.restore(
+            camera_id,
+            snapshot,
+            schedule_changed=schedule_changed,
+        )
 
 
 camera_runtime_coordinator = CameraRuntimeCoordinator()

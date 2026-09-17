@@ -22,8 +22,15 @@ class HikMediaAdapter:
         *,
         preferred: StreamPreference = "auto",
     ) -> MediaSource:
-        metadata = getattr(camera, "hik_metadata", None)
-        if metadata is None:
+        connection = getattr(camera, "connection", None)
+        if connection is not None:
+            if str(connection.adapter) != "hik_sdk":
+                raise ValueError(
+                    f"current connection adapter is {connection.adapter}, expected hik_sdk"
+                )
+            if getattr(connection, "hik_config", None) is None:
+                raise ValueError("HIK current connection config is missing")
+        elif getattr(camera, "hik_metadata", None) is None:
             raise ValueError("HIK SDK metadata is missing; re-add or repair the camera")
 
         role: StreamRole
