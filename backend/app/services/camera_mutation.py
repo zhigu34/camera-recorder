@@ -36,6 +36,11 @@ _RUNTIME_POLICY_FIELDS = {
     "recording_schedule",
     "timestamp_mode",
 }
+_SCHEDULE_FIELDS = {
+    "auto_record",
+    "recording_schedule_enabled",
+    "recording_schedule",
+}
 
 
 def _resolved_form_factor(manufacturer: str | None, model: str | None, requested: str) -> str:
@@ -186,14 +191,20 @@ async def create_unified_camera(
 
 def _apply_camera_fields(camera: Camera, payload: CameraUnifiedUpdate) -> tuple[bool, bool]:
     values = payload.model_dump(exclude_unset=True, exclude={"connection"})
-    policy_changed = bool(_RUNTIME_POLICY_FIELDS & set(values))
-    metadata_changed = bool(values)
 
-    if "recording_schedule" in values:
+    if "recording_schedule" in values and values["recording_schedule"] is not None:
         schedule = values["recording_schedule"]
         values["recording_schedule"] = [
             item.model_dump() if hasattr(item, "model_dump") else item for item in schedule
         ]
+
+    def changes(field: str) -> bool:
+        if field not in values or values[field] is None:
+            return False
+        return getattr(camera, field) != values[field]
+
+    policy_changed = any(changes(field) for field in _RUNTIME_POLICY_FIELDS)
+    schedule_changed = any(changes(field) for field in _SCHEDULE_FIELDS)
 
     for key, value in values.items():
         if key in {"manufacturer", "model"}:
@@ -212,7 +223,7 @@ def _apply_camera_fields(camera: Camera, payload: CameraUnifiedUpdate) -> tuple[
             status_code=422,
             detail="启用录制时段后至少需要配置一个时间段",
         )
-    return metadata_changed, policy_changed
+    return policy_changed, schedule_changed
 
 
 def _desired_password_encrypted(camera: Camera, draft, *, switching: bool) -> str:
@@ -307,7 +318,7 @@ async def update_unified_camera(
     if current is None:
         raise HTTPException(status_code=409, detail="camera has no current connection")
 
-    _, policy_changed = _apply_camera_fields(camera, payload)
+    policy_changed, schedule_changed = _apply_camera_fields(camera, payload)
     draft = payload.connection
     if draft is None:
         try:
@@ -319,19 +330,12 @@ async def update_unified_camera(
         if policy_changed:
             await runtime_coordinator.reload(
                 camera.id,
-                schedule_changed=bool(
-                    {"auto_record", "recording_schedule_enabled", "recording_schedule"}
-                    & payload.model_fields_set
-                ),
+                schedule_changed=schedule_changed,
             )
         return camera
 
     switching = current.adapter != draft.adapter
     password_encrypted = _desired_password_encrypted(camera, draft, switching=switching)
-    schedule_changed = bool(
-        {"auto_record", "recording_schedule_enabled", "recording_schedule"}
-        & payload.model_fields_set
-    )
 
     if not switching:
         before_revision = current.revision
@@ -363,7 +367,7 @@ async def update_unified_camera(
             await db.rollback()
             raise HTTPException(status_code=409, detail="camera name already exists") from exc
         await db.refresh(camera)
-        if connection_changed or policy_changed:
+        if connection_changed or policy_changed or probe_result is not None:
             await runtime_coordinator.reload(
                 camera.id,
                 schedule_changed=schedule_changed,
