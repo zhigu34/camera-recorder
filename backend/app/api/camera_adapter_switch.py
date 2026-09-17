@@ -149,6 +149,11 @@ async def update_or_switch_to_manual_rtsp(
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
+        await coordinator.restore(
+            camera.id,
+            snapshot,
+            schedule_changed=schedule_changed,
+        )
         raise HTTPException(status_code=409, detail="camera name already exists") from exc
 
     await db.refresh(camera)
