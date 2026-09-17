@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Literal
 
 from app.core.security import decrypt_secret
-from app.services.hik_bridge_client import HikBridgeClient
 from app.services.hik_media_adapter import HikBridgeTarget
 
 HikStreamRole = Literal["main", "sub"]
@@ -42,12 +44,11 @@ def build_hik_target(camera, role: HikStreamRole) -> HikBridgeTarget:
     )
 
 
-async def iter_hik_stream(
-    client: HikBridgeClient,
-    stream_id: str,
-) -> AsyncIterator[bytes]:
+async def iter_hik_stream(client, stream_id: str) -> AsyncIterator[bytes]:
     try:
         async for chunk in client.iter_media(stream_id):
-            yield chunk
+            if chunk:
+                yield chunk
     finally:
-        await client.stop_stream(stream_id)
+        with suppress(Exception):
+            await client.stop_stream(stream_id)
