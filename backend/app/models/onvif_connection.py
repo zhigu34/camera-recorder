@@ -22,10 +22,10 @@ class OnvifConnectionConfig(Base):
     device_uuid: Mapped[str | None] = mapped_column(String(255), nullable=True)
     capabilities_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     profiles_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
-    recording_profile_token: Mapped[str] = mapped_column(String(255), nullable=False)
+    recording_profile_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     preview_profile_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     detection_profile_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    recording_uri: Mapped[str] = mapped_column(String(2048), nullable=False)
+    recording_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     preview_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     detection_uri: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
