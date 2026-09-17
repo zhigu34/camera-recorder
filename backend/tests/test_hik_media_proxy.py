@@ -94,6 +94,19 @@ class FakeBridgeClient:
         self.stopped.append(stream_id)
 
 
+class EmptyChunkBridgeClient(FakeBridgeClient):
+    async def iter_media(self, stream_id: str):
+        assert stream_id == "stream-1"
+        yield b""
+        yield b"payload"
+
+
+class FailingStopBridgeClient(FakeBridgeClient):
+    async def stop_stream(self, stream_id: str) -> None:
+        self.stopped.append(stream_id)
+        raise RuntimeError("sidecar cleanup failed")
+
+
 @pytest.mark.asyncio
 async def test_iter_hik_stream_always_releases_sidecar_session() -> None:
     client = FakeBridgeClient()
@@ -110,4 +123,22 @@ async def test_iter_hik_stream_releases_session_when_consumer_closes_early() -> 
     assert await anext(stream) == b"header"
     await stream.aclose()
 
+    assert client.stopped == ["stream-1"]
+
+
+@pytest.mark.asyncio
+async def test_iter_hik_stream_skips_empty_bridge_chunks() -> None:
+    client = EmptyChunkBridgeClient()
+    chunks = [chunk async for chunk in iter_hik_stream(client, "stream-1")]
+
+    assert chunks == [b"payload"]
+    assert client.stopped == ["stream-1"]
+
+
+@pytest.mark.asyncio
+async def test_iter_hik_stream_does_not_surface_sidecar_cleanup_failure() -> None:
+    client = FailingStopBridgeClient()
+    chunks = [chunk async for chunk in iter_hik_stream(client, "stream-1")]
+
+    assert chunks == [b"header", b"payload"]
     assert client.stopped == ["stream-1"]
