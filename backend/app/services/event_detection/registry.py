@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.camera import Camera
 from app.schemas.event_detection import EventSourceDescriptor, EventSourceRead
+from app.services.event_source_errors import EventSourceConflict, EventSourceUnavailable
 
 
 class EventSourceAdapter(Protocol):
@@ -28,13 +29,6 @@ class EventSourceAdapter(Protocol):
 class UnknownEventSource(KeyError):
     pass
 
-
-class EventSourceConflict(ValueError):
-    pass
-
-
-class EventSourceUnavailable(ValueError):
-    pass
 
 
 class EventSourceRegistry:
