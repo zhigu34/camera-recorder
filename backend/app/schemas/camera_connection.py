@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -130,6 +130,11 @@ class OnvifConnectionReadConfig(BaseModel):
     port: int
     device_service_url: str
     device_uuid: str | None = None
+    firmware_version: str | None = None
+    serial_number: str | None = None
+    hardware_id: str | None = None
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
     recording_profile_token: str | None = None
     preview_profile_token: str | None = None
     detection_profile_token: str | None = None
@@ -157,6 +162,44 @@ def _onvif_port(device_service_url: str) -> int:
     if parsed.port is not None:
         return parsed.port
     return 443 if parsed.scheme.lower() == "https" else 80
+
+
+def _credential_free_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.hostname is None:
+        return value
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def _safe_onvif_profiles(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    profiles: list[dict[str, Any]] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        profile = dict(raw)
+        uri = profile.get("uri")
+        if isinstance(uri, str) and uri:
+            profile["uri"] = _credential_free_url(uri)
+        profiles.append(profile)
+    return profiles
+
+
+def _safe_onvif_capabilities(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    capabilities = dict(value)
+    for key, raw in list(capabilities.items()):
+        if key.endswith("_xaddr") and isinstance(raw, str) and raw:
+            capabilities[key] = _credential_free_url(raw)
+    return capabilities
 
 
 class CameraConnectionRead(BaseModel):
@@ -204,10 +247,20 @@ class CameraConnectionRead(BaseModel):
         elif adapter == "onvif":
             config = getattr(value, "onvif_config", None)
             device_service_url = getattr(config, "device_service_url", "")
+            safe_device_service_url = (
+                _credential_free_url(device_service_url) if device_service_url else ""
+            )
             base["config"] = {
-                "port": _onvif_port(device_service_url),
-                "device_service_url": device_service_url,
+                "port": _onvif_port(safe_device_service_url),
+                "device_service_url": safe_device_service_url,
                 "device_uuid": getattr(config, "device_uuid", None),
+                "firmware_version": getattr(config, "firmware_version", None),
+                "serial_number": getattr(config, "serial_number", None),
+                "hardware_id": getattr(config, "hardware_id", None),
+                "capabilities": _safe_onvif_capabilities(
+                    getattr(config, "capabilities_json", {})
+                ),
+                "profiles": _safe_onvif_profiles(getattr(config, "profiles_json", [])),
                 "recording_profile_token": getattr(config, "recording_profile_token", None),
                 "preview_profile_token": getattr(config, "preview_profile_token", None),
                 "detection_profile_token": getattr(config, "detection_profile_token", None),

@@ -44,6 +44,9 @@ def _connection(camera: Camera) -> CameraConnection:
     connection.onvif_config = OnvifConnectionConfig(
         device_service_url="http://10.0.0.20:80/onvif/device_service",
         device_uuid="urn:uuid:camera-20",
+        firmware_version="5.0.1",
+        serial_number="SERIAL-20",
+        hardware_id="HW-20",
         capabilities_json={"media_xaddr": "http://10.0.0.20/onvif/media_service"},
         profiles_json=[{"token": "main"}, {"token": "sub"}],
         recording_profile_token="main",
@@ -76,6 +79,9 @@ def test_onvif_connection_config_round_trips_connection_scoped_state() -> None:
         assert config.connection_id == camera.connection.id
         assert config.device_service_url == "http://10.0.0.20:80/onvif/device_service"
         assert config.device_uuid == "urn:uuid:camera-20"
+        assert config.firmware_version == "5.0.1"
+        assert config.serial_number == "SERIAL-20"
+        assert config.hardware_id == "HW-20"
         assert config.capabilities_json["media_xaddr"].endswith("/onvif/media_service")
         assert [item["token"] for item in config.profiles_json] == ["main", "sub"]
         assert config.recording_profile_token == "main"

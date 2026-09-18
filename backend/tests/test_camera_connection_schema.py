@@ -220,6 +220,8 @@ def _camera_with_connection(adapter: str) -> Camera:
                 "port": 8080,
                 "device_service_url": "http://192.0.2.12:8080/onvif/device_service",
                 "device_uuid": "uuid-12",
+                "capabilities": {"media": "supported"},
+                "profiles": [{"token": "main"}],
                 "recording_profile_token": "main",
                 "preview_profile_token": "main",
                 "detection_profile_token": "main",

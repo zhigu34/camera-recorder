@@ -15,10 +15,25 @@ export interface ManualRtspConnectionConfig {
   sub_path?: string | null
 }
 
+export interface OnvifMediaProfile {
+  token: string
+  name: string
+  encoding?: string | null
+  width?: number | null
+  height?: number | null
+  fps?: number | null
+  uri?: string | null
+}
+
 export interface OnvifConnectionConfig {
   port: number
   device_service_url?: string
   device_uuid?: string | null
+  firmware_version?: string | null
+  serial_number?: string | null
+  hardware_id?: string | null
+  capabilities?: Record<string, unknown>
+  profiles?: OnvifMediaProfile[]
   recording_profile_token?: string | null
   preview_profile_token?: string | null
   detection_profile_token?: string | null
