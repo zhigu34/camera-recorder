@@ -52,7 +52,13 @@ def _resolved_form_factor(manufacturer: str | None, model: str | None, requested
     return requested
 
 
-def _onvif_device_service_url(host: str, port: int) -> str:
+def _onvif_device_service_url(
+    host: str,
+    port: int,
+    explicit_url: str | None = None,
+) -> str:
+    if explicit_url:
+        return explicit_url
     authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
     return f"http://{authority}:{port}/onvif/device_service"
 
@@ -123,7 +129,11 @@ def _write_create_connection(
             host=connection.host,
             username=connection.username,
             password_encrypted=password_encrypted,
-            device_service_url=_onvif_device_service_url(connection.host, connection.port),
+            device_service_url=_onvif_device_service_url(
+                connection.host,
+                connection.port,
+                connection.device_service_url,
+            ),
         )
         return
     upsert_hik_connection(
@@ -257,7 +267,11 @@ def _upsert_same_adapter(camera: Camera, draft, password_encrypted: str):
             host=draft.host,
             username=draft.username,
             password_encrypted=password_encrypted,
-            device_service_url=_onvif_device_service_url(draft.host, draft.port),
+            device_service_url=_onvif_device_service_url(
+            draft.host,
+            draft.port,
+            draft.device_service_url,
+        ),
         )
     return upsert_hik_connection(
         camera,
