@@ -89,7 +89,7 @@
 }
 
 .camera-editor-grid-policy {
-  grid-template-columns: minmax(220px, 1fr) 160px 160px;
+  grid-template-columns: minmax(220px, 1fr) 160px;
 }
 
 .camera-editor-grid .el-input-number,
