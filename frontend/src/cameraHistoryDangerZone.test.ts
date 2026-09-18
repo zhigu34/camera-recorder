@@ -22,8 +22,8 @@ describe('camera history and danger zone', () => {
     expect(cameraSource).toContain('disableCamera')
     expect(cameraSource).toContain('enableCamera')
     expect(cameraSource).toContain('录像、连接探测与重连、移动检测和事件预录')
-    expect(cameraSource).toContain('{ enabled: false }')
-    expect(cameraSource).toContain('{ enabled: true }')
+    expect(cameraSource).toContain('setCameraEnabled(camera, false)')
+    expect(cameraSource).toContain('setCameraEnabled(camera, true)')
   })
 
   it('fetches deletion impact and only permits permanent delete with zero blockers', () => {
