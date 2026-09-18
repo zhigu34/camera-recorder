@@ -163,6 +163,7 @@ def _onvif_port(device_service_url: str) -> int:
         return parsed.port
     return 443 if parsed.scheme.lower() == "https" else 80
 
+
 def _credential_free_url(value: str) -> str:
     parsed = urlsplit(value)
     if parsed.hostname is None:
