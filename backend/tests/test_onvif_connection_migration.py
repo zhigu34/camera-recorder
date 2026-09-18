@@ -12,6 +12,7 @@ ONVIF_CONNECTION_REVISION = "20260916_0023"
 HIK_CONNECTION_REVISION = "20260917_0024"
 UNVERIFIED_ONVIF_REVISION = "20260917_0025"
 ONVIF_IDENTITY_REVISION = "20260918_0026"
+ONVIF_EVENTS_REVISION = "20260918_0027"
 
 
 def _database_url(db_path: Path) -> str:
@@ -316,6 +317,83 @@ def test_0026_adds_onvif_identity_columns_without_rewriting_existing_config(
                        capabilities_json, profiles_json,
                        recording_profile_token, recording_uri
                 FROM onvif_connection_configs WHERE connection_id = 601
+                """
+            ).fetchone()
+        )
+        assert after == before
+
+
+
+def test_0027_adds_event_tables_without_rewriting_onvif_connection(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "onvif-events.db"
+    _alembic(db_path, ONVIF_IDENTITY_REVISION)
+
+    with _connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO cameras (
+                id, name, ip, rtsp_port, username, password_encrypted, rtsp_path,
+                enabled, auto_record, timestamp_mode, status, connection_type
+            ) VALUES (
+                71, 'events-onvif', '192.0.2.71', 554, 'viewer',
+                'ciphertext-71', '/main', 1, 0, 'reconstruct', 'online', 'onvif'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO camera_connections (
+                id, camera_id, adapter, host, username, password_encrypted,
+                revision, verification_status
+            ) VALUES (
+                701, 71, 'onvif', '192.0.2.71', 'viewer',
+                'ciphertext-71', 3, 'verified'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO onvif_connection_configs (
+                connection_id, device_service_url, device_uuid,
+                capabilities_json, profiles_json
+            ) VALUES (
+                701, 'http://192.0.2.71/onvif/device_service', 'uuid-71',
+                '{"events_xaddr":"http://192.0.2.71/onvif/events"}', '[]'
+            )
+            """
+        )
+        connection.commit()
+        before = tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       capabilities_json, profiles_json
+                FROM onvif_connection_configs WHERE connection_id = 701
+                """
+            ).fetchone()
+        )
+
+    _alembic(db_path, ONVIF_EVENTS_REVISION)
+
+    with _connect(db_path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
+            ONVIF_EVENTS_REVISION
+        )
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {"onvif_event_settings", "detection_events"} <= tables
+        after = tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       capabilities_json, profiles_json
+                FROM onvif_connection_configs WHERE connection_id = 701
                 """
             ).fetchone()
         )
