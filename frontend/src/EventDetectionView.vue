@@ -94,7 +94,7 @@ function sourceStatusLabel(status: string) {
   return '不可用'
 }
 
-function capabilityLabel(type: DetectionEventType) {
+function capabilityLabel(type: string) {
   const labels: Record<DetectionEventType, string> = {
     motion: '移动',
     person: '人员',
@@ -104,7 +104,7 @@ function capabilityLabel(type: DetectionEventType) {
     digital_input: '数字输入',
     unknown: '其他事件',
   }
-  return labels[type]
+  return labels[type as DetectionEventType] || type
 }
 
 function capabilityReason(slot: DetectionCapabilitySlot) {
