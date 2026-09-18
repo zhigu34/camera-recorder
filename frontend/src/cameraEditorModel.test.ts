@@ -71,7 +71,10 @@ describe('camera editor model', () => {
       adapter: 'manual_rtsp', host: '192.0.2.10', port: 8554, main_path: '/main', sub_path: '/sub',
     })
     expect(draftFromCamera(camera('onvif'))).toMatchObject({
-      adapter: 'onvif', host: '192.0.2.20', port: 80,
+      adapter: 'onvif',
+      host: '192.0.2.20',
+      port: 80,
+      device_service_url: 'http://192.0.2.20:80/onvif/device_service',
     })
     expect(draftFromCamera(camera('hik_sdk'))).toMatchObject({
       adapter: 'hik_sdk', host: '192.0.2.30', sdk_port: 8000, channel: 2,
@@ -92,6 +95,7 @@ describe('camera editor model', () => {
         username: 'viewer',
         password: 'secret',
         port: 80,
+        device_service_url: 'http://192.0.2.20:80/onvif/device_service',
       },
     })
   })
