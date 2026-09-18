@@ -119,7 +119,10 @@ async def _probe_onvif(
     rtsp_timeout_us: int,
 ) -> CameraConnectionProbeResult:
     host = f"[{draft.host}]" if ":" in draft.host and not draft.host.startswith("[") else draft.host
-    device_service_url = f"http://{host}:{draft.port}/onvif/device_service"
+    device_service_url = (
+        draft.device_service_url
+        or f"http://{host}:{draft.port}/onvif/device_service"
+    )
     client = OnvifClient(
         device_service_url=device_service_url,
         username=draft.username,
