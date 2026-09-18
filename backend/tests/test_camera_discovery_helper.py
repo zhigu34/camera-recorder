@@ -75,3 +75,16 @@ def test_discovery_helper_proxies_rtsp_scan_without_credentials(monkeypatch) -> 
         "scan_duration_ms": 22,
         "warnings": [],
     }
+
+
+def test_discovery_helper_removes_runtime_socket_on_shutdown(tmp_path, monkeypatch) -> None:
+    module = helper_module()
+    socket_path = tmp_path / "onvif-discovery.sock"
+    socket_path.write_text("stale", encoding="utf-8")
+    monkeypatch.setattr(module.settings, "onvif_discovery_socket", socket_path)
+
+    with TestClient(module.app) as client:
+        assert client.get("/health").status_code == 200
+        assert socket_path.exists()
+
+    assert not socket_path.exists()
