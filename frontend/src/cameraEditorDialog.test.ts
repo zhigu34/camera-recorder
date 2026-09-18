@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import cameraSource from './CamerasView.vue?raw'
+import editorSource from './CameraEditorDialog.vue?raw'
 import workspaceSource from './CamerasWorkspace.vue?raw'
 
 describe('unified camera editor', () => {
@@ -19,6 +20,23 @@ describe('unified camera editor', () => {
     expect(workspaceSource).not.toContain('<OnvifCameraAddView')
     expect(workspaceSource).not.toContain('添加 HIK SDK')
     expect(workspaceSource).not.toContain('添加 ONVIF')
+  })
+
+  it('loads adapter capabilities and uses the unified probe/create/update APIs', () => {
+    expect(editorSource).toContain("'/api/camera-adapters'")
+    expect(editorSource).toContain("'/api/camera-connections/probe'")
+    expect(editorSource).toContain("'/api/cameras'")
+    expect(editorSource).toContain(`/api/cameras/\${props.camera.id}`)
+    expect(editorSource).toContain("'manual_rtsp'")
+    expect(editorSource).toContain("'onvif'")
+    expect(editorSource).toContain("'hik_sdk'")
+    expect(editorSource).toContain('unavailable_reason')
+  })
+
+  it('explains adapter switches while preserving the camera identity and history', () => {
+    expect(editorSource).toContain('Camera ID #{{ camera?.id }}')
+    expect(editorSource).toContain('历史录像、事件和健康记录保持不变')
+    expect(editorSource).toContain('可跳过检测直接保存')
   })
 
   it('keeps batch add and the persistent detail extension workspace', () => {
