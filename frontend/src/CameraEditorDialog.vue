@@ -145,6 +145,8 @@ async function loadAdapters() {
 }
 
 function validateConnection(): string | null {
+  if (adaptersLoading.value) return '摄像头适配器能力仍在加载'
+  if (!selectedCapability.value) return '无法确认所选摄像头适配器能力'
   if (!form.value.host.trim()) return '请填写设备地址'
   if (!form.value.username.trim()) return '请填写用户名'
   if (requiresPassword.value && !form.value.password) return '新增或切换适配器时必须填写密码'
@@ -376,7 +378,7 @@ watch(
           <el-button
             plain
             :loading="probing"
-            :disabled="saving || selectedAdapterUnavailable"
+            :disabled="saving || adaptersLoading || selectedAdapterUnavailable"
             @click="probeConnection"
           >
             检测连接
@@ -414,7 +416,7 @@ watch(
 
     <template #footer>
       <el-button :disabled="saving || probing" @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="probing" @click="save">
+      <el-button type="primary" :loading="saving" :disabled="probing || adaptersLoading" @click="save">
         {{ camera ? '保存修改' : '添加摄像头' }}
       </el-button>
     </template>
