@@ -212,6 +212,7 @@ compose_up_with_network_recovery() {
 BUILD_BACKEND=0
 BUILD_FRONTEND=0
 UPDATE_HIK=0
+UPDATE_DISCOVERY=0
 UPDATE_BACKEND=0
 UPDATE_FRONTEND=0
 UPDATE_OPENLIST=0
@@ -230,22 +231,27 @@ HIK_SDK_HOST_DIR=""
 mark_hik_if_enabled() {
   [ "$HIK_ENABLED" = "1" ] && UPDATE_HIK=1 || true
 }
+mark_discovery() {
+  UPDATE_DISCOVERY=1
+}
 mark_full() {
   BUILD_BACKEND=1; BUILD_FRONTEND=1
   UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
   mark_hik_if_enabled
+  mark_discovery
   CONFIG_ALL=1
 }
 classify_path() {
   local path="$1"
   case "$path" in
     frontend/*) BUILD_FRONTEND=1; UPDATE_FRONTEND=1 ;;
-    backend/Dockerfile|backend/pyproject.toml|backend/uv.lock) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_hik_if_enabled ;;
+    backend/Dockerfile|backend/pyproject.toml|backend/uv.lock) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_hik_if_enabled; mark_discovery ;;
+    backend/app/discovery_helper.py|backend/app/services/camera_discovery.py|backend/app/schemas/camera_discovery.py|backend/app/services/onvif_client.py) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_discovery ;;
     backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1 ;;
     hik_bridge/*) BUILD_BACKEND=1; mark_hik_if_enabled ;;
     hik-sdk-runtime/.gitkeep) ;;
     hik-sdk-runtime/*) mark_hik_if_enabled ;;
-    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; mark_hik_if_enabled ;;
+    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; mark_hik_if_enabled; mark_discovery ;;
     docker-compose.yml) mark_full ;;
     .env.example) CONFIG_ALL=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1; mark_hik_if_enabled ;;
     deploy.sh|*.md|docs/*|.github/*|.gitignore|Makefile|scripts/*) ;;
@@ -266,7 +272,7 @@ collect_changed_files() {
 
   if [ -n "$previous_commit" ] && git cat-file -e "${previous_commit}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$previous_commit" "$CURRENT_COMMIT" 2>/dev/null; then
     base="$previous_commit"; PLAN_SOURCE="上次成功部署 ${previous_commit:0:8}"
-  elif container_exists camera-recorder-backend || container_exists camera-recorder-hik-bridge || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
+  elif container_exists camera-recorder-backend || container_exists camera-recorder-hik-bridge || container_exists camera-recorder-onvif-discovery || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
     if git rev-parse --verify ORIG_HEAD >/dev/null 2>&1 && git merge-base --is-ancestor ORIG_HEAD "$CURRENT_COMMIT" 2>/dev/null; then
       base="$(git rev-parse ORIG_HEAD)"; PLAN_SOURCE="首次智能部署，使用 pull 前 ${base:0:8} 作为基线"
     else
