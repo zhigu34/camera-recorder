@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import httpx
@@ -18,19 +19,26 @@ class CameraDiscoveryProtocolError(RuntimeError):
 
 
 class CameraDiscoveryClient:
-    def __init__(self, socket_path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        socket_path: str | Path | None = None,
+        *,
+        timeout_seconds: float = 5.0,
+    ) -> None:
         self.socket_path = Path(socket_path or settings.onvif_discovery_socket)
+        self.timeout_seconds = max(0.01, float(timeout_seconds))
 
     async def _post(self, path: str, response_model):
         transport = httpx.AsyncHTTPTransport(uds=str(self.socket_path))
         try:
-            async with httpx.AsyncClient(
-                transport=transport,
-                base_url="http://camera-discovery",
-                timeout=httpx.Timeout(5.0),
-            ) as client:
-                response = await client.post(path, json={})
-        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, OSError) as exc:
+            async with asyncio.timeout(self.timeout_seconds):
+                async with httpx.AsyncClient(
+                    transport=transport,
+                    base_url="http://camera-discovery",
+                    timeout=httpx.Timeout(self.timeout_seconds),
+                ) as client:
+                    response = await client.post(path, json={})
+        except (TimeoutError, httpx.HTTPError, OSError) as exc:
             raise CameraDiscoveryUnavailable("camera discovery helper is unavailable") from exc
 
         if response.status_code >= 500:
