@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     hik_enabled: bool = False
     hik_bridge_url: str = "http://hik-bridge:8100"
     internal_media_url: str = "http://127.0.0.1:8000"
+    onvif_discovery_socket: Path = Path("/run/camera-recorder/onvif-discovery.sock")
 
     # Internal worker polling intervals are implementation details, not UI settings.
     segment_scan_interval_seconds: float = 3.0
