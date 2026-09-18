@@ -18,6 +18,8 @@ import {
   VideoPlay,
 } from '@element-plus/icons-vue'
 import CameraDeviceGlyph from './CameraDeviceGlyph.vue'
+import CameraEditorDialog from './CameraEditorDialog.vue'
+import type { CameraConnectionRead } from './camera-editor/types'
 import { useCameraStore } from './stores/cameras'
 import { formatDateTime } from './utils/dateTime'
 
@@ -44,6 +46,7 @@ interface Camera {
   recording_schedule_enabled: boolean
   timestamp_mode: 'native' | 'reconstruct' | 'wallclock'
   password_set?: boolean
+  connection?: CameraConnectionRead | null
   video_codec?: string | null
   width?: number | null
   height?: number | null
@@ -85,30 +88,13 @@ const previewFailed = ref(false)
 const previewNonce = ref(Date.now())
 const previewSource = ref<PreviewSource>('main')
 const previewFallbackUsed = ref(false)
-const dialogVisible = ref(false)
-const editingId = ref<number | null>(null)
-const saving = ref(false)
+const editorVisible = ref(false)
+const editorCamera = ref<Camera | null>(null)
 const actionCameraId = ref<number | null>(null)
 const batchProbeRunning = ref(false)
 const batchProbeFailedNames = ref<string[]>([])
 const batchProbeProgress = reactive({ current: 0, total: 0, success: 0, failed: 0 })
 let refreshTimer: number | null = null
-
-const form = reactive({
-  name: '',
-  manufacturer: '',
-  model: '',
-  form_factor: 'unknown' as CameraFormFactor,
-  ip: '',
-  rtsp_port: 554,
-  username: 'admin',
-  password: '',
-  rtsp_path: '/ch1/main',
-  sub_rtsp_path: '',
-  timestamp_mode: 'reconstruct' as Camera['timestamp_mode'],
-  enabled: true,
-  auto_record: false,
-})
 
 const formFactorOptions: Array<{ value: CameraFormFactor; label: string }> = [
   { value: 'unknown', label: '未指定' },
@@ -373,32 +359,19 @@ async function loadData(showLoading = true, force = true) {
     if (showLoading) ElMessage.error(apiError(error, '摄像头数据加载失败'))
   } finally { if (showLoading) localLoading.value = false }
 }
-function resetForm() {
-  editingId.value = null
-  Object.assign(form, { name: '', manufacturer: '', model: '', form_factor: 'unknown', ip: '', rtsp_port: 554, username: 'admin', password: '', rtsp_path: '/ch1/main', sub_rtsp_path: '', timestamp_mode: 'reconstruct', enabled: true, auto_record: false })
+function openCreate() {
+  editorCamera.value = null
+  editorVisible.value = true
 }
-function openCreate() { resetForm(); dialogVisible.value = true }
 function openEdit(camera: Camera) {
-  editingId.value = camera.id
-  Object.assign(form, { name: camera.name, manufacturer: camera.manufacturer || '', model: camera.model || '', form_factor: camera.form_factor || 'unknown', ip: camera.ip, rtsp_port: camera.rtsp_port, username: camera.username, password: '', rtsp_path: camera.rtsp_path, sub_rtsp_path: camera.sub_rtsp_path || '', timestamp_mode: camera.timestamp_mode, enabled: camera.enabled, auto_record: camera.auto_record })
-  dialogVisible.value = true
+  editorCamera.value = camera
+  editorVisible.value = true
 }
-async function saveCamera() {
-  if (!form.name.trim() || !form.ip.trim() || !form.rtsp_path.trim()) { ElMessage.warning('请填写摄像头名称、IP 和主码流路径'); return }
-  if (editingId.value === null && !form.password) { ElMessage.warning('新增摄像头时必须填写密码'); return }
-  saving.value = true
-  try {
-    const payload: Record<string, unknown> = { name: form.name.trim(), manufacturer: form.manufacturer.trim() || null, model: form.model.trim() || null, form_factor: form.form_factor, ip: form.ip.trim(), rtsp_port: form.rtsp_port, username: form.username.trim(), rtsp_path: form.rtsp_path.trim(), sub_rtsp_path: form.sub_rtsp_path.trim() || null, timestamp_mode: form.timestamp_mode, enabled: form.enabled, auto_record: form.auto_record }
-    if (form.password) payload.password = form.password
-    if (editingId.value === null) await axios.post('/api/cameras', payload)
-    else await axios.put(`/api/cameras/${editingId.value}`, payload)
-    ElMessage.success(editingId.value === null ? '摄像头已添加' : '摄像头配置已保存')
-    dialogVisible.value = false
-    resetForm()
-    cameraStore.invalidate()
-    await loadData(true, true)
-  } catch (error) { ElMessage.error(apiError(error, '保存失败')) }
-  finally { saving.value = false }
+async function handleEditorSaved(cameraId: number) {
+  cameraStore.invalidate()
+  await loadData(true, true)
+  const saved = cameraById(cameraId)
+  if (saved) selectCamera(saved, 'replace')
 }
 async function runAction(camera: Camera, action: 'probe' | 'start' | 'stop') {
   if (batchProbeRunning.value || actionCameraId.value !== null) return
@@ -469,7 +442,7 @@ function switchDetails(camera: Camera | null) {
 }
 function showCameraList() { mobileListVisible.value = true; previewPlaying.value = false }
 function handleDetailKeyboard(event: KeyboardEvent) {
-  if (!selectedCamera.value || mobileListVisible.value || dialogVisible.value || batchProbeRunning.value || actionCameraId.value !== null) return
+  if (!selectedCamera.value || mobileListVisible.value || editorVisible.value || batchProbeRunning.value || actionCameraId.value !== null) return
   const target = event.target as HTMLElement | null
   if (target?.closest('input, textarea, select, button, [contenteditable="true"], .el-input, .el-select')) return
   if (event.key === 'ArrowLeft' && previousCamera.value) { event.preventDefault(); switchDetails(previousCamera.value) }
@@ -544,25 +517,6 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId === null ? '添加 RTSP 摄像头' : '编辑摄像头'" width="680px" destroy-on-close>
-      <el-form label-width="88px" class="camera-form" @submit.prevent="saveCamera">
-        <div class="form-grid">
-          <el-form-item label="名称" class="wide"><el-input v-model="form.name" placeholder="例如：门口摄像头" /></el-form-item>
-          <el-form-item label="厂商"><el-input v-model="form.manufacturer" placeholder="例如 Hikvision" /></el-form-item>
-          <el-form-item label="型号"><el-input v-model="form.model" placeholder="例如 DS-2CD..." /></el-form-item>
-          <el-form-item label="外形" class="wide"><el-select v-model="form.form_factor" style="width: 100%"><el-option v-for="item in formFactorOptions" :key="item.value" :label="item.label" :value="item.value" /></el-select></el-form-item>
-          <el-form-item label="IP 地址"><el-input v-model="form.ip" placeholder="192.168.1.101" /></el-form-item>
-          <el-form-item label="RTSP 端口"><el-input-number v-model="form.rtsp_port" :min="1" :max="65535" controls-position="right" /></el-form-item>
-          <el-form-item label="用户名"><el-input v-model="form.username" /></el-form-item>
-          <el-form-item label="密码"><el-input v-model="form.password" type="password" show-password :placeholder="editingId === null ? '必填' : '留空保持原密码'" /></el-form-item>
-          <el-form-item label="主码流" class="wide"><el-input v-model="form.rtsp_path" placeholder="/ch1/main" /></el-form-item>
-          <el-form-item label="子码流" class="wide"><el-input v-model="form.sub_rtsp_path" placeholder="可选，例如 /ch1/sub" /></el-form-item>
-          <el-form-item label="时间戳"><el-select v-model="form.timestamp_mode" style="width: 100%"><el-option label="重建时间戳（推荐）" value="reconstruct" /><el-option label="使用原始时间戳" value="native" /><el-option label="使用系统时间" value="wallclock" /></el-select></el-form-item>
-          <el-form-item label="自动录像"><el-switch v-model="form.auto_record" /></el-form-item>
-          <el-form-item label="启用设备"><el-switch v-model="form.enabled" /></el-form-item>
-        </div>
-      </el-form>
-      <template #footer><el-button @click="dialogVisible = false">取消</el-button><el-button type="primary" :loading="saving" @click="saveCamera">保存</el-button></template>
-    </el-dialog>
+    <CameraEditorDialog v-model="editorVisible" :camera="editorCamera" @saved="handleEditorSaved" />
   </section>
 </template>
