@@ -9,7 +9,7 @@ from app.models.camera import Camera
 from app.models.motion import MotionDetectionSettings
 from app.models.onvif_events import OnvifEventSettings
 from app.schemas.event_detection import EventSourceDescriptor, EventSourceRead
-from app.services.event_detection.registry import EventSourceConflict, EventSourceUnavailable
+from app.services.event_source_errors import EventSourceConflict, EventSourceUnavailable
 from app.services.onvif_event_manager import onvif_event_manager
 
 
