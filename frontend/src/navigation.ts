@@ -22,3 +22,23 @@ export function recordingPlaybackRoute(recordingId: number, cameraId?: number | 
 export function settingsSectionRoute(section: string): RouteLocationRaw {
   return { path: '/settings', query: { section } }
 }
+
+export function cameraRecordingsRoute(cameraId: number): RouteLocationRaw {
+  return { path: '/recordings/manage', query: { camera_id: String(cameraId) } }
+}
+
+export function cameraActivityRoute(cameraId: number): RouteLocationRaw {
+  return { path: '/events', query: { camera_id: String(cameraId) } }
+}
+
+export function cameraSystemEventsRoute(cameraId: number): RouteLocationRaw {
+  return { path: '/events', query: { camera_id: String(cameraId), view: 'system' } }
+}
+
+export function cameraHealthRoute(cameraId: number): RouteLocationRaw {
+  return { path: '/health-center', query: { camera_id: String(cameraId) } }
+}
+
+export function cameraUploadsRoute(cameraId: number): RouteLocationRaw {
+  return { path: '/uploads', query: { camera_id: String(cameraId) } }
+}

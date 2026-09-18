@@ -1,6 +1,6 @@
 # Camera Architecture Refactor — Migration Notes
 
-Status: **Switch slice complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator lifecycle, connection revision guard, active media-session lifecycle, Phase 3 unified adapter API, and Phase 4 optional HIK deployment slices complete**
+Status: **Switch complete for manual RTSP + ONVIF + HIK; RuntimeCoordinator/media lifecycle, unified adapter API, optional HIK deployment, and Phase 5 camera-management UI convergence complete**
 
 Date: 2026-09-16
 
@@ -16,7 +16,7 @@ ONVIF and HIK SDK remain supported target adapters after the refactor, but they 
 
 Use an Expand -> Switch -> Contract rollout.
 
-Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, the connection revision guard slice, the active media-session lifecycle slice, the Phase 3 unified adapter API slice, and the Phase 4 optional HIK deployment slice completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
+Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator lifecycle slice, the connection revision guard slice, the active media-session lifecycle slice, the Phase 3 unified adapter API slice, the Phase 4 optional HIK deployment slice, and the Phase 5 camera-management UI convergence completed items are checked below. Unchecked items remain deliberate follow-up work and are not implied by the completed slices.
 
 ### Expand
 
@@ -79,6 +79,20 @@ Phase 1, the manual-RTSP/ONVIF/HIK Switch slice, the bounded RuntimeCoordinator 
 - [x] Ensure an optional HIK startup/runtime failure cannot roll back or stop healthy core services.
 - [x] Verify public CI in core-only mode without proprietary SDK binaries while separately validating the HIK Compose profile configuration.
 
+### Phase 5 camera-management UI convergence
+
+- [x] Replace the temporary desktop detail drawer with the persistent camera list/detail split workspace while preserving `?camera_id=<id>` deep links.
+- [x] Treat Disabled as its own summary/filter state rather than a connectivity failure.
+- [x] Drive camera cards/detail connection identity from canonical `CameraConnection` adapter/host/config state.
+- [x] Replace separate manual RTSP / ONVIF / HIK add flows with one reusable adapter-aware `CameraEditorDialog`.
+- [x] Drive adapter selection from `GET /api/camera-adapters`, including visible unavailable capabilities and optional draft Probe.
+- [x] Preserve Camera ID/history when switching adapters through the unified editor.
+- [x] Replace the easy enabled toggle with explicit Disable/Re-enable device-management actions and confirmation semantics.
+- [x] Add camera-scoped history summaries/deep links for recordings, activity, blocking system events, health samples, and pending uploads.
+- [x] Gate permanent deletion through deletion-impact inspection, blocker deep links, and explicit typed-name confirmation; do not offer cascade deletion.
+- [x] Replace detail-workspace Teleports/MutationObserver wiring with an explicit `CameraDetailWorkspace` component.
+- [x] Remove the old standalone ONVIF/HIK frontend add components.
+
 ### Contract
 
 Only after the new model has run successfully for a stable release window:
@@ -86,7 +100,7 @@ Only after the new model has run successfully for a stable release window:
 - [ ] Remove legacy RTSP connection fields from `Camera`.
 - [ ] Remove compatibility shadow writes.
 - [ ] Remove legacy adapter-specific persistence paths/routes that are no longer used.
-- [ ] Remove old standalone ONVIF/HIK frontend add components.
+- [x] Remove old standalone ONVIF/HIK frontend add components. This frontend-only cleanup was safely completed during Phase 5 UI convergence; the persistence/API contract removals above remain deferred.
 
 ## Migration invariants
 

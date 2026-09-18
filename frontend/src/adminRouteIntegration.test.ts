@@ -4,10 +4,11 @@ import settingsWorkspaceSource from './SystemSettingsWorkspace.vue?raw'
 import workspaceRouteSource from './WorkspaceRoute.vue?raw'
 
 describe('admin route integration', () => {
-  it('syncs upload detail selection with task_id and reuses the shared camera store', () => {
+  it('syncs upload detail selection with task_id, camera scope, and the shared camera store', () => {
     expect(uploadSource).toContain('useRoute')
     expect(uploadSource).toContain('route.query.task_id')
-    expect(uploadSource).toContain('uploadTaskLocation(task.id)')
+    expect(uploadSource).toContain("query: { ...route.query, task_id: String(task.id) }")
+    expect(uploadSource).toContain('cameraScopedTasks.value.find')
     expect(uploadSource).toContain('useCameraStore')
   })
 

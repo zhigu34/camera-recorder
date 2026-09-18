@@ -23,9 +23,11 @@ describe('camera split view', () => {
     expect(cameraSource).toContain("filter.value === 'disabled'")
   })
 
-  it('provides stable workspace portal targets in the persistent detail pane', () => {
-    expect(cameraSource).toContain('class="camera-detail-extension-slot"')
-    expect(workspaceSource).toContain('.camera-detail-pane .camera-detail-extension-slot')
+  it('renders the detail workspace explicitly without DOM portal targets', () => {
+    expect(cameraSource).toContain('<CameraDetailWorkspace')
+    expect(cameraSource).not.toContain('camera-detail-extension-slot')
+    expect(workspaceSource).not.toContain('<Teleport')
+    expect(workspaceSource).not.toContain('MutationObserver')
   })
 
   it('loads the split-view refinement and exposes the narrow-screen list/detail controls', () => {

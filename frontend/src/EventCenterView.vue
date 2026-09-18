@@ -45,10 +45,11 @@ const route = useRoute()
 const router = useRouter()
 const cameraStore = useCameraStore()
 const { cameras } = storeToRefs(cameraStore)
+const initialCameraId = positiveRouteId(route.query.camera_id)
 
 const mode = ref<EventMode>(route.query.view === 'system' || route.query.event_id ? 'system' : 'activity')
 const activityDate = ref(todayString())
-const activityCamera = ref<ActivityCameraFilter>('all')
+const activityCamera = ref<ActivityCameraFilter>(initialCameraId || 'all')
 const activityEvents = ref<MotionActivityEvent[]>([])
 const activityLoading = ref(false)
 const activityError = ref('')
@@ -63,7 +64,7 @@ const loading = ref(false)
 const keyword = ref('')
 const levelFilter = ref('all')
 const categoryFilter = ref('all')
-const cameraFilter = ref<CameraFilter>('all')
+const cameraFilter = ref<CameraFilter>(initialCameraId || 'all')
 const systemPage = ref(1)
 const systemPageSize = ref(50)
 const detailVisible = ref(false)
@@ -406,7 +407,18 @@ function syncDeepLinkedEvent() {
   const item = events.value.find((event) => event.id === eventId)
   if (item) { selectedEvent.value = item; detailVisible.value = true }
 }
-function clearFilters() { keyword.value = ''; levelFilter.value = 'all'; categoryFilter.value = 'all'; cameraFilter.value = 'all' }
+function replaceCameraDeepLink(cameraId: number | null) {
+  const query = { ...route.query }
+  if (cameraId === null) delete query.camera_id
+  else query.camera_id = String(cameraId)
+  void router.replace({ query })
+}
+function clearFilters() {
+  keyword.value = ''
+  levelFilter.value = 'all'
+  categoryFilter.value = 'all'
+  cameraFilter.value = 'all'
+}
 function relatedAction(item: EventItem) {
   const category = item.category.toLowerCase()
   if (item.recording_id) {
@@ -485,12 +497,38 @@ async function reload() { await Promise.all([load(), cameraStore.load(true)]); c
 watch(() => [activityDate.value, activityCamera.value] as const, () => {
   if (mode.value === 'activity') void loadActivity()
 })
+watch(activityCamera, (value) => {
+  const nextId = typeof value === 'number' ? value : null
+  if (positiveRouteId(route.query.camera_id) !== nextId) replaceCameraDeepLink(nextId)
+})
+watch(cameraFilter, (value) => {
+  const nextId = typeof value === 'number' ? value : null
+  if (positiveRouteId(route.query.camera_id) !== nextId) replaceCameraDeepLink(nextId)
+})
 watch([keyword, levelFilter, categoryFilter, cameraFilter, systemPageSize], () => { systemPage.value = 1 })
 watch(() => filteredEvents.value.length, (length) => {
   const maxPage = Math.max(1, Math.ceil(length / systemPageSize.value))
   if (systemPage.value > maxPage) systemPage.value = maxPage
 })
 watch(() => route.query.event_id, syncDeepLinkedEvent)
+watch(() => route.query.camera_id, (value) => {
+  const cameraId = positiveRouteId(value)
+  if (cameraId) {
+    if (activityCamera.value !== cameraId) activityCamera.value = cameraId
+    if (cameraFilter.value !== cameraId) cameraFilter.value = cameraId
+    return
+  }
+  if (typeof activityCamera.value === 'number') activityCamera.value = 'all'
+  if (typeof cameraFilter.value === 'number') cameraFilter.value = 'all'
+})
+watch(() => [route.query.view, route.query.event_id] as const, () => {
+  const nextMode: EventMode = route.query.view === 'system' || route.query.event_id ? 'system' : 'activity'
+  if (nextMode === mode.value) return
+  mode.value = nextMode
+  if (!mounted) return
+  if (nextMode === 'activity') void loadActivity()
+  else void load().then(connectEventsSocket)
+})
 onMounted(() => {
   mounted = true
   void (async () => {

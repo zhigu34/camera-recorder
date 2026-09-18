@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import CameraHealthDrawer from './components/health/CameraHealthDrawer.vue'
 import CameraReliabilityTable from './components/health/CameraReliabilityTable.vue'
@@ -18,13 +18,20 @@ import { wallClockSeconds } from './utils/playbackTimelineV3'
 
 const RELIABILITY_REFRESH_MS = 60_000
 
+const route = useRoute()
 const router = useRouter()
 const runtime = useRuntimeStore()
 const reliability = useHealthReliabilityStore()
 const { healthSnapshot: realtime, systemStatus: system, socketState } = storeToRefs(runtime)
 const { report, windowHours, loading, error } = storeToRefs(reliability)
 
-const selectedCameraId = ref<number | null>(null)
+function positiveRouteId(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = Number(raw || 0)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
+const selectedCameraId = ref<number | null>(positiveRouteId(route.query.camera_id))
 const drawerOpen = ref(false)
 let refreshTimer: number | null = null
 
@@ -44,6 +51,25 @@ const reliabilityStatusLabel = computed(() => {
 function selectCamera(cameraId: number) {
   selectedCameraId.value = cameraId
   drawerOpen.value = true
+  const query = { ...route.query, camera_id: String(cameraId) }
+  void router.replace({ query })
+}
+
+function syncDeepLinkedCamera() {
+  const cameraId = positiveRouteId(route.query.camera_id)
+  if (!cameraId) {
+    if (route.query.camera_id === undefined) {
+      selectedCameraId.value = null
+      drawerOpen.value = false
+    }
+    return
+  }
+  selectedCameraId.value = cameraId
+  const exists = Boolean(
+    realtime.value?.camera_health.some((item) => item.camera_id === cameraId)
+    || report.value?.cameras.some((item) => item.camera_id === cameraId),
+  )
+  if (exists) drawerOpen.value = true
 }
 
 async function setWindow(hours: ReliabilityWindow) {
@@ -88,8 +114,16 @@ function openPlaybackDiagnostics() {
   void router.push({ path: '/recordings/manage', hash: '#playback-compatibility' })
 }
 
+watch([() => route.query.camera_id, selectedRealtime, selectedReliability], syncDeepLinkedCamera, { immediate: true })
+watch(drawerOpen, (open) => {
+  if (open || positiveRouteId(route.query.camera_id) === null) return
+  const query = { ...route.query }
+  delete query.camera_id
+  void router.replace({ query })
+})
+
 onMounted(() => {
-  void reliability.refresh()
+  void reliability.refresh().then(syncDeepLinkedCamera)
   refreshTimer = window.setInterval(() => {
     if (!document.hidden) void reliability.refresh(true)
   }, RELIABILITY_REFRESH_MS)

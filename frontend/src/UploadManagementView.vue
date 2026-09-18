@@ -5,8 +5,9 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Cloudy, Refresh, Search, Setting, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { cameraRecordingsRoute } from './navigation'
 import { useCameraStore } from './stores/cameras'
-import { parsePositiveQueryId, uploadTaskLocation } from './utils/adminDeepLinks'
+import { parsePositiveQueryId } from './utils/adminDeepLinks'
 import { formatDateTime } from './utils/dateTime'
 
 interface UploadTask {
@@ -78,20 +79,32 @@ let mounted = false
 
 const recordingMap = computed(() => new Map(recordings.value.map((row) => [row.id, row])))
 const cameraMap = computed(() => new Map(cameras.value.map((row) => [row.id, row])))
+const routeCameraId = computed(() => parsePositiveQueryId(route.query.camera_id))
 const counts = computed(() => status.value?.counts || {})
-const totalCount = computed(() => Object.values(counts.value).reduce((sum, value) => sum + Number(value || 0), 0))
-const pendingCount = computed(() => (counts.value.pending || 0) + (counts.value.uploading || 0) + (counts.value.retry_wait || 0))
-const successCount = computed(() => counts.value.success || 0)
-const failedCount = computed(() => counts.value.failed || 0)
+const cameraScopedTasks = computed(() => {
+  if (!routeCameraId.value) return tasks.value
+  return tasks.value.filter((task) => recordingMap.value.get(task.recording_id)?.camera_id === routeCameraId.value)
+})
+const scopedCounts = computed(() => {
+  if (!routeCameraId.value) return counts.value
+  return cameraScopedTasks.value.reduce<Record<string, number>>((result, task) => {
+    result[task.status] = (result[task.status] || 0) + 1
+    return result
+  }, {})
+})
+const totalCount = computed(() => Object.values(scopedCounts.value).reduce((sum, value) => sum + Number(value || 0), 0))
+const pendingCount = computed(() => (scopedCounts.value.pending || 0) + (scopedCounts.value.uploading || 0) + (scopedCounts.value.retry_wait || 0))
+const successCount = computed(() => scopedCounts.value.success || 0)
+const failedCount = computed(() => scopedCounts.value.failed || 0)
 const filteredTasks = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
-  return tasks.value.filter((task) => {
+  return cameraScopedTasks.value.filter((task) => {
     if (statusFilter.value && task.status !== statusFilter.value) return false
-    if (!keyword) return true
     const recording = recordingMap.value.get(task.recording_id)
+    if (!keyword) return true
     const camera = recording ? cameraMap.value.get(recording.camera_id) : null
     const fileName = recording?.mp4_path.split('/').pop() || ''
-    return `${task.id} ${task.recording_id} ${camera?.name || ''} ${camera?.ip || ''} ${fileName} ${task.remote_path} ${task.last_error || ''}`.toLowerCase().includes(keyword)
+    return `${task.id} ${task.recording_id} ${camera?.name || ''} ${camera?.connection?.host || camera?.ip || ''} ${fileName} ${task.remote_path} ${task.last_error || ''}`.toLowerCase().includes(keyword)
   })
 })
 
@@ -157,7 +170,7 @@ function syncDeepLinkedTask(showMissing = false) {
     activeTask.value = null
     return
   }
-  const task = tasks.value.find((item) => item.id === taskId)
+  const task = cameraScopedTasks.value.find((item) => item.id === taskId)
   if (!task) {
     if (showMissing) ElMessage.warning(`未找到上传任务 #${taskId}`)
     detailVisible.value = false
@@ -172,13 +185,21 @@ function syncDeepLinkedTask(showMissing = false) {
 function openDetail(task: UploadTask) {
   activeTask.value = task
   detailVisible.value = true
-  void router.push(uploadTaskLocation(task.id))
+  void router.push({ path: '/uploads', query: { ...route.query, task_id: String(task.id) } })
 }
 
 function closeDetail() {
   detailVisible.value = false
   activeTask.value = null
   if (parsePositiveQueryId(route.query.task_id) !== null) clearTaskDeepLink()
+}
+
+function openRecordings() {
+  if (routeCameraId.value) {
+    void router.push(cameraRecordingsRoute(routeCameraId.value))
+    return
+  }
+  emit('open-recordings')
 }
 
 async function refreshReferences() {
@@ -330,6 +351,7 @@ async function load(showLoading = true) {
 }
 
 watch(() => route.query.task_id, () => syncDeepLinkedTask(false))
+watch(() => route.query.camera_id, () => { if (activeTask.value && !filteredTasks.value.some((item) => item.id === activeTask.value?.id)) closeDetail() })
 onMounted(() => {
   mounted = true
   void load().then(() => syncDeepLinkedTask(true)).finally(connectStream)
@@ -384,9 +406,10 @@ onBeforeUnmount(() => {
         </el-select>
       </div>
       <div class="toolbar-actions">
+        <span v-if="routeCameraId" class="stream-state live"><i></i>摄像头 #{{ routeCameraId }}</span>
         <span class="stream-state" :class="{ live: streamConnected }"><i></i>{{ streamConnected ? '实时推送' : '正在重连' }}</span>
-        <span>显示 {{ filteredTasks.length }} / {{ tasks.length }} 条</span>
-        <el-button @click="emit('open-recordings')">录像管理</el-button>
+        <span>显示 {{ filteredTasks.length }} / {{ cameraScopedTasks.length }} 条</span>
+        <el-button @click="openRecordings">录像管理</el-button>
         <el-button @click="load()">刷新</el-button>
         <el-button type="primary" :loading="scanning" :disabled="!status?.active" @click="scan">立即扫描</el-button>
       </div>
