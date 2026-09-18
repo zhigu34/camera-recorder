@@ -39,6 +39,7 @@ describe('event detection platform shell contract', () => {
 
   it('uses aggregate event detection APIs and imports the dedicated workspace css', () => {
     expect(viewSource).toContain('/event-detection/sources/local.motion')
+    expect(viewSource).toContain('/event-detection/sources/camera.onvif')
     expect(viewSource).toContain('/event-detection`')
     expect(viewSource).toContain('/motion-zones')
     expect(viewSource).toContain('preview.mjpeg?stream=auto')
