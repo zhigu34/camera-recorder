@@ -433,7 +433,11 @@ async function runBatchProbe() {
     cameraStore.invalidate()
     await loadData(false, true)
     if (batchProbeProgress.failed === 0) ElMessage.success(`异常设备检测完成：成功 ${batchProbeProgress.success} 台`)
-    else ElMessage.warning(`异常设备检测完成：成功 ${batchProbeProgress.success} 台，失败 ${batchProbeProgress.failed} 台`)
+    else {
+      const names = batchProbeFailedNames.value.slice(0, 3).join('、')
+      const extra = batchProbeFailedNames.value.length > 3 ? ` 等 ${batchProbeFailedNames.value.length} 台` : ''
+      ElMessage.warning(`异常设备检测完成：成功 ${batchProbeProgress.success} 台，失败 ${batchProbeProgress.failed} 台（${names}${extra}）`)
+    }
   } finally { actionCameraId.value = null; batchProbeRunning.value = false }
 }
 async function removeCamera(camera: Camera) {
