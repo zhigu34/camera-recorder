@@ -26,5 +26,7 @@ describe('camera history deep links', () => {
     expect(uploadSource).toContain('const cameraScopedTasks = computed')
     expect(uploadSource).toContain('const scopedCounts = computed')
     expect(uploadSource).toContain('cameraScopedTasks.length')
+    expect(uploadSource).toContain('cameraScopedTasks.value.find')
+    expect(uploadSource).toContain('cameraRecordingsRoute(routeCameraId.value)')
   })
 })
