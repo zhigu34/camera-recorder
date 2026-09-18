@@ -221,3 +221,29 @@
     flex-direction: column;
   }
 }
+
+.nvr-workspace-content .camera-page .camera-icon.adapter-unavailable {
+  color: var(--nvr-yellow) !important;
+  border-color: color-mix(in srgb, var(--nvr-yellow) 28%, var(--nvr-border)) !important;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--nvr-yellow) 7%, var(--nvr-surface-2)), var(--nvr-surface-2)) !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge.adapter-unavailable {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 28%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-yellow) 86%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-yellow) 7%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge.adapter-unavailable i {
+  background: var(--nvr-yellow) !important;
+}
+
+.nvr-workspace-content .camera-page .record-badge.error {
+  border-color: color-mix(in srgb, var(--nvr-red) 28%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-red) 86%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-red) 7%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .camera-page .record-badge.error i {
+  background: var(--nvr-red) !important;
+}
