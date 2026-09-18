@@ -17,10 +17,18 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("onvif_connection_configs") as batch:
-        batch.add_column(sa.Column("firmware_version", sa.String(length=255), nullable=True))
-        batch.add_column(sa.Column("serial_number", sa.String(length=255), nullable=True))
-        batch.add_column(sa.Column("hardware_id", sa.String(length=255), nullable=True))
+    op.add_column(
+        "onvif_connection_configs",
+        sa.Column("firmware_version", sa.String(length=255), nullable=True),
+    )
+    op.add_column(
+        "onvif_connection_configs",
+        sa.Column("serial_number", sa.String(length=255), nullable=True),
+    )
+    op.add_column(
+        "onvif_connection_configs",
+        sa.Column("hardware_id", sa.String(length=255), nullable=True),
+    )
 
 
 def downgrade() -> None:
