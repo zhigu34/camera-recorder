@@ -64,6 +64,11 @@ watch(() => props.cameraId, () => void load(), { immediate: true })
         <strong>{{ impact?.motion_events ?? '—' }}</strong>
         <small>查看活动</small>
       </button>
+      <button type="button" @click="router.push(cameraActivityRoute(cameraId))">
+        <span>原生检测</span>
+        <strong>{{ impact?.detection_events ?? '—' }}</strong>
+        <small>查看活动</small>
+      </button>
       <button type="button" @click="router.push(cameraSystemEventsRoute(cameraId))">
         <span>阻塞事件</span>
         <strong>{{ impact?.blocking_events ?? '—' }}</strong>

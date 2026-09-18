@@ -47,6 +47,7 @@ def _camera_exists(client: TestClient, camera_id: int) -> bool:
 def _clear_camera_history(camera_id: int) -> None:
     with _connect() as connection:
         connection.execute("DELETE FROM motion_events WHERE camera_id = ?", (camera_id,))
+        connection.execute("DELETE FROM detection_events WHERE camera_id = ?", (camera_id,))
         connection.execute("DELETE FROM camera_health_samples WHERE camera_id = ?", (camera_id,))
         connection.execute(
             "DELETE FROM events WHERE camera_id = ? AND blocks_camera_delete = 1",
@@ -78,6 +79,7 @@ def _assert_zero_impact(payload: dict, camera_id: int) -> None:
         "camera_id": camera_id,
         "recordings": 0,
         "motion_events": 0,
+        "detection_events": 0,
         "health_samples": 0,
         "blocking_events": 0,
         "pending_uploads": 0,
@@ -138,6 +140,7 @@ def test_recorded_camera_refuses_delete_and_reports_pending_upload() -> None:
             assert impact["recordings"] == 1
             assert impact["pending_uploads"] == 1
             assert impact["motion_events"] == 0
+            assert impact["detection_events"] == 0
             assert impact["health_samples"] == 0
             assert impact["blocking_events"] == 0
             assert impact["can_delete"] is False
@@ -267,3 +270,34 @@ def test_nonblocking_audit_event_does_not_prevent_delete_and_is_preserved() -> N
                 with _connect() as connection:
                     connection.execute("DELETE FROM events WHERE id = ?", (audit_id,))
                     connection.commit()
+
+
+
+def test_native_detection_history_alone_refuses_camera_delete() -> None:
+    with TestClient(app, raise_server_exceptions=False) as client:
+        camera_id = _create_camera(client, "pytest-delete-native-detection")
+        try:
+            with _connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO detection_events (
+                        camera_id, source_kind, provider, event_type,
+                        started_at, ended_at, metadata_json
+                    ) VALUES (
+                        ?, 'camera_native', 'onvif', 'person',
+                        '2026-09-18 10:00:00', '2026-09-18 10:00:00', '{}'
+                    )
+                    """,
+                    (camera_id,),
+                )
+                connection.commit()
+
+            impact = client.get(f"/api/cameras/{camera_id}/deletion-impact").json()
+            assert impact["detection_events"] == 1
+            assert impact["can_delete"] is False
+
+            delete_response = client.delete(f"/api/cameras/{camera_id}")
+            assert delete_response.status_code == 409
+            assert delete_response.json()["detail"] == impact
+        finally:
+            _cleanup_camera(client, camera_id)

@@ -75,7 +75,9 @@ def test_event_detection_overview_is_honest_about_v1_capabilities() -> None:
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["camera"]["id"] == camera_id
-        assert [item["id"] for item in body["sources"]] == ["local.motion"]
+        assert [item["id"] for item in body["sources"]] == ["local.motion", "camera.onvif"]
+        onvif = next(item for item in body["sources"] if item["id"] == "camera.onvif")
+        assert onvif["status"] == "unsupported"
         assert any(
             item["event_type"] == "person" and item["status"] == "unavailable"
             for item in body["capability_slots"]
@@ -86,7 +88,7 @@ def test_event_detection_overview_is_honest_about_v1_capabilities() -> None:
 def test_unknown_event_source_detail_and_update_are_404() -> None:
     with TestClient(app) as client:
         camera_id = _create_camera(client, "event-detection-unknown")
-        path = f"/api/cameras/{camera_id}/event-detection/sources/camera.onvif"
+        path = f"/api/cameras/{camera_id}/event-detection/sources/camera.fake"
         response = client.get(path)
         assert response.status_code == 404
         assert response.json()["detail"] == "event source not found"

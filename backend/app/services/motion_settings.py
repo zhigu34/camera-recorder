@@ -2,7 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.motion import MotionDetectionSettings, MotionZone
+from app.models.onvif_events import OnvifEventSettings
 from app.schemas.motion import MotionDetectionRead, MotionDetectionUpdate, MotionRuntimeRead
+from app.services.event_source_errors import EventSourceConflict
 from app.services.motion_manager import motion_detection_manager
 
 
@@ -45,6 +47,11 @@ async def update_motion_detection_settings(
     payload: MotionDetectionUpdate,
     db: AsyncSession,
 ) -> MotionDetectionRead:
+    if payload.enabled:
+        onvif = await db.get(OnvifEventSettings, camera_id)
+        if onvif is not None and onvif.enabled:
+            raise EventSourceConflict("disable camera.onvif before enabling local.motion")
+
     settings = await db.get(MotionDetectionSettings, camera_id)
     if settings is None:
         settings = MotionDetectionSettings(camera_id=camera_id)

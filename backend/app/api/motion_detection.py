@@ -18,6 +18,7 @@ from app.schemas.motion import (
     MotionZoneRead,
     MotionZoneUpdate,
 )
+from app.services.event_source_errors import EventSourceConflict
 from app.services.motion_manager import motion_detection_manager
 from app.services.motion_settings import read_motion_detection, update_motion_detection_settings
 
@@ -50,7 +51,10 @@ async def update_motion_detection(
     db: AsyncSession = Depends(get_db),
 ):
     await _camera_or_404(camera_id, db)
-    return await update_motion_detection_settings(camera_id, payload, db)
+    try:
+        return await update_motion_detection_settings(camera_id, payload, db)
+    except EventSourceConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post(

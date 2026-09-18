@@ -6,8 +6,8 @@ from app.services.event_detection import event_source_registry
 from app.services.event_detection.registry import EventSourceRegistry, UnknownEventSource
 
 
-def test_default_registry_contains_only_local_motion() -> None:
-    assert event_source_registry.ids() == ["local.motion"]
+def test_default_registry_contains_local_and_onvif_sources() -> None:
+    assert event_source_registry.ids() == ["local.motion", "camera.onvif"]
 
 
 @pytest.mark.asyncio
@@ -35,4 +35,4 @@ def test_registry_rejects_duplicate_source_ids() -> None:
 
 def test_registry_raises_typed_error_for_unknown_source() -> None:
     with pytest.raises(UnknownEventSource):
-        EventSourceRegistry().get("camera.onvif")
+        EventSourceRegistry().get("camera.fake")

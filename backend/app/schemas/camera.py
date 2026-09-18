@@ -389,6 +389,7 @@ class CameraDeletionImpact(BaseModel):
     camera_id: int
     recordings: int = 0
     motion_events: int = 0
+    detection_events: int = 0
     health_samples: int = 0
     blocking_events: int = 0
     pending_uploads: int = 0

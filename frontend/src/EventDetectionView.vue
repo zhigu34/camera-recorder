@@ -30,11 +30,13 @@ const router = useRouter()
 const cameras = ref<CameraSummary[]>([])
 const overview = ref<EventDetectionOverview | null>(null)
 const motionSource = ref<EventSourceRead | null>(null)
+const onvifSource = ref<EventSourceRead | null>(null)
 const savedDraft = ref<MotionSourceDraft | null>(null)
 const draft = ref<MotionSourceDraft | null>(null)
 const loading = ref(false)
 const cameraListLoading = ref(false)
 const saving = ref(false)
+const onvifToggling = ref(false)
 const previewActive = ref(false)
 const previewNonce = ref(Date.now())
 const previewFailed = ref(false)
@@ -62,6 +64,8 @@ const zoneOverlays = computed(() => zones.value.map((zone) => ({
 })))
 const editorTitle = computed(() => editingZoneId.value ? '重新绘制检测区域' : '添加检测区域')
 const motionRuntimeState = computed(() => motionSource.value?.descriptor.runtime_state || 'disabled')
+const onvifRuntimeState = computed(() => onvifSource.value?.descriptor.runtime_state || 'disabled')
+const onvifEnabled = computed(() => onvifSource.value?.config.enabled === true)
 
 function errorText(error: unknown, fallback: string) {
   if (axios.isAxiosError(error)) {
@@ -90,7 +94,7 @@ function sourceStatusLabel(status: string) {
   return '不可用'
 }
 
-function capabilityLabel(type: DetectionEventType) {
+function capabilityLabel(type: string) {
   const labels: Record<DetectionEventType, string> = {
     motion: '移动',
     person: '人员',
@@ -100,7 +104,7 @@ function capabilityLabel(type: DetectionEventType) {
     digital_input: '数字输入',
     unknown: '其他事件',
   }
-  return labels[type]
+  return labels[type as DetectionEventType] || type
 }
 
 function capabilityReason(slot: DetectionCapabilitySlot) {
@@ -143,6 +147,7 @@ async function loadCameras() {
     if (!cameras.value.length) {
       overview.value = null
       motionSource.value = null
+      onvifSource.value = null
       savedDraft.value = null
       draft.value = null
       return
@@ -176,11 +181,17 @@ async function loadSelectedCamera(cameraId: number) {
     if (token !== requestToken) return
     overview.value = overviewResponse.data
 
-    const sourceResponse = await axios.get<EventSourceRead>(
-      `/api/cameras/${cameraId}/event-detection/sources/local.motion`,
-    )
+    const [sourceResponse, onvifResponse] = await Promise.all([
+      axios.get<EventSourceRead>(
+        `/api/cameras/${cameraId}/event-detection/sources/local.motion`,
+      ),
+      axios.get<EventSourceRead>(
+        `/api/cameras/${cameraId}/event-detection/sources/camera.onvif`,
+      ),
+    ])
     if (token !== requestToken) return
     motionSource.value = sourceResponse.data
+    onvifSource.value = onvifResponse.data
     const value = motionDraftFromSource(sourceResponse.data)
     savedDraft.value = value
     draft.value = cloneDraft(value)
@@ -233,15 +244,40 @@ async function saveSettings() {
     const value = motionDraftFromSource(response.data)
     savedDraft.value = value
     draft.value = cloneDraft(value)
-    overview.value = overview.value ? {
-      ...overview.value,
-      enabled_source_ids: value.enabled ? ['local.motion'] : [],
-    } : overview.value
+    if (overview.value) {
+      const enabled = new Set(overview.value.enabled_source_ids)
+      if (value.enabled) enabled.add('local.motion')
+      else enabled.delete('local.motion')
+      overview.value = { ...overview.value, enabled_source_ids: [...enabled] }
+    }
     ElMessage.success(value.enabled ? '移动检测设置已保存' : '移动检测已关闭')
   } catch (error) {
     ElMessage.error(errorText(error, '事件检测设置保存失败'))
   } finally {
     saving.value = false
+  }
+}
+
+async function toggleOnvifSource(value: string | number | boolean) {
+  const cameraId = selectedCameraId.value
+  if (!cameraId || !onvifSource.value || onvifToggling.value) return
+  const enabled = Boolean(value)
+  onvifToggling.value = true
+  try {
+    onvifSource.value = (await axios.put<EventSourceRead>(
+      `/api/cameras/${cameraId}/event-detection/sources/camera.onvif`,
+      { enabled },
+    )).data
+    overview.value = (await axios.get<EventDetectionOverview>(
+      `/api/cameras/${cameraId}/event-detection`,
+    )).data
+    ElMessage.success(enabled ? 'ONVIF 原生事件已启用' : 'ONVIF 原生事件已关闭')
+  } catch (error) {
+    ElMessage.error(errorText(error, enabled
+      ? 'ONVIF 原生事件启用失败'
+      : 'ONVIF 原生事件关闭失败'))
+  } finally {
+    onvifToggling.value = false
   }
 }
 
@@ -390,6 +426,38 @@ onBeforeUnmount(() => {
             <el-button v-if="previewActive" :icon="Refresh" @click="refreshPreview">重连</el-button>
             <el-button :icon="previewActive ? VideoPause : VideoPlay" @click="togglePreview">{{ previewActive ? '停止预览' : '打开预览' }}</el-button>
           </div>
+        </div>
+      </section>
+
+      <section
+        v-if="onvifSource && onvifSource.descriptor.status !== 'unsupported'"
+        class="detection-settings-card onvif-source-settings"
+      >
+        <div class="settings-card-head">
+          <div>
+            <span>摄像头原生 Provider</span>
+            <strong>ONVIF PullPoint Events</strong>
+            <small>订阅摄像头原生事件；连接状态与事件订阅状态彼此独立。</small>
+          </div>
+          <div class="motion-master">
+            <span class="runtime-pill" :class="onvifRuntimeState">
+              <i></i>{{ runtimeLabel(onvifRuntimeState) }}
+            </span>
+            <el-switch
+              :model-value="onvifEnabled"
+              :loading="onvifToggling"
+              :disabled="!['available', 'error'].includes(onvifSource.descriptor.status)"
+              @change="toggleOnvifSource"
+            />
+          </div>
+        </div>
+        <div class="onvif-source-copy">
+          <strong>{{ sourceStatusLabel(onvifSource.descriptor.status) }}</strong>
+          <span v-if="onvifSource.descriptor.capabilities.length">
+            已识别：{{ onvifSource.descriptor.capabilities.map(capabilityLabel).join('、') }}
+          </span>
+          <span v-else>{{ onvifSource.descriptor.reason || '设备已公布 Events 服务，尚未识别具体 Topic。' }}</span>
+          <small>为避免重复移动事件，camera.onvif 与 local.motion 不能同时启用。</small>
         </div>
       </section>
 
