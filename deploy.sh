@@ -246,7 +246,8 @@ classify_path() {
   case "$path" in
     frontend/*) BUILD_FRONTEND=1; UPDATE_FRONTEND=1 ;;
     backend/Dockerfile|backend/pyproject.toml|backend/uv.lock) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_hik_if_enabled; mark_discovery ;;
-    backend/app/discovery_helper.py|backend/app/services/camera_discovery.py|backend/app/schemas/camera_discovery.py|backend/app/services/onvif_client.py) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_discovery ;;
+    backend/app/discovery_helper.py|backend/app/services/camera_discovery.py) BUILD_BACKEND=1; mark_discovery ;;
+    backend/app/schemas/camera_discovery.py|backend/app/services/onvif_client.py) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_discovery ;;
     backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1 ;;
     hik_bridge/*) BUILD_BACKEND=1; mark_hik_if_enabled ;;
     hik-sdk-runtime/.gitkeep) ;;
