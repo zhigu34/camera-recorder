@@ -181,7 +181,15 @@ def _validate_service_url(url: str) -> str:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise OnvifError("invalid ONVIF service URL")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise OnvifError("invalid ONVIF service URL") from exc
     return url
+
+
+def validate_service_url(url: str) -> str:
+    return _validate_service_url(url)
 
 
 def _wsse_header(username: str, password: str) -> str:
