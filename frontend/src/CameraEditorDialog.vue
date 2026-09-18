@@ -162,6 +162,7 @@ function changeAdapter(adapter: CameraAdapterId) {
 
 function reset() {
   form.value = props.camera ? draftFromCamera(props.camera) : emptyCameraDraft()
+  discoveryVisible.value = false
   probeResult.value = null
   probeFingerprint.value = ''
 }
@@ -272,7 +273,10 @@ const probeSummary = computed(() => {
 watch(
   () => props.modelValue,
   (open) => {
-    if (!open) return
+    if (!open) {
+      discoveryVisible.value = false
+      return
+    }
     reset()
     void loadAdapters()
   },
