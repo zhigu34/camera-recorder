@@ -144,8 +144,7 @@ async function loadAdapters() {
   }
 }
 
-function validate(): string | null {
-  if (!form.value.name.trim()) return '请填写摄像头名称'
+function validateConnection(): string | null {
   if (!form.value.host.trim()) return '请填写设备地址'
   if (!form.value.username.trim()) return '请填写用户名'
   if (requiresPassword.value && !form.value.password) return '新增或切换适配器时必须填写密码'
@@ -156,8 +155,13 @@ function validate(): string | null {
   return null
 }
 
+function validateSave(): string | null {
+  if (!form.value.name.trim()) return '请填写摄像头名称'
+  return validateConnection()
+}
+
 async function probeConnection() {
-  const validationError = validate()
+  const validationError = validateConnection()
   if (validationError) {
     ElMessage.warning(validationError)
     return
@@ -190,7 +194,7 @@ async function probeConnection() {
 }
 
 async function save() {
-  const validationError = validate()
+  const validationError = validateSave()
   if (validationError) {
     ElMessage.warning(validationError)
     return
