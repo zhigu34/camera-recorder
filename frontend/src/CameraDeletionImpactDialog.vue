@@ -49,7 +49,7 @@ const canConfirmDelete = computed(() =>
 function isDeletionImpact(value: unknown): value is CameraDeletionImpact {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<CameraDeletionImpact>
-  return Number.isInteger(candidate.camera_id)
+  return typeof candidate.camera_id === 'number' && Number.isInteger(candidate.camera_id)
     && typeof candidate.recordings === 'number'
     && typeof candidate.motion_events === 'number'
     && typeof candidate.health_samples === 'number'
