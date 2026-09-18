@@ -6,7 +6,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Cloudy, Refresh, Search, Setting, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { useCameraStore } from './stores/cameras'
-import { parsePositiveQueryId, uploadTaskLocation } from './utils/adminDeepLinks'
+import { parsePositiveQueryId } from './utils/adminDeepLinks'
 import { formatDateTime } from './utils/dateTime'
 
 interface UploadTask {
