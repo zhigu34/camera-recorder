@@ -37,6 +37,7 @@ let requestId = 0
 const blockers = computed(() => impact.value ? [
   { key: 'recordings', label: '录像', count: impact.value.recordings, route: cameraRecordingsRoute(impact.value.camera_id) },
   { key: 'motion', label: '移动活动', count: impact.value.motion_events, route: cameraActivityRoute(impact.value.camera_id) },
+  { key: 'native-detection', label: '原生检测事件', count: impact.value.detection_events, route: cameraActivityRoute(impact.value.camera_id) },
   { key: 'events', label: '阻塞事件', count: impact.value.blocking_events, route: cameraSystemEventsRoute(impact.value.camera_id) },
   { key: 'health', label: '健康样本', count: impact.value.health_samples, route: cameraHealthRoute(impact.value.camera_id) },
   { key: 'uploads', label: '待处理上传', count: impact.value.pending_uploads, route: cameraUploadsRoute(impact.value.camera_id) },
@@ -52,6 +53,7 @@ function isDeletionImpact(value: unknown): value is CameraDeletionImpact {
   return typeof candidate.camera_id === 'number' && Number.isInteger(candidate.camera_id)
     && typeof candidate.recordings === 'number'
     && typeof candidate.motion_events === 'number'
+    && typeof candidate.detection_events === 'number'
     && typeof candidate.health_samples === 'number'
     && typeof candidate.blocking_events === 'number'
     && typeof candidate.pending_uploads === 'number'
