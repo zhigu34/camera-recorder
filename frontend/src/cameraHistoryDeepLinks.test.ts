@@ -11,6 +11,7 @@ describe('camera history deep links', () => {
     expect(eventSource).toContain("const cameraFilter = ref<CameraFilter>(initialCameraId || 'all')")
     expect(eventSource).toContain('watch(() => route.query.camera_id')
     expect(eventSource).toContain('replaceCameraDeepLink(nextId)')
+    expect(eventSource).toContain("if (typeof cameraFilter.value === 'number') cameraFilter.value = 'all'")
   })
 
   it('opens the health drawer for a camera_id deep link once health data exists', () => {
