@@ -1,4 +1,4 @@
-# ONVIF WS-Discovery Design
+# Camera LAN Discovery Design
 
 Status: **Approved in chat — implementation-ready**
 
@@ -6,11 +6,11 @@ Date: 2026-09-18
 
 ## Goal
 
-Add explicit, user-triggered LAN discovery for ONVIF devices without changing the current Camera identity model or creating a second ONVIF camera workflow.
+Add explicit, user-triggered LAN discovery for ONVIF and Manual RTSP cameras without changing the current Camera identity model or creating parallel camera-management workflows.
 
-Discovery produces temporary device candidates only. A user selects a candidate to prefill the existing `CameraEditorDialog`, then enters credentials, runs the existing ONVIF Probe if desired, and saves through the unified Camera API.
+Discovery produces temporary candidates only. ONVIF uses WS-Discovery; Manual RTSP performs only bounded TCP port-554 discovery on the host LAN `/24`. A user selects a candidate to prefill the existing `CameraEditorDialog`, then completes the existing adapter-specific fields/Probe flow and saves through the unified Camera API.
 
-This is the first Post-V1 ONVIF capability slice.
+This is the first Post-V1 LAN discovery slice.
 
 ## Non-goals
 
@@ -18,7 +18,10 @@ This phase does **not** implement:
 
 - automatic background LAN scanning;
 - automatic Camera creation;
-- credential probing during WS-Discovery;
+- credential probing during discovery;
+- RTSP path guessing;
+- RTSP OPTIONS/DESCRIBE requests during discovery;
+- scanning RTSP ports other than TCP 554;
 - persistence of discovery results;
 - ONVIF PullPoint / Events subscriptions;
 - PTZ control;
@@ -35,7 +38,27 @@ The existing unified editor remains the only camera add/edit surface.
 
 ### Manual RTSP
 
-The editor shows Manual RTSP connection fields only. No discovery action is shown.
+When `adapter=manual_rtsp`, the editor shows the normal RTSP fields plus:
+
+`扫描局域网 RTSP 设备`
+
+The scan performs only TCP-connect discovery against port `554` on the selected host LAN `/24`.
+
+It does not:
+
+- guess a main/sub stream path;
+- send RTSP OPTIONS/DESCRIBE;
+- use or request credentials;
+- classify a successful TCP listener as a specific camera brand/model.
+
+Selecting a result fills only:
+
+- `host`;
+- `port=554`.
+
+The user still supplies main/sub RTSP paths and uses the existing Probe flow before saving.
+
+Manual entry remains fully supported and scanning is optional.
 
 ### ONVIF
 
@@ -61,7 +84,82 @@ Scanning is always optional. Users who already know the camera address may conti
 
 ### HIK SDK
 
-The editor shows HIK SDK connection fields only. ONVIF discovery is not shown.
+The editor shows HIK SDK connection fields only. LAN discovery actions are not shown in this phase.
+
+
+## RTSP Port-554 Discovery
+
+RTSP discovery intentionally means only "which hosts on the local /24 accept TCP connections on port 554".
+
+### Network selection
+
+The helper identifies the IPv4 address of the interface used by the host default route.
+
+If that address is, for example:
+
+```text
+192.168.1.10
+```
+
+the scan target is:
+
+```text
+192.168.1.1 - 192.168.1.254
+TCP 554
+```
+
+The helper excludes:
+
+- network address;
+- broadcast address;
+- its own interface address.
+
+Supported default-route address ranges for automatic scanning:
+
+- RFC1918 private IPv4;
+- IPv4 link-local if used by the deployment.
+
+If no suitable non-loopback IPv4 default-route interface can be determined, RTSP LAN scan returns discovery-unavailable rather than guessing an interface.
+
+The first slice does not expose arbitrary CIDR input in the UI.
+
+### Probe behavior
+
+Each host receives only a TCP connect attempt to port `554`.
+
+A successful TCP connection means:
+
+```text
+host:554 is reachable
+```
+
+and nothing more.
+
+No application bytes are written to the socket.
+
+Initial bounds:
+
+- target count: maximum 254 hosts;
+- concurrency: maximum 64 in-flight connection attempts;
+- per-host connect timeout: 300 ms;
+- overall RTSP scan hard deadline: 3 seconds;
+- result cap: 254.
+
+Sockets are closed immediately after connect success/failure.
+
+### RTSP candidate shape
+
+```json
+{
+  "host": "192.168.1.50",
+  "port": 554,
+  "selectable": true
+}
+```
+
+Results are sorted numerically by IPv4 address.
+
+No manufacturer/model/name/path is inferred from an open port.
 
 ## Discovery Semantics
 
@@ -202,13 +300,16 @@ The helper MUST NOT receive or access:
 - OpenList configuration;
 - HIK runtime.
 
-The helper receives only a bounded discovery request such as:
+The helper accepts only bounded, credential-free discovery operations.
 
-```json
-{
-  "timeout_seconds": 3.0
-}
+Conceptually:
+
+```text
+scan_onvif(timeout_seconds=3.0)
+scan_rtsp_port_554()
 ```
+
+The backend does not send user-selected CIDRs, credentials, or arbitrary target ports to the helper in this phase.
 
 and returns normalized discovery candidates.
 
@@ -216,20 +317,40 @@ It does not persist state between requests.
 
 ## Backend API
 
-Add:
+Add two explicit backend operations:
 
 ```text
-POST /api/onvif-discovery/scan
+POST /api/camera-discovery/onvif
+POST /api/camera-discovery/rtsp
 ```
 
-No credentials are accepted.
+Neither accepts credentials.
 
-Suggested response:
+The ONVIF operation invokes WS-Discovery.
+
+The RTSP operation invokes the bounded local-/24 TCP-554 scan.
+
+Keeping separate endpoints makes adapter semantics explicit and avoids a loosely typed "scan mode" payload.
+
+Suggested ONVIF response:
 
 ```json
 {
   "devices": [...],
   "scan_duration_ms": 3012,
+  "warnings": []
+}
+```
+
+Suggested RTSP response:
+
+```json
+{
+  "network": "192.168.1.0/24",
+  "devices": [
+    {"host": "192.168.1.50", "port": 554, "selectable": true}
+  ],
+  "scan_duration_ms": 842,
   "warnings": []
 }
 ```
@@ -250,7 +371,7 @@ Malformed individual ProbeMatches are ignored and surfaced as a sanitized warnin
 
 The API MUST NOT expose raw XML packets.
 
-## WS-Discovery Implementation
+## ONVIF WS-Discovery Implementation
 
 Implement the minimal ONVIF discovery subset directly rather than adding a large ONVIF framework dependency.
 
@@ -336,7 +457,45 @@ Expected behavior:
 - helper startup failure: warn, leave the healthy recorder backend/frontend stack untouched, and keep the overall deploy exit status successful;
 - a later backend/helper code change should retry helper recreation automatically.
 
-## Frontend UX
+## Manual RTSP Frontend UX
+
+RTSP scanning appears inside `CameraEditorDialog` only when:
+
+```text
+form.adapter === 'manual_rtsp'
+```
+
+Place the action beside the device-address field:
+
+```text
+设备地址   [ 192.168.1.50 ] [扫描局域网]
+```
+
+The result chooser shows:
+
+- scanned `/24` network;
+- discovered `host:554` candidates;
+- scan status/count;
+- Rescan action.
+
+Selecting a candidate sets only:
+
+```text
+host=<candidate host>
+port=554
+```
+
+It does not modify:
+
+- username/password;
+- main_path;
+- sub_path;
+- device identity metadata;
+- runtime/recording policy.
+
+It does not automatically Probe or Save.
+
+## ONVIF Frontend UX
 
 Discovery appears inside `CameraEditorDialog` only when:
 
@@ -413,7 +572,7 @@ Changing host or port manually after candidate selection clears the discovered e
 
 ## Testing
 
-### Parser/unit tests
+### ONVIF parser/unit tests
 
 Cover:
 
@@ -428,9 +587,26 @@ Cover:
 - malformed XML isolation;
 - candidate cap.
 
+### RTSP scanner tests
+
+Use mocked/default-route interface discovery and mocked TCP connection attempts.
+
+Verify:
+
+- default-route IPv4 selection;
+- private `/24` derivation;
+- network/broadcast/self exclusion;
+- TCP 554 only;
+- no bytes are written;
+- 64-concurrency bound;
+- per-host and overall deadlines;
+- numeric IP sorting;
+- empty result;
+- no suitable interface -> discovery unavailable.
+
 ### Helper tests
 
-Use mocked UDP socket/input rather than real multicast in CI.
+Use mocked UDP/socket/network inputs rather than real LAN discovery in CI.
 
 Verify:
 
@@ -444,7 +620,9 @@ Verify:
 
 Verify:
 
-- successful candidate list;
+- successful ONVIF candidate list;
+- successful RTSP `host:554` candidate list;
+- RTSP response includes derived scanned `/24`;
 - empty discovery result;
 - helper unavailable -> 503;
 - malformed helper response -> safe 502/503 behavior;
@@ -454,10 +632,13 @@ Verify:
 
 Verify:
 
-- scan action appears only for ONVIF;
-- discovery does not appear for Manual RTSP/HIK;
+- ONVIF scan action appears only for ONVIF;
+- RTSP scan action appears only for Manual RTSP;
+- discovery does not appear for HIK;
 - unselectable candidates are visible but disabled;
-- selecting a candidate only changes editor draft;
+- selecting an ONVIF candidate only changes the ONVIF editor draft;
+- selecting an RTSP candidate changes only host and port=554;
+- RTSP paths remain untouched;
 - username/password remain untouched;
 - discovered non-default Device Service URL is preserved;
 - no automatic Probe/save;
@@ -478,17 +659,20 @@ Verify Compose contract:
 The slice is complete when:
 
 1. selecting ONVIF exposes a Scan LAN action in the unified editor;
-2. manual ONVIF entry still works unchanged;
-3. scan executes only after explicit user action;
-4. Docker deployment can discover LAN ONVIF ProbeMatches through the host-network helper;
-5. candidates with incomplete discovery data remain visible;
-6. only candidates with safe usable ONVIF XAddr are selectable;
-7. selecting a candidate only fills the editor draft;
-8. credentials are entered only in the existing editor;
-9. existing authenticated Probe performs device/profile/URI interrogation;
-10. Save still uses the unified Camera API and preserves Camera ID/history on edits;
-11. helper failure does not stop recording core or break manually configured ONVIF cameras;
-12. CI tests do not require real multicast cameras.
+2. selecting Manual RTSP exposes a Scan LAN action that probes only TCP 554 on the default LAN /24;
+3. HIK SDK exposes no discovery action in this phase;
+4. manual ONVIF and RTSP entry still work unchanged;
+5. scans execute only after explicit user action;
+6. Docker deployment can discover LAN ONVIF ProbeMatches through the host-network helper;
+7. RTSP discovery returns only reachable host:554 candidates and does not guess paths;
+8. ONVIF candidates with incomplete discovery data remain visible;
+9. only candidates with safe usable ONVIF XAddr are selectable;
+10. selecting any candidate only fills the relevant editor draft fields;
+11. credentials are entered only in the existing editor;
+12. existing authenticated Probe performs device/profile/URI interrogation;
+13. Save still uses the unified Camera API and preserves Camera ID/history on edits;
+14. helper failure does not stop recording core or break manually configured cameras;
+15. CI tests do not require real multicast cameras or a real LAN /24.
 
 ## Follow-up Slices
 
