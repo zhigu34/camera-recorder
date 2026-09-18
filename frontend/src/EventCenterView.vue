@@ -407,7 +407,18 @@ function syncDeepLinkedEvent() {
   const item = events.value.find((event) => event.id === eventId)
   if (item) { selectedEvent.value = item; detailVisible.value = true }
 }
-function clearFilters() { keyword.value = ''; levelFilter.value = 'all'; categoryFilter.value = 'all'; cameraFilter.value = 'all' }
+function replaceCameraDeepLink(cameraId: number | null) {
+  const query = { ...route.query }
+  if (cameraId === null) delete query.camera_id
+  else query.camera_id = String(cameraId)
+  void router.replace({ query })
+}
+function clearFilters() {
+  keyword.value = ''
+  levelFilter.value = 'all'
+  categoryFilter.value = 'all'
+  cameraFilter.value = 'all'
+}
 function relatedAction(item: EventItem) {
   const category = item.category.toLowerCase()
   if (item.recording_id) {
@@ -485,6 +496,14 @@ async function reload() { await Promise.all([load(), cameraStore.load(true)]); c
 
 watch(() => [activityDate.value, activityCamera.value] as const, () => {
   if (mode.value === 'activity') void loadActivity()
+})
+watch(activityCamera, (value) => {
+  const nextId = typeof value === 'number' ? value : null
+  if (positiveRouteId(route.query.camera_id) !== nextId) replaceCameraDeepLink(nextId)
+})
+watch(cameraFilter, (value) => {
+  const nextId = typeof value === 'number' ? value : null
+  if (positiveRouteId(route.query.camera_id) !== nextId) replaceCameraDeepLink(nextId)
 })
 watch([keyword, levelFilter, categoryFilter, cameraFilter, systemPageSize], () => { systemPage.value = 1 })
 watch(() => filteredEvents.value.length, (length) => {
