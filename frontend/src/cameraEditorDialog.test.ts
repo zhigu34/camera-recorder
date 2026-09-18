@@ -33,6 +33,13 @@ describe('unified camera editor', () => {
     expect(editorSource).toContain('unavailable_reason')
   })
 
+  it('blocks probe and save until adapter capabilities are known', () => {
+    expect(editorSource).toContain("if (adaptersLoading.value) return '摄像头适配器能力仍在加载'")
+    expect(editorSource).toContain("if (!selectedCapability.value) return '无法确认所选摄像头适配器能力'")
+    expect(editorSource).toContain(':disabled="probing || adaptersLoading"')
+    expect(editorSource).toContain(':disabled="saving || adaptersLoading || selectedAdapterUnavailable"')
+  })
+
   it('explains adapter switches while preserving the camera identity and history', () => {
     expect(editorSource).toContain('Camera ID #{{ camera?.id }}')
     expect(editorSource).toContain('历史录像、事件和健康记录保持不变')
