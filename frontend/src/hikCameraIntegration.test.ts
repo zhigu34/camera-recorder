@@ -1,20 +1,19 @@
 import { describe, expect, it } from 'vitest'
+
+import cameraSource from './CamerasView.vue?raw'
 import workspaceSource from './CamerasWorkspace.vue?raw'
-import hikSource from './HikCameraAddView.vue?raw'
 
 describe('HIK SDK camera integration', () => {
-  it('exposes HIK and ONVIF as explicit adapter add flows', () => {
-    expect(workspaceSource).toContain("import HikCameraAddView from './HikCameraAddView.vue'")
-    expect(workspaceSource).toContain('添加 HIK SDK')
-    expect(workspaceSource).toContain('<HikCameraAddView')
-    expect(workspaceSource).toContain('添加 ONVIF')
+  it('routes HIK configuration through the unified camera editor', () => {
+    expect(cameraSource).toContain("import CameraEditorDialog from './CameraEditorDialog.vue'")
+    expect(cameraSource).toContain('<CameraEditorDialog')
+    expect(workspaceSource).not.toContain("import HikCameraAddView from './HikCameraAddView.vue'")
+    expect(workspaceSource).not.toContain('<HikCameraAddView')
+    expect(workspaceSource).not.toContain('添加 HIK SDK')
   })
 
-  it('requires explicit probe then create and does not autoplay media', () => {
-    expect(hikSource).toContain("'/api/cameras/hik/probe'")
-    expect(hikSource).toContain("'/api/cameras/hik'")
-    expect(hikSource).toContain('请先检测 HIK SDK 设备')
-    expect(hikSource).not.toContain('autoplay')
-    expect(hikSource).not.toContain('preview.mjpeg')
+  it('keeps camera media manual while HIK configuration is edited', () => {
+    expect(cameraSource).not.toContain('autoplay')
+    expect(workspaceSource).not.toContain('autoplay')
   })
 })

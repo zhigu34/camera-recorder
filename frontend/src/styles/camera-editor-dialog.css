@@ -1,0 +1,215 @@
+.camera-editor-dialog {
+  overflow: hidden;
+  border: 1px solid var(--nvr-border-strong) !important;
+  border-radius: 12px !important;
+  background: var(--nvr-surface) !important;
+}
+
+.camera-editor-dialog .el-dialog__header {
+  margin: 0;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--nvr-border);
+  background: var(--nvr-surface-2);
+}
+
+.camera-editor-dialog .el-dialog__body {
+  max-height: min(74vh, 760px);
+  overflow: auto;
+  padding: 0;
+  background: var(--nvr-bg);
+}
+
+.camera-editor-dialog .el-dialog__footer {
+  padding: 14px 18px;
+  border-top: 1px solid var(--nvr-border);
+  background: var(--nvr-surface-2);
+}
+
+.camera-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.camera-editor-section {
+  padding: 15px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 10px;
+  background: var(--nvr-surface);
+}
+
+.camera-editor-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.camera-editor-section-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.camera-editor-section-heading span {
+  color: var(--nvr-blue);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.camera-editor-section-heading strong {
+  color: var(--nvr-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.camera-editor-section-heading small,
+.camera-editor-probe-hint {
+  max-width: 440px;
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.camera-editor-grid {
+  display: grid;
+  gap: 0 12px;
+}
+
+.camera-editor-grid-identity {
+  grid-template-columns: 1.4fr 1fr 1fr 160px;
+}
+
+.camera-editor-grid-connection {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.camera-editor-grid-policy {
+  grid-template-columns: minmax(220px, 1fr) 160px 160px;
+}
+
+.camera-editor-grid .el-input-number,
+.camera-editor-grid .el-select,
+.camera-editor-adapter-select {
+  width: 100%;
+}
+
+.camera-editor-wide {
+  grid-column: span 2;
+}
+
+.camera-editor-adapter-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.camera-editor-adapter-option small {
+  color: var(--nvr-muted);
+  font-size: 9px;
+}
+
+.camera-editor-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 8px;
+  background: var(--nvr-surface-2);
+}
+
+.camera-editor-notice strong {
+  color: var(--nvr-text-soft);
+  font-size: 11px;
+}
+
+.camera-editor-notice span {
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.camera-editor-notice.warning {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 35%, var(--nvr-border));
+}
+
+.camera-editor-notice.switch {
+  border-color: color-mix(in srgb, var(--nvr-blue) 35%, var(--nvr-border));
+}
+
+.camera-editor-probe-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.camera-editor-probe-result {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.camera-editor-probe-result strong {
+  color: var(--nvr-green);
+  font-size: 10px;
+}
+
+.camera-editor-probe-result span {
+  color: var(--nvr-muted);
+  font-size: 10px;
+}
+
+@media (max-width: 860px) {
+  .camera-editor-grid-identity,
+  .camera-editor-grid-connection,
+  .camera-editor-grid-policy {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .camera-editor-wide {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 620px) {
+  .camera-editor-dialog {
+    width: calc(100vw - 20px) !important;
+  }
+
+  .camera-editor {
+    padding: 10px;
+  }
+
+  .camera-editor-section {
+    padding: 12px;
+  }
+
+  .camera-editor-section-heading,
+  .camera-editor-probe-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .camera-editor-section-heading small,
+  .camera-editor-probe-hint {
+    max-width: none;
+    text-align: left;
+  }
+
+  .camera-editor-grid-identity,
+  .camera-editor-grid-connection,
+  .camera-editor-grid-policy {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-editor-wide {
+    grid-column: auto;
+  }
+}
