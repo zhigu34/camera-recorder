@@ -63,6 +63,7 @@ export function draftFromCamera(camera: CameraEditorCamera): CameraEditorDraft {
       host: connection.host,
       username: connection.username,
       port: config.port,
+      device_service_url: config.device_service_url || '',
     }
   }
 
@@ -123,6 +124,7 @@ export function connectionFingerprint(draft: CameraEditorDraft): string {
       draft.username.trim(),
       draft.password,
       draft.port,
+      draft.device_service_url.trim(),
     ])
   }
   return JSON.stringify([
@@ -154,7 +156,13 @@ function connectionPayload(draft: CameraEditorDraft, includePassword: boolean): 
     }
   }
   if (draft.adapter === 'onvif') {
-    return { ...common, port: draft.port }
+    return {
+      ...common,
+      port: draft.port,
+      ...(draft.device_service_url.trim()
+        ? { device_service_url: draft.device_service_url.trim() }
+        : {}),
+    }
   }
   return {
     ...common,
