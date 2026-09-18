@@ -29,6 +29,14 @@ class UnknownEventSource(KeyError):
     pass
 
 
+class EventSourceConflict(ValueError):
+    pass
+
+
+class EventSourceUnavailable(ValueError):
+    pass
+
+
 class EventSourceRegistry:
     def __init__(self) -> None:
         self._sources: dict[str, EventSourceAdapter] = {}
