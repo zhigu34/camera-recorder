@@ -58,12 +58,6 @@ function onBatchCompleted() {
 </template>
 
 <style scoped>
-:global(.camera-detail-pane .detail-columns),
-:global(.camera-detail-pane .runtime-section),
-:global(.camera-detail-pane .camera-device-management),
-:global(.camera-detail-pane .drawer-danger-zone) {
-  order: 2;
-}
 :global(.batch-camera-dialog) {
   overflow: hidden;
   border: 1px solid var(--nvr-border-strong) !important;
