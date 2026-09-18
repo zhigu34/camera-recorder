@@ -39,6 +39,7 @@ from app.services.event_recording import event_recording_manager
 from app.services.ffmpeg_capabilities import capabilities_dict
 from app.services.health_sampler import health_sampler
 from app.services.motion_manager import motion_detection_manager
+from app.services.onvif_event_manager import onvif_event_manager
 from app.services.playback_prefetch import PlaybackPrefetchMiddleware, playback_prefetch_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_export import recording_export_manager
@@ -92,6 +93,7 @@ async def lifespan(_: FastAPI):
     await recording_schedule_manager.start()
     await event_recording_manager.start()
     await camera_connectivity_monitor.start()
+    await onvif_event_manager.start()
     await motion_detection_manager.start()
     await health_sampler.start()
     await storage_cleanup_manager.start()
@@ -103,6 +105,7 @@ async def lifespan(_: FastAPI):
     await storage_cleanup_manager.stop()
     await health_sampler.stop()
     await motion_detection_manager.stop()
+    await onvif_event_manager.stop()
     await camera_connectivity_monitor.stop()
     await event_recording_manager.stop()
     await recording_schedule_manager.stop()
@@ -171,6 +174,10 @@ async def system_status() -> dict:
         "recorders": recorder_manager.status(),
         "recording_schedule": recording_schedule_manager.status(),
         "event_recording": event_recording_manager.status(),
+        "onvif_events": {
+            str(camera_id): onvif_event_manager.status(camera_id)
+            for camera_id in onvif_event_manager.active_camera_ids()
+        },
         "connectivity_monitor": camera_connectivity_monitor.snapshot(),
         "segment_processor": segment_processor.status(),
         "recording_export": recording_export_manager.status(),
