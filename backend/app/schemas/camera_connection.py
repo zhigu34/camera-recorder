@@ -191,6 +191,16 @@ def _safe_onvif_profiles(value: Any) -> list[dict[str, Any]]:
     return profiles
 
 
+def _safe_onvif_capabilities(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    capabilities = dict(value)
+    for key, raw in list(capabilities.items()):
+        if key.endswith("_xaddr") and isinstance(raw, str) and raw:
+            capabilities[key] = _credential_free_url(raw)
+    return capabilities
+
+
 class CameraConnectionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -246,7 +256,9 @@ class CameraConnectionRead(BaseModel):
                 "firmware_version": getattr(config, "firmware_version", None),
                 "serial_number": getattr(config, "serial_number", None),
                 "hardware_id": getattr(config, "hardware_id", None),
-                "capabilities": getattr(config, "capabilities_json", {}) or {},
+                "capabilities": _safe_onvif_capabilities(
+                    getattr(config, "capabilities_json", {})
+                ),
                 "profiles": _safe_onvif_profiles(getattr(config, "profiles_json", [])),
                 "recording_profile_token": getattr(config, "recording_profile_token", None),
                 "preview_profile_token": getattr(config, "preview_profile_token", None),
