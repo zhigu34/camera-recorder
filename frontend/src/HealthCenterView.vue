@@ -51,6 +51,8 @@ const reliabilityStatusLabel = computed(() => {
 function selectCamera(cameraId: number) {
   selectedCameraId.value = cameraId
   drawerOpen.value = true
+  const query = { ...route.query, camera_id: String(cameraId) }
+  void router.replace({ query })
 }
 
 function syncDeepLinkedCamera() {
@@ -113,6 +115,12 @@ function openPlaybackDiagnostics() {
 }
 
 watch([() => route.query.camera_id, selectedRealtime, selectedReliability], syncDeepLinkedCamera, { immediate: true })
+watch(drawerOpen, (open) => {
+  if (open || positiveRouteId(route.query.camera_id) === null) return
+  const query = { ...route.query }
+  delete query.camera_id
+  void router.replace({ query })
+})
 
 onMounted(() => {
   void reliability.refresh().then(syncDeepLinkedCamera)
