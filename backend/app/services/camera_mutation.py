@@ -302,7 +302,11 @@ def _switch_adapter(camera: Camera, draft, password_encrypted: str):
             host=draft.host,
             username=draft.username,
             password_encrypted=password_encrypted,
-            device_service_url=_onvif_device_service_url(draft.host, draft.port),
+            device_service_url=_onvif_device_service_url(
+                draft.host,
+                draft.port,
+                draft.device_service_url,
+            ),
         )
     return switch_to_hik_connection(
         camera,
