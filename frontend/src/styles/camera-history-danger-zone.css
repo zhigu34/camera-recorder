@@ -1,0 +1,176 @@
+.camera-history-panel {
+  display: grid;
+  gap: 10px;
+  padding: 14px 15px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 10px;
+  background: var(--nvr-surface);
+}
+
+.camera-history-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.camera-history-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.camera-history-heading span,
+.camera-delete-target > span {
+  color: var(--nvr-blue);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+}
+
+.camera-history-heading strong {
+  font-size: 12px;
+}
+
+.camera-history-heading small,
+.camera-history-heading button {
+  border: 0;
+  color: var(--nvr-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 9px;
+}
+
+.camera-history-heading button {
+  cursor: pointer;
+}
+
+.camera-history-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.camera-history-grid button {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 8px;
+  color: var(--nvr-text);
+  background: var(--nvr-surface-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.camera-history-grid button:hover {
+  border-color: color-mix(in srgb, var(--nvr-blue) 42%, var(--nvr-border));
+}
+
+.camera-history-grid span,
+.camera-history-grid small {
+  overflow: hidden;
+  color: var(--nvr-muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.camera-history-grid strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.camera-deletion-impact-dialog .el-dialog__body {
+  padding: 0;
+}
+
+.camera-delete-impact {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.camera-delete-target {
+  display: grid;
+  gap: 5px;
+}
+
+.camera-delete-target strong {
+  font-size: 14px;
+}
+
+.camera-delete-target small,
+.camera-delete-blocked > span,
+.camera-delete-confirm > span,
+.camera-delete-blocked-actions > span {
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.camera-delete-error {
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--nvr-red) 35%, var(--nvr-border));
+  border-radius: 8px;
+  color: var(--nvr-red);
+  font-size: 11px;
+}
+
+.camera-delete-blocked,
+.camera-delete-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid color-mix(in srgb, var(--nvr-red) 28%, var(--nvr-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--nvr-red) 4%, var(--nvr-surface));
+}
+
+.camera-delete-blocker-list {
+  display: grid;
+  gap: 7px;
+}
+
+.camera-delete-blocker-list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 7px;
+  color: var(--nvr-text);
+  background: var(--nvr-surface-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+.camera-delete-blocker-list button > span,
+.camera-delete-blocker-list button > small {
+  color: var(--nvr-muted);
+  font-size: 9px;
+}
+
+.camera-delete-blocked-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 900px) {
+  .camera-history-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .camera-history-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .camera-delete-blocked-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
