@@ -87,7 +87,7 @@ export interface ManualRtspEditorDraft extends CameraEditorDraftBase {
 export interface OnvifEditorDraft extends CameraEditorDraftBase {
   adapter: 'onvif'
   port: number
-  device_service_url: string
+  device_service_url?: string
 }
 
 export interface HikEditorDraft extends CameraEditorDraftBase {
