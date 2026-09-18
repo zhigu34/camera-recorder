@@ -238,7 +238,6 @@ def test_0025_allows_unverified_onvif_cache_without_rewriting_existing_values(
         ) == before
 
 
-
 def test_0026_adds_onvif_identity_columns_without_rewriting_existing_config(
     tmp_path: Path,
 ) -> None:
