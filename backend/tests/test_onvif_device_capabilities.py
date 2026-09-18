@@ -133,7 +133,7 @@ def test_camera_read_exposes_sanitized_onvif_capability_details() -> None:
             "width": 3840,
             "height": 2160,
             "fps": 25.0,
-            "uri": "rtsp://192.0.2.44:554/main",
+            "uri": "rtsp://viewer:secret@192.0.2.44:554/main",
         }
     ]
     config.recording_profile_token = "main"
