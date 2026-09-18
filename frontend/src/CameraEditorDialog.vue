@@ -106,7 +106,7 @@ function changeAdapter(adapter: CameraAdapterId) {
   if (adapter === 'manual_rtsp') {
     form.value = { ...base, adapter, port: 554, main_path: '/ch1/main', sub_path: '' }
   } else if (adapter === 'onvif') {
-    form.value = { ...base, adapter, port: 80 }
+    form.value = { ...base, adapter, port: 80, device_service_url: '' }
   } else {
     form.value = {
       ...base,
