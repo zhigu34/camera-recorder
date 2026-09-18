@@ -407,9 +407,6 @@ watch(
           <el-form-item label="自动录像">
             <el-switch v-model="form.auto_record" />
           </el-form-item>
-          <el-form-item label="启用设备">
-            <el-switch v-model="form.enabled" />
-          </el-form-item>
         </div>
       </section>
     </div>
