@@ -30,7 +30,7 @@ type CameraFormFactor = 'unknown' | 'bullet' | 'dome' | 'turret' | 'ptz' | 'door
 type PreviewSource = 'main' | 'sub'
 type FilterKey = 'all' | 'online' | 'issue' | 'recording' | 'disabled'
 type SortKey = 'attention' | 'name' | 'ip' | 'status'
-type CameraHealth = 'online' | 'offline' | 'unknown' | 'disabled' | 'adapter-unavailable'
+type CameraHealth = 'online' | 'offline' | 'unknown' | 'unverified' | 'disabled' | 'adapter-unavailable'
 type HistoryMode = 'push' | 'replace'
 
 interface Camera {
@@ -159,17 +159,25 @@ function adapterCapabilityLabel(camera: Camera) {
 function health(camera: Camera): CameraHealth {
   if (!camera.enabled) return 'disabled'
   if (adapterUnavailable(camera)) return 'adapter-unavailable'
+  if (camera.connection?.verification_status === 'unverified') return 'unverified'
   if (camera.connectivity_status === 'online') return 'online'
   if (camera.connectivity_status === 'offline') return 'offline'
   return 'unknown'
 }
-function canQuickProbe(camera: Camera) { return camera.enabled && ['offline', 'unknown'].includes(health(camera)) }
+function isIssue(camera: Camera) {
+  if (!camera.enabled) return false
+  return ['offline', 'unknown', 'unverified', 'adapter-unavailable'].includes(health(camera))
+    || isRuntimeError(camera)
+    || camera.schedule_state === 'error'
+}
+function canQuickProbe(camera: Camera) { return camera.enabled && ['offline', 'unknown', 'unverified'].includes(health(camera)) }
 function healthLabel(camera: Camera) {
   const value = health(camera)
   if (value === 'online') return '在线'
   if (value === 'offline') return '离线'
   if (value === 'disabled') return '已禁用'
   if (value === 'adapter-unavailable') return '适配器不可用'
+  if (value === 'unverified') return '未验证'
   return '未检测'
 }
 function runtimeLabel(camera: Camera) {
@@ -289,19 +297,21 @@ function statusRank(camera: Camera) {
   const state = health(camera)
   if (state === 'adapter-unavailable') return 0
   if (state === 'offline') return 1
-  if (state === 'unknown') return 2
-  if (state === 'online') return 3
-  return 4
+  if (state === 'unverified') return 2
+  if (state === 'unknown') return 3
+  if (state === 'online') return 4
+  return 5
 }
 function attentionRank(camera: Camera) {
   const state = health(camera)
   if (state === 'adapter-unavailable') return 0
   if (state === 'offline') return 1
-  if (state === 'unknown') return 2
-  if (isRuntimeError(camera) || camera.schedule_state === 'error' || camera.schedule_state === 'probe_required' || camera.recorder_state === 'RECONNECTING') return 3
-  if (camera.recorder_state === 'RECORDING') return 4
-  if (state === 'online') return 5
-  return 6
+  if (state === 'unverified') return 2
+  if (state === 'unknown') return 3
+  if (isRuntimeError(camera) || camera.schedule_state === 'error' || camera.schedule_state === 'probe_required' || camera.recorder_state === 'RECONNECTING') return 4
+  if (camera.recorder_state === 'RECORDING') return 5
+  if (state === 'online') return 6
+  return 7
 }
 function compareCameras(left: Camera, right: Camera) {
   if (sortKey.value === 'name') return compareCameraNames(left, right)
@@ -377,7 +387,7 @@ function writeCameraDeepLink(cameraId: number | null, mode: HistoryMode) {
 const summary = computed(() => ({
   total: cameras.value.length,
   online: cameras.value.filter((camera) => health(camera) === 'online').length,
-  issue: cameras.value.filter((camera) => camera.enabled && ['offline', 'unknown', 'adapter-unavailable'].includes(health(camera))).length,
+  issue: cameras.value.filter(isIssue).length,
   recording: cameras.value.filter((camera) => isRecording(camera.id)).length,
   disabled: cameras.value.filter((camera) => health(camera) === 'disabled').length,
 }))
@@ -390,7 +400,7 @@ const filteredCameras = computed(() => {
     const matched = !needle || [camera.name, camera.manufacturer || '', camera.model || '', camera.connection?.host || camera.ip, connectionDetail(camera), camera.sub_rtsp_path || ''].some((value) => value.toLowerCase().includes(needle))
     if (!matched) return false
     if (filter.value === 'online') return health(camera) === 'online'
-    if (filter.value === 'issue') return camera.enabled && ['offline', 'unknown', 'adapter-unavailable'].includes(health(camera))
+    if (filter.value === 'issue') return isIssue(camera)
     if (filter.value === 'recording') return isRecording(camera.id)
     if (filter.value === 'disabled') return health(camera) === 'disabled'
     return true
@@ -607,7 +617,7 @@ onBeforeUnmount(() => {
         <div class="summary-grid camera-summary-grid">
           <button class="summary-card" :class="{ active: filter === 'all' }" @click="setFilter('all')"><span>全部</span><strong>{{ summary.total }}</strong><small>已配置</small></button>
           <button class="summary-card online" :class="{ active: filter === 'online' }" @click="setFilter('online')"><span>在线</span><strong>{{ summary.online }}</strong><small>连接正常</small></button>
-          <button class="summary-card issue" :class="{ active: filter === 'issue' }" @click="setFilter('issue')"><span>异常</span><strong>{{ summary.issue }}</strong><small>离线 / 未检测</small></button>
+          <button class="summary-card issue" :class="{ active: filter === 'issue' }" @click="setFilter('issue')"><span>异常</span><strong>{{ summary.issue }}</strong><small>连接 / 运行异常</small></button>
           <button class="summary-card recording" :class="{ active: filter === 'recording' }" @click="setFilter('recording')"><span>录像中</span><strong>{{ summary.recording }}</strong><small>当前任务</small></button>
           <button class="summary-card disabled" :class="{ active: filter === 'disabled' }" @click="setFilter('disabled')"><span>已禁用</span><strong>{{ summary.disabled }}</strong><small>主动停用</small></button>
         </div>
