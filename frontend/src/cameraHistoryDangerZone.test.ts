@@ -5,7 +5,6 @@ import editorSource from './CameraEditorDialog.vue?raw'
 import deletionSource from './CameraDeletionImpactDialog.vue?raw'
 import historySource from './CameraHistoryPanel.vue?raw'
 import navigationSource from './navigation.ts?raw'
-import detailOrderSource from './styles/camera-history-danger-zone.css?raw'
 
 describe('camera history and danger zone', () => {
   it('distinguishes unavailable adapters and recorder errors from connectivity state', () => {
@@ -58,14 +57,22 @@ describe('camera history and danger zone', () => {
     expect(deletionSource).toContain('已阻止永久删除')
   })
 
-  it('keeps split-detail information architecture explicit', () => {
-    expect(detailOrderSource).toContain('.camera-detail-pane .drawer-device-nav { order: -6; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .detail-columns { order: -3; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .runtime-section { order: -2; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .camera-detail-workspace { order: -1; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .camera-history-panel { order: 0; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .drawer-operation-panel { order: 1; }')
-    expect(detailOrderSource).toContain('.camera-detail-pane .drawer-danger-zone { order: 3; }')
+  it('keeps split-detail information architecture explicit in template order', () => {
+    const markers = [
+      'class="drawer-device-nav"',
+      'class="device-overview"',
+      'class="preview-section"',
+      'class="detail-columns"',
+      'class="detail-section detail-section-v2 runtime-section"',
+      '<CameraDetailWorkspace',
+      '<CameraHistoryPanel',
+      'class="drawer-operation-panel',
+      'class="camera-device-management',
+      'class="drawer-danger-zone"',
+    ]
+    const positions = markers.map((marker) => cameraSource.indexOf(marker))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions)
   })
 
   it('keeps delete in the right-pane danger zone', () => {
