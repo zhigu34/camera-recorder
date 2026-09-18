@@ -44,7 +44,7 @@ class CameraRuntimeCoordinator:
         # pre-roll worker is being torn down. A runtime reload intentionally
         # invalidates any event ownership tied to the old connection.
         await motion_detection_manager.stop_camera(camera_id)
-        await onvif_event_manager.restart_camera(camera_id)
+        await onvif_event_manager.stop_camera(camera_id)
         event_recording_manager.end_event(camera_id)
         await event_recording_manager.stop_camera(camera_id)
 
