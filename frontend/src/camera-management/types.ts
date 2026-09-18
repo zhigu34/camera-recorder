@@ -7,7 +7,3 @@ export interface CameraDeletionImpact {
   pending_uploads: number
   can_delete: boolean
 }
-
-export function hasDeletionBlockers(impact: CameraDeletionImpact | null): boolean {
-  return Boolean(impact && !impact.can_delete)
-}
