@@ -1,5 +1,17 @@
+
+.camera-detail-pane .drawer-device-nav { order: -6; }
+.camera-detail-pane .device-overview { order: -5; }
+.camera-detail-pane .preview-section { order: -4; }
+.camera-detail-pane .detail-columns { order: -3; }
+.camera-detail-pane .runtime-section { order: -2; }
+.camera-detail-pane .camera-detail-workspace { order: -1; }
+.camera-detail-pane .camera-history-panel { order: 0; }
+.camera-detail-pane .drawer-operation-panel { order: 1; }
+.camera-detail-pane .camera-device-management { order: 2; }
+.camera-detail-pane .drawer-danger-zone { order: 3; }
+
 .camera-history-panel {
-  order: 1;
+  order: 0;
   display: grid;
   gap: 10px;
   padding: 14px 15px;
