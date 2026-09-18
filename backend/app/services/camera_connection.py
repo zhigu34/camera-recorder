@@ -154,6 +154,9 @@ def upsert_onvif_connection(
     password_encrypted: str,
     device_service_url: str,
     device_uuid: str | None = None,
+    firmware_version: str | None = None,
+    serial_number: str | None = None,
+    hardware_id: str | None = None,
     capabilities: dict | None = None,
     profiles: list[dict] | None = None,
     recording_profile_token: str | None = None,
@@ -187,6 +190,9 @@ def upsert_onvif_connection(
         connection.onvif_config = OnvifConnectionConfig(
             device_service_url=device_service_url,
             device_uuid=device_uuid if requested_status == "verified" else None,
+            firmware_version=firmware_version if requested_status == "verified" else None,
+            serial_number=serial_number if requested_status == "verified" else None,
+            hardware_id=hardware_id if requested_status == "verified" else None,
             capabilities_json=(capabilities or {}) if requested_status == "verified" else {},
             profiles_json=(profiles or []) if requested_status == "verified" else [],
             recording_profile_token=(
@@ -230,6 +236,9 @@ def upsert_onvif_connection(
             connection.verified_at = verified_at if requested_status == "verified" else None
             connection.last_error = None if requested_status == "verified" else last_error
             config.device_uuid = device_uuid if requested_status == "verified" else None
+            config.firmware_version = firmware_version if requested_status == "verified" else None
+            config.serial_number = serial_number if requested_status == "verified" else None
+            config.hardware_id = hardware_id if requested_status == "verified" else None
             config.capabilities_json = (capabilities or {}) if requested_status == "verified" else {}
             config.profiles_json = (profiles or []) if requested_status == "verified" else []
             config.recording_profile_token = (
@@ -247,6 +256,9 @@ def upsert_onvif_connection(
         elif requested_status == "verified" and (
             verified_at is not None
             or device_uuid is not None
+            or firmware_version is not None
+            or serial_number is not None
+            or hardware_id is not None
             or capabilities is not None
             or profiles is not None
             or recording_profile_token is not None
@@ -256,6 +268,9 @@ def upsert_onvif_connection(
             connection.verified_at = verified_at
             connection.last_error = None
             config.device_uuid = device_uuid
+            config.firmware_version = firmware_version
+            config.serial_number = serial_number
+            config.hardware_id = hardware_id
             config.capabilities_json = capabilities or {}
             config.profiles_json = profiles or []
             config.recording_profile_token = recording_profile_token
@@ -481,6 +496,9 @@ def switch_to_onvif_connection(
     password_encrypted: str,
     device_service_url: str,
     device_uuid: str | None = None,
+    firmware_version: str | None = None,
+    serial_number: str | None = None,
+    hardware_id: str | None = None,
     capabilities: dict | None = None,
     profiles: list[dict] | None = None,
     recording_profile_token: str | None = None,
@@ -501,6 +519,9 @@ def switch_to_onvif_connection(
         password_encrypted=password_encrypted,
         device_service_url=device_service_url,
         device_uuid=device_uuid,
+        firmware_version=firmware_version,
+        serial_number=serial_number,
+        hardware_id=hardware_id,
         capabilities=capabilities,
         profiles=profiles,
         recording_profile_token=recording_profile_token,
