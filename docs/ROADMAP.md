@@ -107,18 +107,19 @@ schedule_state
 - [ ] 支持 `/cameras?camera_id=<id>`，直接打开指定摄像头详情
 - [ ] 实时监控“摄像头配置”直接打开对应摄像头，而不是只进入列表
 - [ ] 事件中心、Dashboard、Health 可下钻到准确摄像头
-- [ ] 摄像头详情增加能力区：主 / 子码流、音频、ONVIF、事件、PTZ 等能力标记
+- [x] 摄像头详情增加 ONVIF 能力区：设备身份、Media Profiles、主 / 子角色及 Media / Events / PTZ 服务地址标记；事件订阅与 PTZ 控制仍单独待办
 
 ### B. ONVIF 与设备发现
 
 - [x] ONVIF 基础客户端与认证
 - [x] 局域网设备发现（明确开启后执行，不默认后台扫描）：ONVIF WS-Discovery；Manual RTSP 仅扫描默认路由 /24 的 TCP 554
-- [ ] 自动读取 manufacturer / model / firmware / serial / MAC（当前已读取 manufacturer / model / firmware / serial / hardware id；MAC 尚未实现）
+- [ ] 自动读取 manufacturer / model / firmware / serial / MAC（manufacturer / model / firmware / serial / hardware id 已读取并展示；MAC 尚未实现）
 - [x] 自动读取 Media Profiles、主码流 / 子码流 URI、编码和分辨率
 - [x] ONVIF 信息与现有手工 RTSP 配置合并，保持 RTSP 为最终录像输入
 - [ ] 真实 Linux Docker host-network 环境验证 WS-Discovery 与 RTSP TCP-554 扫描
 - [ ] 评估 / 接入 PullPoint / Events，用摄像头原生 motion / person / smart event 作为低资源事件源
-- [ ] PTZ 能力识别，后续决定是否提供基础控制
+- [x] PTZ 服务地址能力识别并在设备详情展示
+- [ ] PTZ 基础控制
 
 ### C. 智能事件录像
 
