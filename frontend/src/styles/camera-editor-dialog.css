@@ -213,3 +213,132 @@
     grid-column: auto;
   }
 }
+
+
+.camera-editor-address-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.camera-editor-address-row .el-input {
+  min-width: 0;
+  flex: 1;
+}
+
+.camera-discovery-dialog {
+  overflow: hidden;
+  border: 1px solid var(--nvr-border-strong) !important;
+  border-radius: 12px !important;
+  background: var(--nvr-surface) !important;
+}
+
+.camera-discovery-dialog .el-dialog__header,
+.camera-discovery-dialog .el-dialog__footer {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--nvr-surface-2);
+}
+
+.camera-discovery-dialog .el-dialog__header {
+  border-bottom: 1px solid var(--nvr-border);
+}
+
+.camera-discovery-dialog .el-dialog__footer {
+  border-top: 1px solid var(--nvr-border);
+}
+
+.camera-discovery-dialog .el-dialog__body {
+  max-height: min(70vh, 680px);
+  overflow: auto;
+  padding: 16px;
+  background: var(--nvr-bg);
+}
+
+.camera-discovery-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.camera-discovery-toolbar > div,
+.camera-discovery-item > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.camera-discovery-toolbar strong,
+.camera-discovery-item strong {
+  color: var(--nvr-text);
+  font-size: 11px;
+}
+
+.camera-discovery-toolbar span,
+.camera-discovery-item span,
+.camera-discovery-item small,
+.camera-discovery-warnings span {
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.camera-discovery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.camera-discovery-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 11px 12px;
+  border: 1px solid var(--nvr-border);
+  border-radius: 8px;
+  background: var(--nvr-surface);
+}
+
+.camera-discovery-item.unavailable {
+  opacity: .72;
+}
+
+.camera-discovery-empty,
+.camera-discovery-warnings {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--nvr-border);
+  border-radius: 8px;
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  background: var(--nvr-surface-2);
+}
+
+.camera-discovery-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 620px) {
+  .camera-editor-address-row,
+  .camera-discovery-toolbar,
+  .camera-discovery-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .camera-editor-address-row .el-button,
+  .camera-discovery-toolbar .el-button,
+  .camera-discovery-item .el-button {
+    width: 100%;
+  }
+}
