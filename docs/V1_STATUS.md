@@ -8,6 +8,7 @@
 - Pinia camera/runtime stores exist and are used by core workspaces.
 - Camera deep links support `/cameras?camera_id=<id>` and restore the exact device in a persistent list/detail workspace without auto-starting preview.
 - Camera management uses one adapter-aware create/edit dialog for Manual RTSP, ONVIF and optional HIK SDK connections, backed by the canonical `CameraConnection` contract.
+- Camera add/edit supports explicit LAN discovery without auto-creating devices: ONVIF uses WS-Discovery and Manual RTSP uses a bounded default-route /24 TCP-554 scan. Discovery runs through a host-network helper over a shared Unix Socket, while the recorder backend remains bridge-networked.
 - Camera management distinguishes Disabled from connectivity failures, uses explicit Disable/Re-enable actions, exposes camera-scoped history navigation, and blocks permanent deletion while recordings/events/health/upload dependencies remain.
 - Activity -> Playback exact-event navigation exists with one-shot explicit-action autoplay semantics.
 - Live / Playback / Recording Management do not start media on page entry.
@@ -48,10 +49,12 @@ These require real cameras/browsers/storage and cannot be truthfully closed by C
 - OpenList/WebDAV outage while local recording continues, followed by upload recovery.
 - Disk critical protection test on a real recording volume.
 - Chrome / Edge / Safari matrix for local/cloud H.264 and HEVC playback, seeking, cross-segment and cross-day continuation.
+- Linux Docker host-network field validation for ONVIF WS-Discovery and Manual RTSP TCP-554 LAN scanning against real cameras.
 
 ## Post-V1.0 feature track
 
-- ONVIF discovery/device metadata/media profiles/events/PTZ capability.
+- **LAN discovery slice implemented in code:** ONVIF WS-Discovery candidates and Manual RTSP TCP-554 candidates feed the existing unified editor; authenticated ONVIF Probe continues to provide device metadata, Media Profiles and RTSP URIs.
+- **Still pending:** persisted ONVIF capability/detail presentation, native ONVIF Events/PullPoint and PTZ capability/control.
 - Event-only recording policy and trigger state machine.
 - Low-FPS substream person detection when native smart events are unavailable.
 - Configurable pre-record ring buffer and additional event types.
