@@ -185,7 +185,7 @@ Expected: PASS.
 - Modify: `backend/app/services/camera_mutation.py`
 - Modify: `frontend/src/camera-editor/types.ts`
 - Modify: `frontend/src/camera-editor/model.ts`
-- Test: `backend/tests/test_camera_adapter_api.py` or nearest unified adapter API test file
+- Test: `backend/tests/test_unified_camera_api.py`
 - Test: `frontend/src/cameraEditorModel.test.ts`
 
 **Interfaces:**
@@ -227,7 +227,7 @@ Add `device_service_url` only to ONVIF draft/payload; preserve existing default 
 - [ ] **Step 5: Run backend + frontend model tests**
 
 Run:
-- `cd backend && uv run pytest <unified-camera-test-file> -q`
+- `cd backend && uv run pytest tests/test_unified_camera_api.py -q`
 - `cd frontend && npm test -- cameraEditorModel.test.ts`
 Expected: PASS.
 
@@ -240,7 +240,7 @@ Expected: PASS.
 **Files:**
 - Modify: `docker-compose.yml`
 - Modify: `deploy.sh`
-- Modify: `.env.example` only if an operator-visible socket override is intentionally exposed; otherwise leave unchanged.
+- No change: `.env.example` (socket path is an internal deployment constant for this slice).
 - Create: `backend/tests/test_camera_discovery_deploy_contract.py`
 - Modify: `.github/workflows/ci.yml`
 
@@ -363,7 +363,7 @@ Expected: PASS.
 
 - [ ] **Step 2: Run existing ONVIF/unified adapter regressions**
 
-`cd backend && uv run pytest tests/test_onvif_client.py tests/test_onvif_camera_api.py tests/test_camera_adapter_api.py -q` using the actual unified test filename present in the repository.
+`cd backend && uv run pytest tests/test_onvif_client.py tests/test_onvif_camera_api.py tests/test_unified_camera_api.py -q`.
 
 - [ ] **Step 3: Run full frontend validation**
 
