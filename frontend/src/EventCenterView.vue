@@ -513,10 +513,13 @@ watch(() => filteredEvents.value.length, (length) => {
 watch(() => route.query.event_id, syncDeepLinkedEvent)
 watch(() => route.query.camera_id, (value) => {
   const cameraId = positiveRouteId(value)
-  const nextActivity: ActivityCameraFilter = cameraId || 'all'
-  const nextSystem: CameraFilter = cameraId || 'all'
-  if (activityCamera.value !== nextActivity) activityCamera.value = nextActivity
-  if (cameraFilter.value !== nextSystem) cameraFilter.value = nextSystem
+  if (cameraId) {
+    if (activityCamera.value !== cameraId) activityCamera.value = cameraId
+    if (cameraFilter.value !== cameraId) cameraFilter.value = cameraId
+    return
+  }
+  if (typeof activityCamera.value === 'number') activityCamera.value = 'all'
+  if (typeof cameraFilter.value === 'number') cameraFilter.value = 'all'
 })
 watch(() => [route.query.view, route.query.event_id] as const, () => {
   const nextMode: EventMode = route.query.view === 'system' || route.query.event_id ? 'system' : 'activity'
