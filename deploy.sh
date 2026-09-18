@@ -400,9 +400,11 @@ check_port Web "$WEB_PORT"; check_port OpenList "$OPENLIST_PORT"
 
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 HIK_COMPOSE=(docker compose --env-file "$ENV_FILE" --profile hik)
+DISCOVERY_COMPOSE=(docker compose --env-file "$ENV_FILE" --profile discovery)
 "${COMPOSE[@]}" config >/dev/null || fail "docker compose 核心配置校验失败"
 "${HIK_COMPOSE[@]}" config >/dev/null || fail "docker compose HIK profile 配置校验失败"
-ok "docker compose 核心与 HIK profile 配置校验通过"
+"${DISCOVERY_COMPOSE[@]}" config >/dev/null || fail "docker compose discovery profile 配置校验失败"
+ok "docker compose 核心、HIK 与 discovery profile 配置校验通过"
 
 collect_changed_files
 CURRENT_ENV_HASH="$(file_hash "$ENV_FILE")"
@@ -434,8 +436,10 @@ fi
 container_running camera-recorder-backend || UPDATE_BACKEND=1
 container_running camera-recorder-web || UPDATE_FRONTEND=1
 container_running camera-recorder-openlist || UPDATE_OPENLIST=1
+container_running camera-recorder-onvif-discovery || UPDATE_DISCOVERY=1
 
 if [ "$UPDATE_HIK" = "1" ] && [ "$HIK_ENABLED" = "1" ] && ! docker image inspect camera-recorder-core:local >/dev/null 2>&1; then BUILD_BACKEND=1; fi
+if [ "$UPDATE_DISCOVERY" = "1" ] && ! docker image inspect camera-recorder-core:local >/dev/null 2>&1; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_BACKEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q backend 2>/dev/null || true)" ]; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_FRONTEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q frontend 2>/dev/null || true)" ]; then BUILD_FRONTEND=1; fi
 
@@ -457,6 +461,7 @@ if [ "$UPDATE_HIK" = "1" ]; then
   if [ "$HIK_ENABLED" = "1" ]; then UPDATE_LABELS="${UPDATE_LABELS} hik-bridge"
   else UPDATE_LABELS="${UPDATE_LABELS} hik-bridge(remove)"; fi
 fi
+[ "$UPDATE_DISCOVERY" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} onvif-discovery"
 [ "$UPDATE_BACKEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} backend"
 [ "$UPDATE_FRONTEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} frontend"
 [ "$UPDATE_OPENLIST" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} openlist"
