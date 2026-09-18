@@ -20,7 +20,7 @@ const batchVisible = ref(false)
 const onvifVisible = ref(false)
 const hikVisible = ref(false)
 const cameraViewKey = ref(0)
-const motionPortalReady = ref(false)
+const detailPortalReady = ref(false)
 const adapterPortalReady = ref(false)
 const selectedCameraId = computed(() => cameraIdFromRouteQuery(route.query.camera_id))
 const detectionOverview = ref<EventDetectionOverview | null>(null)
@@ -67,10 +67,10 @@ function todayString() {
 function refreshPortalTargets() {
   adapterPortalReady.value = Boolean(document.querySelector('.camera-page .heading-actions'))
   if (!selectedCameraId.value) {
-    motionPortalReady.value = false
+    detailPortalReady.value = false
     return
   }
-  motionPortalReady.value = Boolean(document.querySelector('.camera-detail-drawer .drawer-body-v2'))
+  detailPortalReady.value = Boolean(document.querySelector('.camera-detail-pane .camera-detail-extension-slot'))
 }
 
 async function loadDetectionSummary() {
@@ -100,7 +100,7 @@ watch(() => route.path, (path) => {
 }, { immediate: true })
 
 watch(() => route.query.camera_id, async () => {
-  motionPortalReady.value = false
+  detailPortalReady.value = false
   await nextTick()
   refreshPortalTargets()
   void loadDetectionSummary()
@@ -182,7 +182,7 @@ onBeforeUnmount(() => {
     <el-button class="onvif-add-button" @click="openOnvif">添加 ONVIF</el-button>
   </Teleport>
 
-  <Teleport v-if="selectedCameraId && motionPortalReady" to=".camera-detail-drawer .drawer-body-v2">
+  <Teleport v-if="selectedCameraId && detailPortalReady" to=".camera-detail-pane .camera-detail-extension-slot">
     <section class="camera-drawer-shortcuts" aria-label="设备工作区快捷入口">
       <div class="camera-drawer-shortcut-copy">
         <strong>设备工作区</strong>
@@ -201,7 +201,7 @@ onBeforeUnmount(() => {
     </section>
   </Teleport>
 
-  <Teleport v-if="selectedCameraId && motionPortalReady" to=".camera-detail-drawer .drawer-body-v2">
+  <Teleport v-if="selectedCameraId && detailPortalReady" to=".camera-detail-pane .camera-detail-extension-slot">
     <section class="event-detection-portal-section" aria-label="事件检测">
       <div class="event-detection-portal-copy">
         <span class="portal-eyebrow">事件检测</span>
@@ -324,9 +324,9 @@ onBeforeUnmount(() => {
   color: var(--nvr-red);
   border-color: color-mix(in srgb, var(--nvr-red) 30%, var(--nvr-border));
 }
-:global(.camera-detail-drawer .detail-columns),
-:global(.camera-detail-drawer .runtime-section),
-:global(.camera-detail-drawer .drawer-danger-zone) {
+:global(.camera-detail-pane .detail-columns),
+:global(.camera-detail-pane .runtime-section),
+:global(.camera-detail-pane .drawer-danger-zone) {
   order: 2;
 }
 :global(.batch-camera-dialog),

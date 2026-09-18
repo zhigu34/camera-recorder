@@ -1,0 +1,158 @@
+.camera-page {
+  min-height: 0;
+}
+
+.camera-split-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+  min-height: 0;
+  height: min(780px, calc(100vh - 170px));
+  gap: 16px;
+}
+
+.camera-list-pane,
+.camera-detail-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.camera-list-pane {
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.camera-detail-pane {
+  overflow: auto;
+  border: 1px solid var(--nvr-border);
+  border-radius: 12px;
+  background: var(--nvr-surface);
+  box-shadow: var(--nvr-shadow-sm, none);
+}
+
+.camera-detail-header {
+  position: sticky;
+  z-index: 4;
+  top: 0;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--nvr-border);
+  background: color-mix(in srgb, var(--nvr-surface) 94%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.camera-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px 20px;
+}
+
+.camera-detail-extension-slot {
+  display: grid;
+  gap: 10px;
+}
+
+.camera-detail-empty {
+  min-height: 360px;
+}
+
+.camera-detail-back {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+  color: var(--nvr-blue);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.camera-detail-back svg {
+  width: 16px;
+  height: 16px;
+}
+
+.camera-summary-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.camera-summary-grid .summary-card:last-child {
+  grid-column: span 2;
+}
+
+.camera-split-toolbar {
+  align-items: stretch;
+}
+
+.camera-split-toolbar .search-box,
+.camera-split-toolbar .camera-toolbar-actions {
+  width: 100%;
+}
+
+.camera-split-toolbar .camera-toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.camera-split-toolbar .camera-sort-select {
+  flex: 1 1 auto;
+}
+
+.camera-list-pane .camera-list {
+  grid-template-columns: 1fr;
+}
+
+.camera-list-pane .camera-card {
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .camera-split-layout {
+    grid-template-columns: minmax(290px, 330px) minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .camera-split-layout {
+    display: block;
+    height: auto;
+  }
+
+  .camera-split-layout.detail-active .camera-list-pane {
+    display: none;
+  }
+
+  .camera-split-layout:not(.detail-active) .camera-detail-pane {
+    display: none;
+  }
+
+  .camera-list-pane,
+  .camera-detail-pane {
+    overflow: visible;
+  }
+
+  .camera-detail-back {
+    display: inline-flex;
+  }
+
+  .camera-detail-header {
+    position: static;
+  }
+}
+
+@media (max-width: 560px) {
+  .camera-summary-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .camera-summary-grid .summary-card:last-child {
+    grid-column: span 2;
+  }
+
+  .camera-detail-header,
+  .camera-detail-body {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}
