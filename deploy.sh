@@ -531,6 +531,27 @@ if [ "$UPDATE_OPENLIST" = "1" ] || container_exists camera-recorder-openlist; th
   ok "OpenList 容器运行正常"
 fi
 
+DISCOVERY_UPDATE_SERVICES=()
+[ "$UPDATE_DISCOVERY" = "1" ] && DISCOVERY_UPDATE_SERVICES+=(onvif-discovery)
+if [ "${#DISCOVERY_UPDATE_SERVICES[@]}" -gt 0 ]; then
+  info "启动/更新局域网发现服务（失败不会影响录像核心）..."
+  mkdir -p logs; : >> "$UP_LOG"
+  set +e
+  "${DISCOVERY_COMPOSE[@]}" up -d --no-deps --force-recreate "${DISCOVERY_UPDATE_SERVICES[@]}" 2>&1 | tee -a "$UP_LOG"
+  DISCOVERY_UP_RC=${PIPESTATUS[0]}
+  set -e
+  if [ "$DISCOVERY_UP_RC" -ne 0 ]; then
+    warn "局域网发现服务启动失败；核心服务保持运行，手工摄像头配置仍可使用"
+  elif ! wait_for_health camera-recorder-onvif-discovery 60; then
+    "${DISCOVERY_COMPOSE[@]}" logs --tail=80 onvif-discovery || true
+    warn "局域网发现服务启动失败：健康检查未通过；核心服务保持运行"
+  else
+    ok "局域网发现服务 healthy（host network + Unix Socket，无 TCP 端口暴露）"
+  fi
+else
+  ok "局域网发现服务无需更新"
+fi
+
 if [ "$HIK_ENABLED" = "0" ]; then
   if [ "$UPDATE_HIK" = "1" ] || container_exists camera-recorder-hik-bridge || [ "$PREVIOUS_HIK_ENABLED" = "1" ]; then
     info "HIK 已关闭，移除旧 hik-bridge（不影响核心服务）..."
@@ -570,6 +591,11 @@ printf '\n'; "${COMPOSE[@]}" ps; printf '\n'
 ok "部署完成"
 printf 'Camera Recorder Web: http://127.0.0.1:%s\n' "$WEB_PORT"
 printf 'Backend API:        internal only (backend:8000, via Web /api and /ws)\n'
+if container_running camera-recorder-onvif-discovery; then
+  printf 'LAN Discovery:      enabled via host-network helper + Unix Socket\n'
+else
+  printf 'LAN Discovery:      unavailable (manual camera entry remains available)\n'
+fi
 if [ "$HIK_ENABLED" = "1" ]; then
   printf 'HIK Bridge:         enabled, internal only (hik-bridge:8100)\n'
 else
@@ -582,5 +608,6 @@ printf '  预览部署计划: ./deploy.sh --check-only\n'
 printf '  强制完整部署: ./deploy.sh --full\n'
 printf '  查看后端日志: docker compose logs -f backend\n'
 printf '  查看 HIK 日志: docker compose --profile hik logs -f hik-bridge\n'
+printf '  查看发现日志: docker compose --profile discovery logs -f onvif-discovery\n'
 printf '  查看核心状态: docker compose ps\n'
 printf '  查看含 HIK 状态: docker compose --profile hik ps\n'
