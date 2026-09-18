@@ -80,7 +80,7 @@ def test_probe_success_persists_onvif_device_identity_and_capabilities() -> None
                     "width": 3840,
                     "height": 2160,
                     "fps": 25.0,
-                    "uri": "rtsp://192.0.2.44:554/main",
+                    "uri": "rtsp://viewer:secret@192.0.2.44:554/main",
                 },
                 {
                     "token": "sub",
@@ -154,4 +154,6 @@ def test_camera_read_exposes_sanitized_onvif_capability_details() -> None:
     assert onvif["hardware_id"] == "HW-A1"
     assert onvif["capabilities"]["events_xaddr"].endswith("/onvif/events")
     assert onvif["profiles"][0]["token"] == "main"
+    assert onvif["profiles"][0]["uri"] == "rtsp://192.0.2.44:554/main"
+    assert "viewer:secret@" not in str(onvif)
     assert "password" not in str(onvif).lower()
