@@ -1,0 +1,56 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import httpx
+from pydantic import ValidationError
+
+from app.core.config import settings
+from app.schemas.camera_discovery import OnvifDiscoveryResponse, RtspDiscoveryResponse
+
+
+class CameraDiscoveryUnavailable(RuntimeError):
+    pass
+
+
+class CameraDiscoveryProtocolError(RuntimeError):
+    pass
+
+
+class CameraDiscoveryClient:
+    def __init__(self, socket_path: str | Path | None = None) -> None:
+        self.socket_path = Path(socket_path or settings.onvif_discovery_socket)
+
+    async def _post(self, path: str, response_model):
+        transport = httpx.AsyncHTTPTransport(uds=str(self.socket_path))
+        try:
+            async with httpx.AsyncClient(
+                transport=transport,
+                base_url="http://camera-discovery",
+                timeout=httpx.Timeout(5.0),
+            ) as client:
+                response = await client.post(path, json={})
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, OSError) as exc:
+            raise CameraDiscoveryUnavailable("camera discovery helper is unavailable") from exc
+
+        if response.status_code >= 500:
+            raise CameraDiscoveryUnavailable("camera discovery helper returned an error")
+        if response.status_code != 200:
+            raise CameraDiscoveryProtocolError(
+                f"unexpected discovery helper status {response.status_code}"
+            )
+
+        try:
+            payload = response.json()
+            return response_model.model_validate(payload)
+        except (ValueError, ValidationError) as exc:
+            raise CameraDiscoveryProtocolError("invalid discovery helper response") from exc
+
+    async def scan_onvif(self) -> OnvifDiscoveryResponse:
+        return await self._post("/scan/onvif", OnvifDiscoveryResponse)
+
+    async def scan_rtsp(self) -> RtspDiscoveryResponse:
+        return await self._post("/scan/rtsp", RtspDiscoveryResponse)
+
+
+camera_discovery_client = CameraDiscoveryClient()
