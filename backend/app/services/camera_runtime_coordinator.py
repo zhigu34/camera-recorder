@@ -10,6 +10,7 @@ from app.services.camera_config import runtime_config
 from app.services.camera_media_session_registry import camera_media_session_registry
 from app.services.event_recording import event_recording_manager
 from app.services.motion_manager import motion_detection_manager
+from app.services.onvif_event_manager import onvif_event_manager
 from app.services.recorder_manager import recorder_manager
 from app.services.recording_schedule_manager import RecordingOwner, recording_schedule_manager
 from app.services.recording_start import start_regular_recorder
@@ -43,6 +44,7 @@ class CameraRuntimeCoordinator:
         # pre-roll worker is being torn down. A runtime reload intentionally
         # invalidates any event ownership tied to the old connection.
         await motion_detection_manager.stop_camera(camera_id)
+        await onvif_event_manager.restart_camera(camera_id)
         event_recording_manager.end_event(camera_id)
         await event_recording_manager.stop_camera(camera_id)
 
@@ -97,6 +99,7 @@ class CameraRuntimeCoordinator:
         # event cannot race ahead of its ring buffer after a configuration reload.
         await event_recording_manager.reconcile_once()
         await motion_detection_manager.restart_camera(camera_id)
+        await onvif_event_manager.restart_camera(camera_id)
         return "running"
 
     async def reload(
