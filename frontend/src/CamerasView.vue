@@ -241,20 +241,28 @@ function scheduleStateLabel(camera: Camera) {
 }
 function formatTime(value?: string | null) { return formatDateTime(value) }
 function compareCameraNames(left: Camera, right: Camera) { return left.name.localeCompare(right.name, 'zh-CN', { numeric: true, sensitivity: 'base' }) || left.id - right.id }
-function ipParts(camera: Camera) { return camera.ip.split('.').map((part) => { const value = Number(part); return Number.isInteger(value) && value >= 0 && value <= 255 ? value : null }) }
+function cameraHost(camera: Camera) { return camera.connection?.host || camera.ip }
+function connectionSortPort(camera: Camera) {
+  const config = connectionConfig(camera)
+  if (camera.connection?.adapter === 'hik_sdk') return config?.sdk_port || 0
+  return config?.port || camera.rtsp_port || 0
+}
+function ipParts(host: string) { return host.split('.').map((part) => { const value = Number(part); return Number.isInteger(value) && value >= 0 && value <= 255 ? value : null }) }
 function compareCameraIps(left: Camera, right: Camera) {
-  const leftParts = ipParts(left)
-  const rightParts = ipParts(right)
+  const leftHost = cameraHost(left)
+  const rightHost = cameraHost(right)
+  const leftParts = ipParts(leftHost)
+  const rightParts = ipParts(rightHost)
   if (leftParts.length === 4 && rightParts.length === 4 && leftParts.every((part) => part !== null) && rightParts.every((part) => part !== null)) {
     for (let index = 0; index < 4; index += 1) {
       const difference = (leftParts[index] as number) - (rightParts[index] as number)
       if (difference !== 0) return difference
     }
   } else {
-    const difference = left.ip.localeCompare(right.ip, undefined, { numeric: true, sensitivity: 'base' })
+    const difference = leftHost.localeCompare(rightHost, undefined, { numeric: true, sensitivity: 'base' })
     if (difference !== 0) return difference
   }
-  return left.rtsp_port - right.rtsp_port || compareCameraNames(left, right)
+  return connectionSortPort(left) - connectionSortPort(right) || compareCameraNames(left, right)
 }
 function statusRank(camera: Camera) {
   const state = health(camera)
@@ -460,10 +468,12 @@ async function setCameraEnabled(camera: Camera, enabled: boolean) {
   if (batchProbeRunning.value || actionCameraId.value !== null) return
   actionCameraId.value = camera.id
   try {
-    const { data } = await axios.put<Camera>(`/api/cameras/${camera.id}`, { enabled })
-    cameraStore.replace(data)
-    selectedCamera.value = data
+    await axios.put<Camera>(`/api/cameras/${camera.id}`, { enabled })
     if (!enabled) stopPreview()
+    cameraStore.invalidate()
+    await loadData(false, true)
+    const refreshed = cameraById(camera.id)
+    if (refreshed) selectCamera(refreshed, 'replace')
     ElMessage.success(enabled ? '摄像头已重新启用' : '摄像头已禁用，历史数据保持不变')
   } catch (error) {
     ElMessage.error(apiError(error, enabled ? '启用摄像头失败' : '禁用摄像头失败'))
@@ -573,7 +583,7 @@ onBeforeUnmount(() => {
             <div class="camera-card-footer" :class="{ 'quick-probe-footer': canQuickProbe(camera) }"><template v-if="canQuickProbe(camera)"><span>{{ health(camera) === 'offline' ? '设备离线，可重新检测连接' : '设备尚未检测连接状态' }}</span><div class="camera-card-quick-action" @click.stop><el-button size="small" plain :icon="Connection" :loading="isCameraBusy(camera.id)" @click="runAction(camera, 'probe')">连接检测</el-button></div></template><template v-else><span>点击查看设备工作区</span><b>查看详情 →</b></template></div>
           </article>
         </div>
-        <div v-else class="empty-state"><VideoCamera /><strong>{{ cameras.length ? '没有符合条件的摄像头' : '还没有摄像头' }}</strong><span>{{ cameras.length ? '调整搜索词或筛选条件。' : '添加第一台 RTSP 摄像头开始录像。' }}</span><el-button v-if="!cameras.length" type="primary" :icon="Plus" @click="openCreate">添加摄像头</el-button></div>
+        <div v-else class="empty-state"><VideoCamera /><strong>{{ cameras.length ? '没有符合条件的摄像头' : '还没有摄像头' }}</strong><span>{{ cameras.length ? '调整搜索词或筛选条件。' : '添加第一台摄像头开始录像。' }}</span><el-button v-if="!cameras.length" type="primary" :icon="Plus" @click="openCreate">添加摄像头</el-button></div>
       </aside>
 
       <section class="camera-detail-pane" aria-label="摄像头详情">
@@ -584,7 +594,7 @@ onBeforeUnmount(() => {
           </header>
           <div class="camera-detail-body drawer-body drawer-body-v2">
             <nav v-if="navigationCameras.length > 1" class="drawer-device-nav" aria-label="摄像头切换"><el-button text :icon="ArrowLeft" :disabled="!previousCamera || batchProbeRunning || actionCameraId !== null" @click="switchDetails(previousCamera)">上一台</el-button><div class="drawer-device-nav-position"><strong>{{ selectedNavigationIndex + 1 }} / {{ navigationCameras.length }}</strong><span>{{ navigationScopeLabel }} · ← →</span></div><el-button text :icon="ArrowRight" :disabled="!nextCamera || batchProbeRunning || actionCameraId !== null" @click="switchDetails(nextCamera)">下一台</el-button></nav>
-            <section class="device-overview"><div class="device-overview-visual" :class="health(selectedCamera)"><CameraDeviceGlyph :form-factor="selectedCamera.form_factor" /></div><div class="device-overview-main"><div class="device-overview-heading"><div><strong>{{ selectedCamera.manufacturer || '通用 RTSP 摄像头' }}</strong><span>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span></div><span class="device-overview-type">{{ formFactorLabel(selectedCamera.form_factor) }}</span></div><dl class="device-overview-facts"><div><dt>地址</dt><dd>{{ connectionEndpoint(selectedCamera) }}</dd></div><div><dt>视频</dt><dd>{{ videoSummary(selectedCamera) }}</dd></div><div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div></dl></div></section>
+            <section class="device-overview"><div class="device-overview-visual" :class="health(selectedCamera)"><CameraDeviceGlyph :form-factor="selectedCamera.form_factor" /></div><div class="device-overview-main"><div class="device-overview-heading"><div><strong>{{ selectedCamera.manufacturer || `${adapterLabel(selectedCamera)} 摄像头` }}</strong><span>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span></div><span class="device-overview-type">{{ formFactorLabel(selectedCamera.form_factor) }}</span></div><dl class="device-overview-facts"><div><dt>地址</dt><dd>{{ connectionEndpoint(selectedCamera) }}</dd></div><div><dt>视频</dt><dd>{{ videoSummary(selectedCamera) }}</dd></div><div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div></dl></div></section>
             <section class="preview-section"><div class="preview-section-heading"><div><strong>实时预览</strong><span>按需播放，打开详情不会自动拉取摄像头码流。</span></div><span v-if="previewPlaying" class="preview-live-badge"><i></i>预览中</span></div><div class="preview-panel preview-panel-v2" :class="{ idle: !previewPlaying && !previewFailed, failed: previewFailed }"><img v-if="selectedCamera.enabled && previewPlaying && !previewFailed" :key="previewNonce" class="preview-image" :src="previewSrc" :alt="`${selectedCamera.name} 实时预览`" @load="handlePreviewLoad" @error="handlePreviewError" /><div v-else-if="!selectedCamera.enabled" class="preview-empty preview-state-panel"><VideoCamera /><strong>摄像头已禁用</strong><span>启用设备后才能播放实时画面。</span></div><div v-else-if="previewFailed" class="preview-empty preview-state-panel"><VideoCamera /><strong>实时预览暂不可用</strong><span>子码流与主码流均无法打开，可先执行连接检测。</span><el-button size="small" :icon="Refresh" @click="startPreview">重新尝试</el-button></div><button v-else type="button" class="preview-play-control" @click="startPreview"><span class="preview-play-icon"><VideoPlay /></span><strong>播放实时画面</strong><small>点击后才开始拉取 {{ preferredPreviewSource(selectedCamera) === 'sub' ? '子码流' : '主码流' }}</small></button><div v-if="previewPlaying && !previewFailed" class="preview-overlay preview-overlay-v2"><div class="preview-overlay-status"><span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span><span class="preview-stream-chip" :class="{ fallback: previewFallbackUsed }">{{ previewSource === 'sub' ? '子码流' : '主码流' }}<template v-if="previewFallbackUsed"> · 已回退</template></span></div><div class="preview-overlay-actions"><button type="button" @click="refreshPreview">重新加载</button><button type="button" class="stop" @click="stopPreview">停止预览</button></div></div></div></section>
             <CameraDetailWorkspace :camera-id="selectedCamera.id" />
             <CameraHistoryPanel :camera-id="selectedCamera.id" />
