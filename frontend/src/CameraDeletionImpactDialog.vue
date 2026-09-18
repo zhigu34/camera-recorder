@@ -46,6 +46,18 @@ const canConfirmDelete = computed(() =>
   Boolean(props.camera && impact.value?.can_delete && confirmName.value === props.camera.name),
 )
 
+function isDeletionImpact(value: unknown): value is CameraDeletionImpact {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<CameraDeletionImpact>
+  return Number.isInteger(candidate.camera_id)
+    && typeof candidate.recordings === 'number'
+    && typeof candidate.motion_events === 'number'
+    && typeof candidate.health_samples === 'number'
+    && typeof candidate.blocking_events === 'number'
+    && typeof candidate.pending_uploads === 'number'
+    && typeof candidate.can_delete === 'boolean'
+}
+
 function apiError(errorValue: unknown, fallback: string) {
   if (axios.isAxiosError(errorValue)) {
     const detail = errorValue.response?.data?.detail
@@ -53,6 +65,13 @@ function apiError(errorValue: unknown, fallback: string) {
     return errorValue.message || fallback
   }
   return fallback
+}
+
+function resetState() {
+  requestId += 1
+  impact.value = null
+  error.value = ''
+  confirmName.value = ''
 }
 
 async function loadImpact() {
@@ -85,7 +104,8 @@ async function disableCamera() {
     )
   } catch (errorValue) {
     if (errorValue === 'cancel' || errorValue === 'close') return
-    throw errorValue
+    ElMessage.error('禁用确认失败')
+    return
   }
 
   disabling.value = true
@@ -116,6 +136,15 @@ async function deleteCamera() {
     emit('deleted', props.camera.id)
     emit('update:modelValue', false)
   } catch (errorValue) {
+    if (axios.isAxiosError(errorValue) && errorValue.response?.status === 409) {
+      const detail = errorValue.response.data?.detail
+      if (isDeletionImpact(detail)) {
+        impact.value = detail
+        confirmName.value = ''
+        ElMessage.warning('删除前关联历史发生变化，已阻止永久删除')
+        return
+      }
+    }
     ElMessage.error(apiError(errorValue, '删除摄像头失败'))
   } finally {
     deleting.value = false
@@ -128,15 +157,10 @@ function openBlocker(route: RouteLocationRaw) {
 }
 
 watch(
-  () => props.modelValue,
-  (open) => {
-    if (open) void loadImpact()
-    else {
-      requestId += 1
-      impact.value = null
-      error.value = ''
-      confirmName.value = ''
-    }
+  () => [props.modelValue, props.camera?.id] as const,
+  ([open]) => {
+    if (open && props.camera) void loadImpact()
+    else resetState()
   },
 )
 </script>
