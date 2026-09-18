@@ -185,14 +185,19 @@ function connectionConfig(camera: Camera) {
     main_path?: string
     sub_path?: string | null
     channel?: number
+    sub_stream_type?: number
+    preview_profile_token?: string | null
   } | undefined
+}
+function displayHost(host: string) {
+  return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
 }
 function connectionEndpoint(camera: Camera) {
   const connection = camera.connection
   const config = connectionConfig(camera)
-  if (!connection) return `${camera.ip}:${camera.rtsp_port}`
+  if (!connection) return `${displayHost(camera.ip)}:${camera.rtsp_port}`
   const port = connection.adapter === 'hik_sdk' ? config?.sdk_port : config?.port
-  return `${connection.host}${port ? `:${port}` : ''}`
+  return `${displayHost(connection.host)}${port ? `:${port}` : ''}`
 }
 function connectionDetail(camera: Camera) {
   const connection = camera.connection
@@ -291,7 +296,15 @@ function inferSubstreamPath(mainPath: string) {
   if (mainPath.endsWith('main')) return `${mainPath.slice(0, -4)}sub`
   return null
 }
-function preferredPreviewSource(camera: Camera): PreviewSource { return camera.sub_rtsp_path?.trim() || inferSubstreamPath(camera.rtsp_path) ? 'sub' : 'main' }
+function preferredPreviewSource(camera: Camera): PreviewSource {
+  const connection = camera.connection
+  const config = connectionConfig(camera)
+  if (connection?.adapter === 'hik_sdk') return 'sub'
+  if (connection?.adapter === 'onvif') return config?.preview_profile_token ? 'sub' : 'main'
+  const subPath = connection?.adapter === 'manual_rtsp' ? config?.sub_path : camera.sub_rtsp_path
+  const mainPath = connection?.adapter === 'manual_rtsp' ? config?.main_path || camera.rtsp_path : camera.rtsp_path
+  return subPath?.trim() || inferSubstreamPath(mainPath) ? 'sub' : 'main'
+}
 function preparePreview(camera: Camera) {
   previewPlaying.value = false
   previewSource.value = preferredPreviewSource(camera)
