@@ -130,6 +130,11 @@ class OnvifConnectionReadConfig(BaseModel):
     port: int
     device_service_url: str
     device_uuid: str | None = None
+    firmware_version: str | None = None
+    serial_number: str | None = None
+    hardware_id: str | None = None
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
     recording_profile_token: str | None = None
     preview_profile_token: str | None = None
     detection_profile_token: str | None = None
@@ -208,6 +213,11 @@ class CameraConnectionRead(BaseModel):
                 "port": _onvif_port(device_service_url),
                 "device_service_url": device_service_url,
                 "device_uuid": getattr(config, "device_uuid", None),
+                "firmware_version": getattr(config, "firmware_version", None),
+                "serial_number": getattr(config, "serial_number", None),
+                "hardware_id": getattr(config, "hardware_id", None),
+                "capabilities": getattr(config, "capabilities_json", {}) or {},
+                "profiles": getattr(config, "profiles_json", []) or [],
                 "recording_profile_token": getattr(config, "recording_profile_token", None),
                 "preview_profile_token": getattr(config, "preview_profile_token", None),
                 "detection_profile_token": getattr(config, "detection_profile_token", None),
