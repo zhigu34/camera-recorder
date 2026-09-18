@@ -6,7 +6,9 @@
 
 - Vue Router is the canonical frontend router.
 - Pinia camera/runtime stores exist and are used by core workspaces.
-- Camera deep links support `/cameras?camera_id=<id>` and open the exact device drawer without auto-starting preview.
+- Camera deep links support `/cameras?camera_id=<id>` and restore the exact device in a persistent list/detail workspace without auto-starting preview.
+- Camera management uses one adapter-aware create/edit dialog for Manual RTSP, ONVIF and optional HIK SDK connections, backed by the canonical `CameraConnection` contract.
+- Camera management distinguishes Disabled from connectivity failures, uses explicit Disable/Re-enable actions, exposes camera-scoped history navigation, and blocks permanent deletion while recordings/events/health/upload dependencies remain.
 - Activity -> Playback exact-event navigation exists with one-shot explicit-action autoplay semantics.
 - Live / Playback / Recording Management do not start media on page entry.
 - Home / Live / Activity / Playback / Cameras use the shared Protect visual system.
@@ -26,6 +28,15 @@ The implementation plan is `docs/superpowers/plans/2026-09-15-v1-convergence.md`
 4. **Complete** — Operations foundations: safe logs and visible rotation policy, configuration backup/restore, high-value administrative audit trail, Prometheus metrics and release/upgrade documentation.
 
 Code convergence being complete does **not** mean V1.0 has passed field acceptance or should automatically be tagged as a final release. The release checklist is in `docs/RELEASE.md`.
+
+## Camera architecture follow-up boundary
+
+The Expand/Switch architecture and camera-management UI convergence are implemented. The destructive Contract cleanup remains intentionally deferred until the new model has run through a stable release window:
+
+- Remove legacy flat RTSP/auth fields from `Camera`.
+- Remove compatibility shadow writes.
+- Remove legacy adapter-specific compatibility routes/persistence wrappers that are no longer needed.
+- Before any future destructive SQLite table-rebuild migration, create and verify a database backup/snapshot.
 
 ## External V1.0 acceptance gates
 
