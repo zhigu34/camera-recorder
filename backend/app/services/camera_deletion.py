@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.detection_event import DetectionEvent
 from app.models.event import Event
 from app.models.health_sample import CameraHealthSample
 from app.models.motion import MotionEvent
@@ -24,6 +25,12 @@ async def camera_deletion_impact(
     motion_events = int(
         await db.scalar(
             select(func.count(MotionEvent.id)).where(MotionEvent.camera_id == camera_id)
+        )
+        or 0
+    )
+    detection_events = int(
+        await db.scalar(
+            select(func.count(DetectionEvent.id)).where(DetectionEvent.camera_id == camera_id)
         )
         or 0
     )
@@ -60,6 +67,7 @@ async def camera_deletion_impact(
         camera_id=camera_id,
         recordings=recordings,
         motion_events=motion_events,
+        detection_events=detection_events,
         health_samples=health_samples,
         blocking_events=blocking_events,
         pending_uploads=pending_uploads,
@@ -67,6 +75,7 @@ async def camera_deletion_impact(
             (
                 recordings,
                 motion_events,
+                detection_events,
                 health_samples,
                 blocking_events,
                 pending_uploads,
