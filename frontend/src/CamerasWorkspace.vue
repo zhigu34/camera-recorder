@@ -4,8 +4,6 @@ import axios from 'axios'
 import { useRoute, useRouter } from 'vue-router'
 import BatchCamerasView from './BatchCamerasView.vue'
 import CamerasView from './CamerasView.vue'
-import HikCameraAddView from './HikCameraAddView.vue'
-import OnvifCameraAddView from './OnvifCameraAddView.vue'
 import type { EventDetectionOverview } from './event-detection/types'
 import { eventDetectionRoute } from './navigation'
 import { cameraIdFromRouteQuery } from './utils/cameraMotionPortal'
@@ -17,11 +15,8 @@ const emit = defineEmits<{
 const route = useRoute()
 const router = useRouter()
 const batchVisible = ref(false)
-const onvifVisible = ref(false)
-const hikVisible = ref(false)
 const cameraViewKey = ref(0)
 const detailPortalReady = ref(false)
-const adapterPortalReady = ref(false)
 const selectedCameraId = computed(() => cameraIdFromRouteQuery(route.query.camera_id))
 const detectionOverview = ref<EventDetectionOverview | null>(null)
 const detectionLoading = ref(false)
@@ -65,7 +60,6 @@ function todayString() {
 }
 
 function refreshPortalTargets() {
-  adapterPortalReady.value = Boolean(document.querySelector('.camera-page .heading-actions'))
   if (!selectedCameraId.value) {
     detailPortalReady.value = false
     return
@@ -117,26 +111,6 @@ function closeBatch() {
 function onBatchCompleted() {
   cameraViewKey.value += 1
 }
-function openOnvif() {
-  onvifVisible.value = true
-}
-function closeOnvif() {
-  onvifVisible.value = false
-}
-function onOnvifCompleted() {
-  onvifVisible.value = false
-  cameraViewKey.value += 1
-}
-function openHik() {
-  hikVisible.value = true
-}
-function closeHik() {
-  hikVisible.value = false
-}
-function onHikCompleted() {
-  hikVisible.value = false
-  cameraViewKey.value += 1
-}
 function openCameraPlayback() {
   if (!selectedCameraId.value) return
   void router.push({
@@ -177,11 +151,6 @@ onBeforeUnmount(() => {
     @open-preview="emit('open-preview')"
   />
 
-  <Teleport v-if="adapterPortalReady" to=".camera-page .heading-actions">
-    <el-button class="hik-add-button" @click="openHik">添加 HIK SDK</el-button>
-    <el-button class="onvif-add-button" @click="openOnvif">添加 ONVIF</el-button>
-  </Teleport>
-
   <Teleport v-if="selectedCameraId && detailPortalReady" to=".camera-detail-pane .camera-detail-extension-slot">
     <section class="camera-drawer-shortcuts" aria-label="设备工作区快捷入口">
       <div class="camera-drawer-shortcut-copy">
@@ -215,38 +184,6 @@ onBeforeUnmount(() => {
       </div>
     </section>
   </Teleport>
-
-  <el-dialog
-    v-model="hikVisible"
-    class="hik-camera-dialog"
-    width="min(900px, calc(100vw - 36px))"
-    align-center
-    destroy-on-close
-    :show-close="true"
-    title="添加 HIK SDK 摄像头"
-    @closed="closeHik"
-  >
-    <HikCameraAddView
-      @completed="onHikCompleted"
-      @close="closeHik"
-    />
-  </el-dialog>
-
-  <el-dialog
-    v-model="onvifVisible"
-    class="onvif-camera-dialog"
-    width="min(860px, calc(100vw - 36px))"
-    align-center
-    destroy-on-close
-    :show-close="true"
-    title="添加 ONVIF 摄像头"
-    @closed="closeOnvif"
-  >
-    <OnvifCameraAddView
-      @completed="onOnvifCompleted"
-      @close="closeOnvif"
-    />
-  </el-dialog>
 
   <el-dialog
     v-model="batchVisible"
@@ -329,32 +266,24 @@ onBeforeUnmount(() => {
 :global(.camera-detail-pane .drawer-danger-zone) {
   order: 2;
 }
-:global(.batch-camera-dialog),
-:global(.onvif-camera-dialog),
-:global(.hik-camera-dialog) {
+:global(.batch-camera-dialog) {
   overflow: hidden;
   border: 1px solid var(--nvr-border-strong) !important;
   border-radius: 12px !important;
   background: var(--nvr-surface) !important;
 }
-:global(.batch-camera-dialog .el-dialog__header),
-:global(.onvif-camera-dialog .el-dialog__header),
-:global(.hik-camera-dialog .el-dialog__header) {
+:global(.batch-camera-dialog .el-dialog__header) {
   margin: 0;
   padding: 15px 18px;
   border-bottom: 1px solid var(--nvr-border);
   background: var(--nvr-surface-2);
 }
-:global(.batch-camera-dialog .el-dialog__title),
-:global(.onvif-camera-dialog .el-dialog__title),
-:global(.hik-camera-dialog .el-dialog__title) {
+:global(.batch-camera-dialog .el-dialog__title) {
   color: var(--nvr-text);
   font-size: 14px;
   font-weight: 650;
 }
-:global(.batch-camera-dialog .el-dialog__body),
-:global(.onvif-camera-dialog .el-dialog__body),
-:global(.hik-camera-dialog .el-dialog__body) {
+:global(.batch-camera-dialog .el-dialog__body) {
   padding: 0;
   background: var(--nvr-bg);
 }
@@ -364,9 +293,7 @@ onBeforeUnmount(() => {
     align-items: flex-start;
     flex-direction: column;
   }
-  :global(.batch-camera-dialog),
-  :global(.onvif-camera-dialog),
-  :global(.hik-camera-dialog) {
+  :global(.batch-camera-dialog) {
     width: calc(100vw - 20px) !important;
   }
 }
