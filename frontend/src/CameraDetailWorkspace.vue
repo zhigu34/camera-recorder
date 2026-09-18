@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import axios from 'axios'
 import { useRouter } from 'vue-router'
 
@@ -86,6 +86,7 @@ function openEventDetection() {
 }
 
 watch(() => props.cameraId, () => void loadDetectionSummary(), { immediate: true })
+onBeforeUnmount(() => { requestId += 1 })
 </script>
 
 <template>
