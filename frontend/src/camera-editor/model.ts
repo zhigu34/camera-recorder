@@ -124,7 +124,7 @@ export function connectionFingerprint(draft: CameraEditorDraft): string {
       draft.username.trim(),
       draft.password,
       draft.port,
-      draft.device_service_url.trim(),
+      (draft.device_service_url || '').trim(),
     ])
   }
   return JSON.stringify([
@@ -159,8 +159,8 @@ function connectionPayload(draft: CameraEditorDraft, includePassword: boolean): 
     return {
       ...common,
       port: draft.port,
-      ...(draft.device_service_url.trim()
-        ? { device_service_url: draft.device_service_url.trim() }
+      ...((draft.device_service_url || '').trim()
+        ? { device_service_url: (draft.device_service_url || '').trim() }
         : {}),
     }
   }
