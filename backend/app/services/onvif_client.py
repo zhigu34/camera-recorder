@@ -177,7 +177,7 @@ def inject_uri_credentials(uri: str, username: str, password: str) -> str:
     return urlunsplit((parsed.scheme, authority, parsed.path, parsed.query, parsed.fragment))
 
 
-def _validate_service_url(url: str) -> str:
+def validate_service_url(url: str) -> str:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         raise OnvifError("invalid ONVIF service URL")
@@ -189,7 +189,7 @@ def _validate_service_url(url: str) -> str:
 
 
 def validate_service_url(url: str) -> str:
-    return _validate_service_url(url)
+    return validate_service_url(url)
 
 
 def _wsse_header(username: str, password: str) -> str:
@@ -241,13 +241,13 @@ class OnvifClient:
         password: str,
         timeout_seconds: float = 8.0,
     ) -> None:
-        self.device_service_url = _validate_service_url(device_service_url)
+        self.device_service_url = validate_service_url(device_service_url)
         self.username = username
         self.password = password
         self.timeout_seconds = timeout_seconds
 
     async def _call(self, url: str, action: str, body: str) -> str:
-        service_url = _validate_service_url(url)
+        service_url = validate_service_url(url)
         payload = _envelope(body, self.username, self.password)
         headers = {
             "Content-Type": f'application/soap+xml; charset=utf-8; action="{action}"',
@@ -309,7 +309,7 @@ class OnvifClient:
         media_url = capabilities.get("media_xaddr")
         if not media_url:
             raise OnvifError("ONVIF camera does not advertise a Media service")
-        media_url = _validate_service_url(media_url)
+        media_url = validate_service_url(media_url)
         profiles = await self.get_profiles(media_url)
         selected = choose_profile_tokens(profiles)
 
