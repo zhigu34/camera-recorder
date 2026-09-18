@@ -10,12 +10,15 @@ describe('camera history deep links', () => {
     expect(eventSource).toContain("const activityCamera = ref<ActivityCameraFilter>(initialCameraId || 'all')")
     expect(eventSource).toContain("const cameraFilter = ref<CameraFilter>(initialCameraId || 'all')")
     expect(eventSource).toContain('watch(() => route.query.camera_id')
+    expect(eventSource).toContain('replaceCameraDeepLink(nextId)')
   })
 
   it('opens the health drawer for a camera_id deep link once health data exists', () => {
     expect(healthSource).toContain('positiveRouteId(route.query.camera_id)')
     expect(healthSource).toContain('function syncDeepLinkedCamera()')
     expect(healthSource).toContain('drawerOpen.value = true')
+    expect(healthSource).toContain("camera_id: String(cameraId)")
+    expect(healthSource).toContain('watch(drawerOpen')
   })
 
   it('scopes upload rows and summary counts to camera_id', () => {
