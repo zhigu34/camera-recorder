@@ -162,11 +162,15 @@ class OnvifEventManager:
         for camera_id in list(self._status):
             self._set_status(camera_id, "stopped", subscription_url=None)
 
-    async def restart_camera(self, camera_id: int) -> None:
+    async def stop_camera(self, camera_id: int) -> None:
         task = self._tasks.pop(camera_id, None)
         if task is not None:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        self._set_status(camera_id, "disabled", subscription_url=None, last_error=None)
+
+    async def restart_camera(self, camera_id: int) -> None:
+        await self.stop_camera(camera_id)
 
         if not self._running:
             return
