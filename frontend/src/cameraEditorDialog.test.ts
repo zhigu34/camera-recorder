@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import cameraSource from './CamerasView.vue?raw'
+import detailSource from './CameraDetailWorkspace.vue?raw'
 import editorSource from './CameraEditorDialog.vue?raw'
 import workspaceSource from './CamerasWorkspace.vue?raw'
 
@@ -46,12 +47,13 @@ describe('unified camera editor', () => {
     expect(editorSource).toContain('可跳过检测直接保存')
   })
 
-  it('keeps batch add and the persistent detail extension workspace', () => {
+  it('keeps batch add and renders camera detail shortcuts explicitly', () => {
     expect(workspaceSource).toContain("import BatchCamerasView from './BatchCamerasView.vue'")
     expect(workspaceSource).toContain('<BatchCamerasView')
-    expect(workspaceSource).toContain('.camera-detail-pane .camera-detail-extension-slot')
-    expect(workspaceSource).toContain("path: '/recordings/playback'")
-    expect(workspaceSource).toContain("path: '/recordings/manage'")
-    expect(workspaceSource).toContain('eventDetectionRoute')
+    expect(workspaceSource).not.toContain('<Teleport')
+    expect(cameraSource).toContain('<CameraDetailWorkspace')
+    expect(detailSource).toContain("path: '/recordings/playback'")
+    expect(detailSource).toContain("path: '/recordings/manage'")
+    expect(detailSource).toContain('eventDetectionRoute')
   })
 })
