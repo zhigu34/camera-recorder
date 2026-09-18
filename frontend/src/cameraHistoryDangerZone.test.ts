@@ -14,7 +14,9 @@ describe('camera history and danger zone', () => {
     expect(cameraSource).toContain('cameras.value.filter(isIssue)')
     expect(cameraSource).toContain("'适配器不可用'")
     expect(cameraSource).toContain("'录像异常'")
-    expect(cameraSource).toContain('isRuntimeError(camera)')
+    expect(cameraSource).toContain("'/api/recorder/status'")
+    expect(cameraSource).toContain('continuous_failure_active === true')
+    expect(cameraSource).toContain('runtimeErrorReason(camera)')
   })
 
   it('uses canonical connection state for camera endpoint and preview roles', () => {
