@@ -400,7 +400,7 @@ onBeforeUnmount(() => {
       <div class="toolbar-actions">
         <span v-if="routeCameraId" class="stream-state live"><i></i>摄像头 #{{ routeCameraId }}</span>
         <span class="stream-state" :class="{ live: streamConnected }"><i></i>{{ streamConnected ? '实时推送' : '正在重连' }}</span>
-        <span>显示 {{ filteredTasks.length }} / {{ tasks.length }} 条</span>
+        <span>显示 {{ filteredTasks.length }} / {{ cameraScopedTasks.length }} 条</span>
         <el-button @click="emit('open-recordings')">录像管理</el-button>
         <el-button @click="load()">刷新</el-button>
         <el-button type="primary" :loading="scanning" :disabled="!status?.active" @click="scan">立即扫描</el-button>
