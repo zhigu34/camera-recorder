@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from pydantic import BaseModel, ConfigDict
 
+from app.core.config import settings
 from app.schemas.camera_discovery import OnvifDiscoveryResponse, RtspDiscoveryResponse
 from app.services.camera_discovery import scan_onvif, scan_rtsp_port_554
 
@@ -13,7 +15,13 @@ class DiscoveryScanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-app = FastAPI(title="Camera Recorder LAN Discovery", version="1")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    settings.onvif_discovery_socket.unlink(missing_ok=True)
+
+
+app = FastAPI(title="Camera Recorder LAN Discovery", version="1", lifespan=lifespan)
 
 
 async def _scan_onvif() -> OnvifDiscoveryResponse:
