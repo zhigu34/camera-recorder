@@ -33,6 +33,18 @@ type SortKey = 'attention' | 'name' | 'ip' | 'status'
 type CameraHealth = 'online' | 'offline' | 'unknown' | 'unverified' | 'disabled' | 'adapter-unavailable'
 type HistoryMode = 'push' | 'replace'
 
+interface RecorderRuntimeSnapshot {
+  camera_id: number
+  state: string
+  pid?: number | null
+  restart_count?: number
+  consecutive_failure_count?: number
+  continuous_failure_active?: boolean
+  last_failure_at?: string | null
+  last_error?: string | null
+  offline_since?: string | null
+}
+
 interface Camera {
   id: number
   name: string
@@ -97,6 +109,7 @@ const deletionImpactVisible = ref(false)
 const deletionCamera = ref<Camera | null>(null)
 const adapterCapabilities = ref<CameraAdapterCapability[]>([])
 const adapterCapabilityMap = computed(() => new Map(adapterCapabilities.value.map((item) => [item.id, item])))
+const recorderRuntime = ref<Record<number, RecorderRuntimeSnapshot>>({})
 const actionCameraId = ref<number | null>(null)
 const batchProbeRunning = ref(false)
 const batchProbeFailedNames = ref<string[]>([])
@@ -143,9 +156,11 @@ function savePreferences() {
 }
 function setFilter(value: FilterKey) { filter.value = value; savePreferences() }
 function cameraById(cameraId: number) { return cameras.value.find((item) => item.id === cameraId) }
-function runtimeState(cameraId: number) { return cameraById(cameraId)?.recorder_state || 'STOPPED' }
+function runtimeSnapshot(cameraId: number) { return recorderRuntime.value[cameraId] || null }
+function runtimeState(cameraId: number) { return runtimeSnapshot(cameraId)?.state || cameraById(cameraId)?.recorder_state || 'STOPPED' }
 function isRecording(cameraId: number) { return runtimeState(cameraId) === 'RECORDING' }
-function isRuntimeError(camera: Camera) { return ['ERROR', 'FAILED'].includes(camera.recorder_state || '') }
+function isRuntimeError(camera: Camera) { return runtimeSnapshot(camera.id)?.continuous_failure_active === true }
+function runtimeErrorReason(camera: Camera) { return runtimeSnapshot(camera.id)?.last_error || '' }
 function isCameraBusy(cameraId: number) { return actionCameraId.value === cameraId }
 function cameraAdapterId(camera: Camera) { return camera.connection?.adapter || 'manual_rtsp' }
 function adapterCapability(camera: Camera) { return adapterCapabilityMap.value.get(cameraAdapterId(camera)) || null }
@@ -181,12 +196,12 @@ function healthLabel(camera: Camera) {
   return '未检测'
 }
 function runtimeLabel(camera: Camera) {
-  const state = camera.recorder_state || 'STOPPED'
+  if (isRuntimeError(camera)) return '录像异常'
+  const state = runtimeState(camera.id)
   if (state === 'RECORDING') return '录像中'
   if (state === 'STARTING') return '启动中'
   if (state === 'RECONNECTING') return '重连中'
   if (state === 'STOPPING') return '停止中'
-  if (state === 'ERROR' || state === 'FAILED') return '录像异常'
   return '未录像'
 }
 function formFactorLabel(value?: CameraFormFactor | null) { return formFactorOptions.find((item) => item.value === value)?.label || '未指定' }
@@ -448,10 +463,18 @@ async function loadAdapterCapabilities() {
     adapterCapabilities.value = []
   }
 }
+async function loadRecorderRuntime() {
+  try {
+    const response = await axios.get<RecorderRuntimeSnapshot[]>('/api/recorder/status')
+    recorderRuntime.value = Object.fromEntries(response.data.map((item) => [item.camera_id, item]))
+  } catch {
+    recorderRuntime.value = {}
+  }
+}
 async function loadData(showLoading = true, force = true) {
   if (showLoading) localLoading.value = true
   try {
-    const requests: Promise<unknown>[] = [cameraStore.load(force)]
+    const requests: Promise<unknown>[] = [cameraStore.load(force), loadRecorderRuntime()]
     if (showLoading || !adapterCapabilities.value.length) requests.push(loadAdapterCapabilities())
     await Promise.all(requests)
     const selectedId = selectedCamera.value?.id || deepLinkedCameraId()
@@ -629,7 +652,7 @@ onBeforeUnmount(() => {
         <div v-if="filteredCameras.length" class="camera-list">
           <article v-for="camera in filteredCameras" :key="camera.id" class="camera-card" :class="{ selected: selectedCamera?.id === camera.id, 'needs-probe': canQuickProbe(camera), busy: isCameraBusy(camera.id) }" role="button" tabindex="0" :aria-label="`查看 ${camera.name} 详情`" @click="openDetails(camera)" @keydown.enter.prevent="openDetails(camera)" @keydown.space.prevent="openDetails(camera)">
             <div class="camera-card-topline"><div class="camera-icon" :class="health(camera)" :title="formFactorLabel(camera.form_factor)"><CameraDeviceGlyph :form-factor="camera.form_factor" /></div><span class="camera-card-id">#{{ camera.id }}</span></div>
-            <div class="camera-copy"><div class="camera-name-row"><strong :title="camera.name">{{ camera.name }}</strong><span class="health-badge" :class="health(camera)"><i></i>{{ healthLabel(camera) }}</span><span class="record-badge" :class="{ active: isRecording(camera.id), error: isRuntimeError(camera) }"><i></i>{{ runtimeLabel(camera) }}</span></div><div class="camera-identity">{{ identitySummary(camera) }}</div><div class="camera-video">{{ videoSummary(camera) }}</div><div class="camera-address">{{ adapterLabel(camera) }} · {{ connectionEndpoint(camera) }} · {{ connectionDetail(camera) }}</div></div>
+            <div class="camera-copy"><div class="camera-name-row"><strong :title="camera.name">{{ camera.name }}</strong><span class="health-badge" :class="health(camera)"><i></i>{{ healthLabel(camera) }}</span><span class="record-badge" :class="{ active: isRecording(camera.id), error: isRuntimeError(camera) }" :title="runtimeErrorReason(camera)"><i></i>{{ runtimeLabel(camera) }}</span></div><div class="camera-identity">{{ identitySummary(camera) }}</div><div class="camera-video">{{ videoSummary(camera) }}</div><div class="camera-address">{{ adapterLabel(camera) }} · {{ connectionEndpoint(camera) }} · {{ connectionDetail(camera) }}</div></div>
             <div class="camera-signals"><div><span>录像策略</span><b>{{ schedulePolicyLabel(camera) }}</b></div><div><span>计划状态</span><b>{{ scheduleStateLabel(camera) }}</b></div><div><span>连接</span><b>{{ connectionVerificationLabel(camera) }}</b></div></div>
             <div class="camera-card-footer" :class="{ 'quick-probe-footer': canQuickProbe(camera) }"><template v-if="canQuickProbe(camera)"><span>{{ health(camera) === 'offline' ? '设备离线，可重新检测连接' : '设备尚未检测连接状态' }}</span><div class="camera-card-quick-action" @click.stop><el-button size="small" plain :icon="Connection" :loading="isCameraBusy(camera.id)" @click="runAction(camera, 'probe')">连接检测</el-button></div></template><template v-else><span>点击查看设备工作区</span><b>查看详情 →</b></template></div>
           </article>
@@ -641,14 +664,14 @@ onBeforeUnmount(() => {
         <template v-if="selectedCamera">
           <header class="camera-detail-header">
             <button type="button" class="camera-detail-back" @click="showCameraList"><ArrowLeft />返回设备列表</button>
-            <div class="drawer-title"><div class="drawer-title-copy"><strong>{{ selectedCamera.name }}</strong><span>{{ identitySummary(selectedCamera) }}</span></div><div class="drawer-title-states"><span class="health-badge" :class="health(selectedCamera)"><i></i>{{ healthLabel(selectedCamera) }}</span><span class="record-badge" :class="{ active: isRecording(selectedCamera.id), error: isRuntimeError(selectedCamera) }"><i></i>{{ runtimeLabel(selectedCamera) }}</span></div></div>
+            <div class="drawer-title"><div class="drawer-title-copy"><strong>{{ selectedCamera.name }}</strong><span>{{ identitySummary(selectedCamera) }}</span></div><div class="drawer-title-states"><span class="health-badge" :class="health(selectedCamera)"><i></i>{{ healthLabel(selectedCamera) }}</span><span class="record-badge" :class="{ active: isRecording(selectedCamera.id), error: isRuntimeError(selectedCamera) }" :title="runtimeErrorReason(selectedCamera)"><i></i>{{ runtimeLabel(selectedCamera) }}</span></div></div>
           </header>
           <div class="camera-detail-body drawer-body drawer-body-v2">
             <nav v-if="navigationCameras.length > 1" class="drawer-device-nav" aria-label="摄像头切换"><el-button text :icon="ArrowLeft" :disabled="!previousCamera || batchProbeRunning || actionCameraId !== null" @click="switchDetails(previousCamera)">上一台</el-button><div class="drawer-device-nav-position"><strong>{{ selectedNavigationIndex + 1 }} / {{ navigationCameras.length }}</strong><span>{{ navigationScopeLabel }} · ← →</span></div><el-button text :icon="ArrowRight" :disabled="!nextCamera || batchProbeRunning || actionCameraId !== null" @click="switchDetails(nextCamera)">下一台</el-button></nav>
             <section class="device-overview"><div class="device-overview-visual" :class="health(selectedCamera)"><CameraDeviceGlyph :form-factor="selectedCamera.form_factor" /></div><div class="device-overview-main"><div class="device-overview-heading"><div><strong>{{ selectedCamera.manufacturer || `${adapterLabel(selectedCamera)} 摄像头` }}</strong><span>{{ selectedCamera.model || formFactorLabel(selectedCamera.form_factor) }} · #{{ selectedCamera.id }}</span></div><span class="device-overview-type">{{ formFactorLabel(selectedCamera.form_factor) }}</span></div><dl class="device-overview-facts"><div><dt>地址</dt><dd>{{ connectionEndpoint(selectedCamera) }}</dd></div><div><dt>视频</dt><dd>{{ videoSummary(selectedCamera) }}</dd></div><div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div></dl></div></section>
             <section class="preview-section"><div class="preview-section-heading"><div><strong>实时预览</strong><span>按需播放，打开详情不会自动拉取摄像头码流。</span></div><span v-if="previewPlaying" class="preview-live-badge"><i></i>预览中</span></div><div class="preview-panel preview-panel-v2" :class="{ idle: !previewPlaying && !previewFailed, failed: previewFailed }"><img v-if="selectedCamera.enabled && previewPlaying && !previewFailed" :key="previewNonce" class="preview-image" :src="previewSrc" :alt="`${selectedCamera.name} 实时预览`" @load="handlePreviewLoad" @error="handlePreviewError" /><div v-else-if="!selectedCamera.enabled" class="preview-empty preview-state-panel"><VideoCamera /><strong>摄像头已禁用</strong><span>启用设备后才能播放实时画面。</span></div><div v-else-if="previewFailed" class="preview-empty preview-state-panel"><VideoCamera /><strong>实时预览暂不可用</strong><span>子码流与主码流均无法打开，可先执行连接检测。</span><el-button size="small" :icon="Refresh" @click="startPreview">重新尝试</el-button></div><button v-else type="button" class="preview-play-control" @click="startPreview"><span class="preview-play-icon"><VideoPlay /></span><strong>播放实时画面</strong><small>点击后才开始拉取 {{ preferredPreviewSource(selectedCamera) === 'sub' ? '子码流' : '主码流' }}</small></button><div v-if="previewPlaying && !previewFailed" class="preview-overlay preview-overlay-v2"><div class="preview-overlay-status"><span><i :class="{ active: isRecording(selectedCamera.id) }"></i>{{ runtimeLabel(selectedCamera) }}</span><span class="preview-stream-chip" :class="{ fallback: previewFallbackUsed }">{{ previewSource === 'sub' ? '子码流' : '主码流' }}<template v-if="previewFallbackUsed"> · 已回退</template></span></div><div class="preview-overlay-actions"><button type="button" @click="refreshPreview">重新加载</button><button type="button" class="stop" @click="stopPreview">停止预览</button></div></div></div></section>
             <div class="detail-columns"><section class="detail-section detail-section-v2"><div class="detail-heading"><strong>连接信息</strong></div><dl class="detail-grid detail-grid-v2"><div><dt>适配器</dt><dd>{{ adapterLabel(selectedCamera) }}</dd></div><div><dt>适配器能力</dt><dd :title="adapterUnavailableReason(selectedCamera)">{{ adapterCapabilityLabel(selectedCamera) }}</dd></div><div><dt>端点</dt><dd>{{ connectionEndpoint(selectedCamera) }}</dd></div><div><dt>用户名</dt><dd>{{ selectedCamera.connection?.username || selectedCamera.username || '-' }}</dd></div><div><dt>连接状态</dt><dd>{{ connectionVerificationLabel(selectedCamera) }}</dd></div><div><dt>连接修订</dt><dd>{{ selectedCamera.connection?.revision ?? '-' }}</dd></div><div class="wide"><dt>连接详情</dt><dd>{{ connectionDetail(selectedCamera) }}</dd></div></dl></section><section class="detail-section detail-section-v2"><div class="detail-heading"><strong>视频与录像</strong></div><dl class="detail-grid detail-grid-v2"><div><dt>编码</dt><dd>{{ selectedCamera.video_codec?.toUpperCase() || '-' }}</dd></div><div><dt>分辨率</dt><dd>{{ selectedCamera.width && selectedCamera.height ? `${selectedCamera.width}×${selectedCamera.height}` : '-' }}</dd></div><div><dt>帧率</dt><dd>{{ fps(selectedCamera) ? `${fps(selectedCamera)} FPS` : '-' }}</dd></div><div><dt>音频</dt><dd>{{ selectedCamera.audio_codec?.toUpperCase() || '-' }}</dd></div><div><dt>录像策略</dt><dd>{{ schedulePolicyLabel(selectedCamera) }}</dd></div><div><dt>计划状态</dt><dd>{{ scheduleStateLabel(selectedCamera) }}</dd></div></dl></section></div>
-            <section class="detail-section detail-section-v2 runtime-section"><div class="detail-heading"><strong>运行状态</strong></div><dl class="detail-grid runtime-grid"><div><dt>连接状态</dt><dd>{{ healthLabel(selectedCamera) }}</dd></div><div><dt>录像状态</dt><dd>{{ runtimeLabel(selectedCamera) }}</dd></div><div><dt>最近检测</dt><dd>{{ formatTime(selectedCamera.last_probe_at) }}</dd></div><div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div><div><dt>时间戳模式</dt><dd>{{ selectedCamera.timestamp_mode }}</dd></div><div><dt>设备类型</dt><dd>{{ formFactorLabel(selectedCamera.form_factor) }}</dd></div></dl></section>
+            <section class="detail-section detail-section-v2 runtime-section"><div class="detail-heading"><strong>运行状态</strong></div><dl class="detail-grid runtime-grid"><div><dt>连接状态</dt><dd>{{ healthLabel(selectedCamera) }}</dd></div><div><dt>录像状态</dt><dd :title="runtimeErrorReason(selectedCamera)">{{ runtimeLabel(selectedCamera) }}</dd></div><div><dt>最近检测</dt><dd>{{ formatTime(selectedCamera.last_probe_at) }}</dd></div><div><dt>最近在线</dt><dd>{{ formatTime(selectedCamera.last_online_at) }}</dd></div><div><dt>时间戳模式</dt><dd>{{ selectedCamera.timestamp_mode }}</dd></div><div><dt>设备类型</dt><dd>{{ formFactorLabel(selectedCamera.form_factor) }}</dd></div></dl></section>
             <CameraDetailWorkspace :camera-id="selectedCamera.id" />
             <CameraHistoryPanel :camera-id="selectedCamera.id" />
             <section class="drawer-operation-panel drawer-operation-panel-v2"><div class="drawer-operation-copy"><strong>设备操作</strong><span>检测连接、控制录像、调整配置或进入多画面实时监控。</span></div><div class="drawer-actions drawer-actions-v2"><el-button :icon="Connection" :loading="isCameraBusy(selectedCamera.id)" :disabled="batchProbeRunning || (actionCameraId !== null && !isCameraBusy(selectedCamera.id))" @click="runAction(selectedCamera, 'probe')">连接检测</el-button><el-button v-if="!isRecording(selectedCamera.id)" type="primary" :icon="VideoPlay" :loading="isCameraBusy(selectedCamera.id)" :disabled="!selectedCamera.enabled || batchProbeRunning || (actionCameraId !== null && !isCameraBusy(selectedCamera.id))" @click="runAction(selectedCamera, 'start')">开始录像</el-button><el-button v-else type="danger" plain :icon="VideoPause" :loading="isCameraBusy(selectedCamera.id)" @click="runAction(selectedCamera, 'stop')">停止录像</el-button><el-button :icon="Edit" :disabled="batchProbeRunning || actionCameraId !== null" @click="openEdit(selectedCamera)">编辑配置</el-button><el-button :disabled="!selectedCamera.enabled || batchProbeRunning" @click="emit('open-preview')">实时监控</el-button></div></section>
