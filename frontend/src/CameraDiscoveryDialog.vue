@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import axios from 'axios'
 
+import { scopeLabel } from './camera-discovery/presentation'
 import type {
   CameraDiscoveryAdapter,
   CameraDiscoverySelection,
@@ -163,7 +164,7 @@ watch(
           <strong>{{ device.host || device.endpoint_reference || 'ONVIF 候选设备' }}</strong>
           <span v-if="device.device_service_url">{{ device.device_service_url }}</span>
           <span v-else>{{ device.unavailable_reason || '没有可用 Device Service 地址' }}</span>
-          <small v-if="device.scopes.length">{{ device.scopes.slice(0, 3).join(' · ') }}</small>
+          <small v-if="device.scopes.length">{{ device.scopes.slice(0, 3).map(scopeLabel).join(' · ') }}</small>
         </div>
         <el-button
           type="primary"
