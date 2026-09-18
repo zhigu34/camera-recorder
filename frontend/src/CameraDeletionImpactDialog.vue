@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter, type RouteLocationRaw } from 'vue-router'
 
 import type { CameraDeletionImpact } from './camera-management/types'
 import type { SharedCamera } from './stores/cameras'
@@ -77,6 +77,17 @@ async function loadImpact() {
 
 async function disableCamera() {
   if (!props.camera || disabling.value) return
+  try {
+    await ElMessageBox.confirm(
+      '禁用后将停止录像、连接探测与重连、移动检测和事件预录；历史录像、事件、健康数据与配置仍会保留。',
+      `禁用“${props.camera.name}”`,
+      { type: 'warning', confirmButtonText: '确认禁用', cancelButtonText: '取消' },
+    )
+  } catch (errorValue) {
+    if (errorValue === 'cancel' || errorValue === 'close') return
+    throw errorValue
+  }
+
   disabling.value = true
   try {
     await axios.put(`/api/cameras/${props.camera.id}`, { enabled: false })
@@ -111,7 +122,7 @@ async function deleteCamera() {
   }
 }
 
-function openBlocker(route: Parameters<typeof router.push>[0]) {
+function openBlocker(route: RouteLocationRaw) {
   emit('update:modelValue', false)
   void router.push(route)
 }
