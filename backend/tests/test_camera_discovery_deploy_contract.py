@@ -88,3 +88,19 @@ def test_ci_validates_discovery_topology_and_uds_health_without_lan_scan() -> No
     assert "/run/camera-recorder/onvif-discovery.sock" in workflow
     assert "/scan/onvif" not in workflow
     assert "/scan/rtsp" not in workflow
+
+
+def test_deploy_classifies_discovery_only_code_without_restarting_backend() -> None:
+    script = _deploy_script()
+
+    helper_rule = (
+        "backend/app/discovery_helper.py|backend/app/services/camera_discovery.py) "
+        "BUILD_BACKEND=1; mark_discovery ;;"
+    )
+    shared_rule = (
+        "backend/app/schemas/camera_discovery.py|backend/app/services/onvif_client.py) "
+        "BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_discovery ;;"
+    )
+
+    assert helper_rule in script
+    assert shared_rule in script
