@@ -1,4 +1,5 @@
-.camera-history-panel {
+ .camera-history-panel {
+  order: 1;
   display: grid;
   gap: 10px;
   padding: 14px 15px;
@@ -170,6 +171,40 @@
   }
 
   .camera-delete-blocked-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+.camera-device-management {
+  order: 2;
+}
+
+.camera-device-management-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.camera-device-management-row > div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.camera-device-management-row > div > strong {
+  font-size: 11px;
+}
+
+.camera-device-management-row > div > span {
+  color: var(--nvr-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+@media (max-width: 620px) {
+  .camera-device-management-row {
     align-items: flex-start;
     flex-direction: column;
   }
