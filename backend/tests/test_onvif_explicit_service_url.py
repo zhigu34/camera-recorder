@@ -108,3 +108,40 @@ def test_unified_onvif_probe_uses_explicit_device_service_url(monkeypatch) -> No
     assert response.status_code == 200, response.text
     assert captured == [explicit]
     assert response.json()["connection_cache"]["device_service_url"] == explicit
+
+
+def test_switch_to_onvif_preserves_explicit_device_service_url() -> None:
+    explicit = "https://192.0.2.80:8443/custom/onvif/device"
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/cameras",
+            json={
+                "name": "switch-to-explicit-onvif",
+                "enabled": False,
+                "connection": {
+                    "adapter": "manual_rtsp",
+                    "host": "192.0.2.70",
+                    "username": "viewer",
+                    "password": "old-secret",
+                    "port": 554,
+                    "main_path": "/main",
+                    "sub_path": None,
+                },
+            },
+        )
+        assert created.status_code == 201, created.text
+        camera_id = int(created.json()["id"])
+
+        switched = client.put(
+            f"/api/cameras/{camera_id}",
+            json={
+                "connection": _onvif_connection(device_service_url=explicit),
+            },
+        )
+        assert switched.status_code == 200, switched.text
+        assert switched.json()["connection"]["adapter"] == "onvif"
+        assert switched.json()["connection"]["config"]["device_service_url"] == explicit
+
+        deleted = client.delete(f"/api/cameras/{camera_id}")
+        assert deleted.status_code == 204
