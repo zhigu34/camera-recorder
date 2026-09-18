@@ -10,6 +10,8 @@ describe('camera history and danger zone', () => {
   it('distinguishes unavailable adapters and recorder errors from connectivity state', () => {
     expect(cameraSource).toContain("'/api/camera-adapters'")
     expect(cameraSource).toContain("'adapter-unavailable'")
+    expect(cameraSource).toContain("'unverified'")
+    expect(cameraSource).toContain('cameras.value.filter(isIssue)')
     expect(cameraSource).toContain("'适配器不可用'")
     expect(cameraSource).toContain("'录像异常'")
     expect(cameraSource).toContain('isRuntimeError(camera)')
