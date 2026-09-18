@@ -230,3 +230,24 @@
 .nvr-workspace-content .camera-page .record-badge.error i {
   background: var(--nvr-red) !important;
 }
+
+.nvr-workspace-content .camera-page .camera-icon.unverified,
+.nvr-workspace-content .camera-page .device-overview-visual.unverified {
+  color: var(--nvr-yellow) !important;
+  border-color: color-mix(in srgb, var(--nvr-yellow) 24%, var(--nvr-border)) !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge.unverified {
+  border-color: color-mix(in srgb, var(--nvr-yellow) 24%, var(--nvr-border)) !important;
+  color: color-mix(in srgb, var(--nvr-yellow) 82%, var(--nvr-text)) !important;
+  background: color-mix(in srgb, var(--nvr-yellow) 7%, var(--nvr-surface)) !important;
+}
+
+.nvr-workspace-content .camera-page .health-badge.unverified i {
+  background: var(--nvr-yellow) !important;
+}
+
+.nvr-workspace-content .camera-page .device-overview-visual.adapter-unavailable {
+  color: var(--nvr-yellow) !important;
+  border-color: color-mix(in srgb, var(--nvr-yellow) 28%, var(--nvr-border)) !important;
+}
