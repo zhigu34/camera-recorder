@@ -11,6 +11,7 @@ PHASE1_HEAD = "20260916_0022"
 ONVIF_CONNECTION_REVISION = "20260916_0023"
 HIK_CONNECTION_REVISION = "20260917_0024"
 UNVERIFIED_ONVIF_REVISION = "20260917_0025"
+ONVIF_IDENTITY_REVISION = "20260918_0026"
 
 
 def _database_url(db_path: Path) -> str:
@@ -214,7 +215,7 @@ def test_0025_allows_unverified_onvif_cache_without_rewriting_existing_values(
             ).fetchone()
         )
 
-    _alembic(db_path, "head")
+    _alembic(db_path, UNVERIFIED_ONVIF_REVISION)
 
     with _connect(db_path) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
@@ -235,3 +236,88 @@ def test_0025_allows_unverified_onvif_cache_without_rewriting_existing_values(
                 """
             ).fetchone()
         ) == before
+
+
+
+def test_0026_adds_onvif_identity_columns_without_rewriting_existing_config(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "onvif-identity.db"
+    _alembic(db_path, UNVERIFIED_ONVIF_REVISION)
+
+    with _connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO cameras (
+                id, name, ip, rtsp_port, username, password_encrypted, rtsp_path,
+                enabled, auto_record, timestamp_mode, status, connection_type
+            ) VALUES (
+                61, 'identity-onvif', '192.0.2.61', 554, 'viewer',
+                'ciphertext-61', '/main', 1, 0, 'reconstruct', 'online', 'onvif'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO camera_connections (
+                id, camera_id, adapter, host, username, password_encrypted,
+                revision, verification_status
+            ) VALUES (
+                601, 61, 'onvif', '192.0.2.61', 'viewer',
+                'ciphertext-61', 2, 'verified'
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO onvif_connection_configs (
+                connection_id, device_service_url, device_uuid,
+                capabilities_json, profiles_json,
+                recording_profile_token, preview_profile_token,
+                detection_profile_token, recording_uri, preview_uri, detection_uri
+            ) VALUES (
+                601, 'http://192.0.2.61:80/onvif/device_service', 'uuid-61',
+                '{"media_xaddr":"http://192.0.2.61/onvif/media"}',
+                '[{"token":"main","uri":"rtsp://192.0.2.61/main"}]',
+                'main', 'main', 'main',
+                'rtsp://192.0.2.61/main', 'rtsp://192.0.2.61/main', 'rtsp://192.0.2.61/main'
+            )
+            """
+        )
+        connection.commit()
+        before = tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       capabilities_json, profiles_json,
+                       recording_profile_token, recording_uri
+                FROM onvif_connection_configs WHERE connection_id = 601
+                """
+            ).fetchone()
+        )
+
+    _alembic(db_path, ONVIF_IDENTITY_REVISION)
+
+    with _connect(db_path) as connection:
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchone()[0] == (
+            ONVIF_IDENTITY_REVISION
+        )
+        columns = {
+            row[1]: row
+            for row in connection.execute("PRAGMA table_info(onvif_connection_configs)")
+        }
+        assert {"firmware_version", "serial_number", "hardware_id"} <= set(columns)
+        assert columns["firmware_version"][3] == 0
+        assert columns["serial_number"][3] == 0
+        assert columns["hardware_id"][3] == 0
+        after = tuple(
+            connection.execute(
+                """
+                SELECT connection_id, device_service_url, device_uuid,
+                       capabilities_json, profiles_json,
+                       recording_profile_token, recording_uri
+                FROM onvif_connection_configs WHERE connection_id = 601
+                """
+            ).fetchone()
+        )
+        assert after == before
