@@ -8,6 +8,14 @@ import navigationSource from './navigation.ts?raw'
 import detailOrderSource from './styles/camera-history-danger-zone.css?raw'
 
 describe('camera history and danger zone', () => {
+  it('distinguishes unavailable adapters and recorder errors from connectivity state', () => {
+    expect(cameraSource).toContain("'/api/camera-adapters'")
+    expect(cameraSource).toContain("'adapter-unavailable'")
+    expect(cameraSource).toContain("'适配器不可用'")
+    expect(cameraSource).toContain("'录像异常'")
+    expect(cameraSource).toContain('isRuntimeError(camera)')
+  })
+
   it('uses canonical connection state for camera endpoint and preview roles', () => {
     expect(cameraSource).toContain("connection?.adapter === 'hik_sdk'")
     expect(cameraSource).toContain("connection?.adapter === 'onvif'")
