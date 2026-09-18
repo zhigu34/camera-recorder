@@ -41,6 +41,13 @@ describe('unified camera editor', () => {
     expect(editorSource).toContain(':disabled="saving || adaptersLoading || selectedAdapterUnavailable"')
   })
 
+  it('offers LAN discovery only for Manual RTSP and ONVIF adapters', () => {
+    expect(editorSource).toContain("import CameraDiscoveryDialog from './CameraDiscoveryDialog.vue'")
+    expect(editorSource).toContain('扫描局域网')
+    expect(editorSource).toContain("form.adapter === 'manual_rtsp' || form.adapter === 'onvif'")
+    expect(editorSource).toContain('@selected="applyDiscoverySelection"')
+  })
+
   it('explains adapter switches while preserving the camera identity and history', () => {
     expect(editorSource).toContain('Camera ID #{{ camera?.id }}')
     expect(editorSource).toContain('历史录像、事件和健康记录保持不变')

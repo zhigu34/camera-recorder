@@ -32,10 +32,45 @@ class ManualRtspConnectionCreate(_ConnectionWriteBase):
     sub_path: str | None = Field(default=None, min_length=1, max_length=255)
 
 
-class OnvifConnectionCreate(_ConnectionWriteBase):
+class _OnvifConnectionBase(_ConnectionWriteBase):
+    port: int = Field(default=80, ge=1, le=65535)
+    device_service_url: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("device_service_url", mode="before")
+    @classmethod
+    def normalize_device_service_url(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
+
+    @model_validator(mode="after")
+    def validate_device_service_url(self):
+        if self.device_service_url is None:
+            return self
+        parsed = urlparse(self.device_service_url)
+        try:
+            _ = parsed.port
+        except ValueError as exc:
+            raise ValueError("invalid ONVIF device service URL") from exc
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("invalid ONVIF device service URL")
+        declared_host = self.host.strip("[]").lower()
+        if parsed.hostname.strip("[]").lower() != declared_host:
+            raise ValueError("ONVIF device service URL host must match connection host")
+        return self
+
+
+class OnvifConnectionCreate(_OnvifConnectionBase):
     adapter: Literal["onvif"] = "onvif"
     password: str = Field(min_length=1, max_length=512)
-    port: int = Field(default=80, ge=1, le=65535)
 
 
 class HikConnectionCreate(_ConnectionWriteBase):
@@ -61,10 +96,9 @@ class ManualRtspConnectionUpdate(_ConnectionWriteBase):
     sub_path: str | None = Field(default=None, min_length=1, max_length=255)
 
 
-class OnvifConnectionUpdate(_ConnectionWriteBase):
+class OnvifConnectionUpdate(_OnvifConnectionBase):
     adapter: Literal["onvif"] = "onvif"
     password: str | None = Field(default=None, min_length=1, max_length=512)
-    port: int = Field(default=80, ge=1, le=65535)
 
 
 class HikConnectionUpdate(_ConnectionWriteBase):

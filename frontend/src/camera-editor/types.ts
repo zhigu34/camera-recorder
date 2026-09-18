@@ -17,7 +17,7 @@ export interface ManualRtspConnectionConfig {
 
 export interface OnvifConnectionConfig {
   port: number
-  device_service_url: string
+  device_service_url?: string
   device_uuid?: string | null
   recording_profile_token?: string | null
   preview_profile_token?: string | null
@@ -87,6 +87,7 @@ export interface ManualRtspEditorDraft extends CameraEditorDraftBase {
 export interface OnvifEditorDraft extends CameraEditorDraftBase {
   adapter: 'onvif'
   port: number
+  device_service_url?: string
 }
 
 export interface HikEditorDraft extends CameraEditorDraftBase {

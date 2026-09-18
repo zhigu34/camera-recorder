@@ -1,6 +1,31 @@
 name: camera-recorder
 
 services:
+  onvif-discovery:
+    profiles: ["discovery"]
+    image: camera-recorder-core:local
+    container_name: camera-recorder-onvif-discovery
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app/backend
+    command:
+      - sh
+      - -c
+      - rm -f /run/camera-recorder/onvif-discovery.sock && exec /app/backend/.venv/bin/uvicorn app.discovery_helper:app --uds /run/camera-recorder/onvif-discovery.sock
+    volumes:
+      - camera-discovery-runtime:/run/camera-recorder
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import socket; s=socket.socket(socket.AF_UNIX); s.settimeout(3); s.connect('/run/camera-recorder/onvif-discovery.sock'); s.close()
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
   hik-bridge:
     profiles: ["hik"]
     image: camera-recorder-core:local
@@ -48,12 +73,14 @@ services:
       CAMREC_HIK_ENABLED: ${CAMREC_HIK_ENABLED:-0}
       CAMREC_HIK_BRIDGE_URL: http://hik-bridge:8100
       CAMREC_INTERNAL_MEDIA_URL: http://127.0.0.1:8000
+      CAMREC_ONVIF_DISCOVERY_SOCKET: /run/camera-recorder/onvif-discovery.sock
     volumes:
       - ./data:/app/data
       - ./recordings:/app/recordings
       - ./staging:/app/staging
       - ./failed:/app/failed
       - ./logs:/app/logs
+      - camera-discovery-runtime:/run/camera-recorder
     expose:
       - "8000"
     healthcheck:
@@ -90,3 +117,6 @@ services:
       - ./openlist-data:/opt/openlist/data
     ports:
       - "${OPENLIST_PORT:-5244}:5244"
+
+volumes:
+  camera-discovery-runtime:

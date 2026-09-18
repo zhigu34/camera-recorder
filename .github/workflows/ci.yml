@@ -194,25 +194,29 @@ jobs:
         env:
           GITHUB_PROXY_PROMPT: "0"
         run: bash scripts/download-ffmpeg.sh amd64
-      - name: Validate core and HIK profile Compose models
+      - name: Validate core, discovery and HIK profile Compose models
         run: |
           docker compose config
+          docker compose --profile discovery config
           docker compose --profile hik config
           docker compose config --services | tee /tmp/core-services
-          if grep -qx 'hik-bridge' /tmp/core-services; then
-            echo 'hik-bridge must not be part of the default core service set' >&2
+          if grep -Eq '^(hik-bridge|onvif-discovery)$' /tmp/core-services; then
+            echo 'optional services must not be part of the default core service set' >&2
             exit 1
           fi
+          docker compose --profile discovery config --services | grep -qx 'onvif-discovery'
           docker compose --profile hik config --services | grep -qx 'hik-bridge'
       - run: docker compose build backend frontend
       - run: docker compose up -d backend frontend
-      - name: Verify HIK bridge is not started by core deployment
+      - name: Verify optional services are not started by core deployment
         run: |
-          if docker ps -a --format '{{.Names}}' | grep -qx 'camera-recorder-hik-bridge'; then
-            echo 'camera-recorder-hik-bridge must not be created by default core startup' >&2
-            docker ps -a
-            exit 1
-          fi
+          for name in camera-recorder-hik-bridge camera-recorder-onvif-discovery; do
+            if docker ps -a --format '{{.Names}}' | grep -qx "$name"; then
+              echo "$name must not be created by default core startup" >&2
+              docker ps -a
+              exit 1
+            fi
+          done
       - name: Wait for backend health
         run: |
           for i in $(seq 1 30); do
@@ -224,6 +228,43 @@ jobs:
           done
           docker compose logs backend
           exit 1
+      - name: Verify discovery helper topology
+        run: |
+          docker compose --profile discovery up -d --no-deps onvif-discovery
+          for i in $(seq 1 30); do
+            status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' camera-recorder-onvif-discovery 2>/dev/null || true)"
+            if [ "$status" = "healthy" ]; then
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              docker compose --profile discovery logs onvif-discovery
+              exit 1
+            fi
+            sleep 1
+          done
+          python - <<'PY'
+          import json
+          import subprocess
+
+          container = json.loads(
+              subprocess.check_output(
+                  ['docker', 'inspect', 'camera-recorder-onvif-discovery'],
+                  text=True,
+              )
+          )[0]
+          assert container['HostConfig']['NetworkMode'] == 'host', container['HostConfig']['NetworkMode']
+          assert not (container['HostConfig'].get('PortBindings') or {}), container['HostConfig'].get('PortBindings')
+          PY
+          docker compose exec -T backend python - <<'PY'
+          import socket
+
+          path = '/run/camera-recorder/onvif-discovery.sock'
+          client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+          client.settimeout(3)
+          client.connect(path)
+          client.close()
+          print('backend can reach discovery helper through Unix Socket')
+          PY
       - name: Verify database migration compatibility
         run: |
           docker compose exec -T backend alembic current | tee /tmp/alembic-current
@@ -349,4 +390,5 @@ jobs:
         if: always()
         run: |
           docker compose down -v --remove-orphans || true
+          docker compose --profile discovery down -v --remove-orphans || true
           docker compose --profile hik down -v --remove-orphans || true

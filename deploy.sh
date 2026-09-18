@@ -212,6 +212,7 @@ compose_up_with_network_recovery() {
 BUILD_BACKEND=0
 BUILD_FRONTEND=0
 UPDATE_HIK=0
+UPDATE_DISCOVERY=0
 UPDATE_BACKEND=0
 UPDATE_FRONTEND=0
 UPDATE_OPENLIST=0
@@ -230,22 +231,28 @@ HIK_SDK_HOST_DIR=""
 mark_hik_if_enabled() {
   [ "$HIK_ENABLED" = "1" ] && UPDATE_HIK=1 || true
 }
+mark_discovery() {
+  UPDATE_DISCOVERY=1
+}
 mark_full() {
   BUILD_BACKEND=1; BUILD_FRONTEND=1
   UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1
   mark_hik_if_enabled
+  mark_discovery
   CONFIG_ALL=1
 }
 classify_path() {
   local path="$1"
   case "$path" in
     frontend/*) BUILD_FRONTEND=1; UPDATE_FRONTEND=1 ;;
-    backend/Dockerfile|backend/pyproject.toml|backend/uv.lock) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_hik_if_enabled ;;
+    backend/Dockerfile|backend/pyproject.toml|backend/uv.lock) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_hik_if_enabled; mark_discovery ;;
+    backend/app/discovery_helper.py|backend/app/services/camera_discovery.py) BUILD_BACKEND=1; mark_discovery ;;
+    backend/app/schemas/camera_discovery.py|backend/app/services/onvif_client.py) BUILD_BACKEND=1; UPDATE_BACKEND=1; mark_discovery ;;
     backend/*|vendor/ffmpeg/*) BUILD_BACKEND=1; UPDATE_BACKEND=1 ;;
     hik_bridge/*) BUILD_BACKEND=1; mark_hik_if_enabled ;;
     hik-sdk-runtime/.gitkeep) ;;
     hik-sdk-runtime/*) mark_hik_if_enabled ;;
-    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; mark_hik_if_enabled ;;
+    .dockerignore) BUILD_BACKEND=1; BUILD_FRONTEND=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; mark_hik_if_enabled; mark_discovery ;;
     docker-compose.yml) mark_full ;;
     .env.example) CONFIG_ALL=1; UPDATE_BACKEND=1; UPDATE_FRONTEND=1; UPDATE_OPENLIST=1; mark_hik_if_enabled ;;
     deploy.sh|*.md|docs/*|.github/*|.gitignore|Makefile|scripts/*) ;;
@@ -266,7 +273,7 @@ collect_changed_files() {
 
   if [ -n "$previous_commit" ] && git cat-file -e "${previous_commit}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$previous_commit" "$CURRENT_COMMIT" 2>/dev/null; then
     base="$previous_commit"; PLAN_SOURCE="上次成功部署 ${previous_commit:0:8}"
-  elif container_exists camera-recorder-backend || container_exists camera-recorder-hik-bridge || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
+  elif container_exists camera-recorder-backend || container_exists camera-recorder-hik-bridge || container_exists camera-recorder-onvif-discovery || container_exists camera-recorder-web || container_exists camera-recorder-openlist; then
     if git rev-parse --verify ORIG_HEAD >/dev/null 2>&1 && git merge-base --is-ancestor ORIG_HEAD "$CURRENT_COMMIT" 2>/dev/null; then
       base="$(git rev-parse ORIG_HEAD)"; PLAN_SOURCE="首次智能部署，使用 pull 前 ${base:0:8} 作为基线"
     else
@@ -394,9 +401,11 @@ check_port Web "$WEB_PORT"; check_port OpenList "$OPENLIST_PORT"
 
 COMPOSE=(docker compose --env-file "$ENV_FILE")
 HIK_COMPOSE=(docker compose --env-file "$ENV_FILE" --profile hik)
+DISCOVERY_COMPOSE=(docker compose --env-file "$ENV_FILE" --profile discovery)
 "${COMPOSE[@]}" config >/dev/null || fail "docker compose 核心配置校验失败"
 "${HIK_COMPOSE[@]}" config >/dev/null || fail "docker compose HIK profile 配置校验失败"
-ok "docker compose 核心与 HIK profile 配置校验通过"
+"${DISCOVERY_COMPOSE[@]}" config >/dev/null || fail "docker compose discovery profile 配置校验失败"
+ok "docker compose 核心、HIK 与 discovery profile 配置校验通过"
 
 collect_changed_files
 CURRENT_ENV_HASH="$(file_hash "$ENV_FILE")"
@@ -428,8 +437,10 @@ fi
 container_running camera-recorder-backend || UPDATE_BACKEND=1
 container_running camera-recorder-web || UPDATE_FRONTEND=1
 container_running camera-recorder-openlist || UPDATE_OPENLIST=1
+container_running camera-recorder-onvif-discovery || UPDATE_DISCOVERY=1
 
 if [ "$UPDATE_HIK" = "1" ] && [ "$HIK_ENABLED" = "1" ] && ! docker image inspect camera-recorder-core:local >/dev/null 2>&1; then BUILD_BACKEND=1; fi
+if [ "$UPDATE_DISCOVERY" = "1" ] && ! docker image inspect camera-recorder-core:local >/dev/null 2>&1; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_BACKEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q backend 2>/dev/null || true)" ]; then BUILD_BACKEND=1; fi
 if [ "$UPDATE_FRONTEND" = "1" ] && [ -z "$("${COMPOSE[@]}" images -q frontend 2>/dev/null || true)" ]; then BUILD_FRONTEND=1; fi
 
@@ -451,6 +462,7 @@ if [ "$UPDATE_HIK" = "1" ]; then
   if [ "$HIK_ENABLED" = "1" ]; then UPDATE_LABELS="${UPDATE_LABELS} hik-bridge"
   else UPDATE_LABELS="${UPDATE_LABELS} hik-bridge(remove)"; fi
 fi
+[ "$UPDATE_DISCOVERY" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} onvif-discovery"
 [ "$UPDATE_BACKEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} backend"
 [ "$UPDATE_FRONTEND" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} frontend"
 [ "$UPDATE_OPENLIST" = "1" ] && UPDATE_LABELS="${UPDATE_LABELS} openlist"
@@ -520,6 +532,27 @@ if [ "$UPDATE_OPENLIST" = "1" ] || container_exists camera-recorder-openlist; th
   ok "OpenList 容器运行正常"
 fi
 
+DISCOVERY_UPDATE_SERVICES=()
+[ "$UPDATE_DISCOVERY" = "1" ] && DISCOVERY_UPDATE_SERVICES+=(onvif-discovery)
+if [ "${#DISCOVERY_UPDATE_SERVICES[@]}" -gt 0 ]; then
+  info "启动/更新局域网发现服务（失败不会影响录像核心）..."
+  mkdir -p logs; : >> "$UP_LOG"
+  set +e
+  "${DISCOVERY_COMPOSE[@]}" up -d --no-deps --force-recreate "${DISCOVERY_UPDATE_SERVICES[@]}" 2>&1 | tee -a "$UP_LOG"
+  DISCOVERY_UP_RC=${PIPESTATUS[0]}
+  set -e
+  if [ "$DISCOVERY_UP_RC" -ne 0 ]; then
+    warn "局域网发现服务启动失败；核心服务保持运行，手工摄像头配置仍可使用"
+  elif ! wait_for_health camera-recorder-onvif-discovery 60; then
+    "${DISCOVERY_COMPOSE[@]}" logs --tail=80 onvif-discovery || true
+    warn "局域网发现服务启动失败：健康检查未通过；核心服务保持运行"
+  else
+    ok "局域网发现服务 healthy（host network + Unix Socket，无 TCP 端口暴露）"
+  fi
+else
+  ok "局域网发现服务无需更新"
+fi
+
 if [ "$HIK_ENABLED" = "0" ]; then
   if [ "$UPDATE_HIK" = "1" ] || container_exists camera-recorder-hik-bridge || [ "$PREVIOUS_HIK_ENABLED" = "1" ]; then
     info "HIK 已关闭，移除旧 hik-bridge（不影响核心服务）..."
@@ -559,6 +592,11 @@ printf '\n'; "${COMPOSE[@]}" ps; printf '\n'
 ok "部署完成"
 printf 'Camera Recorder Web: http://127.0.0.1:%s\n' "$WEB_PORT"
 printf 'Backend API:        internal only (backend:8000, via Web /api and /ws)\n'
+if container_running camera-recorder-onvif-discovery; then
+  printf 'LAN Discovery:      enabled via host-network helper + Unix Socket\n'
+else
+  printf 'LAN Discovery:      unavailable (manual camera entry remains available)\n'
+fi
 if [ "$HIK_ENABLED" = "1" ]; then
   printf 'HIK Bridge:         enabled, internal only (hik-bridge:8100)\n'
 else
@@ -571,5 +609,6 @@ printf '  预览部署计划: ./deploy.sh --check-only\n'
 printf '  强制完整部署: ./deploy.sh --full\n'
 printf '  查看后端日志: docker compose logs -f backend\n'
 printf '  查看 HIK 日志: docker compose --profile hik logs -f hik-bridge\n'
+printf '  查看发现日志: docker compose --profile discovery logs -f onvif-discovery\n'
 printf '  查看核心状态: docker compose ps\n'
 printf '  查看含 HIK 状态: docker compose --profile hik ps\n'
