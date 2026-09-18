@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import { Cloudy, Refresh, Search, Setting, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { cameraRecordingsRoute } from './navigation'
 import { useCameraStore } from './stores/cameras'
 import { parsePositiveQueryId } from './utils/adminDeepLinks'
 import { formatDateTime } from './utils/dateTime'
@@ -100,11 +101,10 @@ const filteredTasks = computed(() => {
   return cameraScopedTasks.value.filter((task) => {
     if (statusFilter.value && task.status !== statusFilter.value) return false
     const recording = recordingMap.value.get(task.recording_id)
-    if (routeCameraId.value && recording?.camera_id !== routeCameraId.value) return false
     if (!keyword) return true
     const camera = recording ? cameraMap.value.get(recording.camera_id) : null
     const fileName = recording?.mp4_path.split('/').pop() || ''
-    return `${task.id} ${task.recording_id} ${camera?.name || ''} ${camera?.ip || ''} ${fileName} ${task.remote_path} ${task.last_error || ''}`.toLowerCase().includes(keyword)
+    return `${task.id} ${task.recording_id} ${camera?.name || ''} ${camera?.connection?.host || camera?.ip || ''} ${fileName} ${task.remote_path} ${task.last_error || ''}`.toLowerCase().includes(keyword)
   })
 })
 
@@ -170,7 +170,7 @@ function syncDeepLinkedTask(showMissing = false) {
     activeTask.value = null
     return
   }
-  const task = tasks.value.find((item) => item.id === taskId)
+  const task = cameraScopedTasks.value.find((item) => item.id === taskId)
   if (!task) {
     if (showMissing) ElMessage.warning(`未找到上传任务 #${taskId}`)
     detailVisible.value = false
@@ -192,6 +192,14 @@ function closeDetail() {
   detailVisible.value = false
   activeTask.value = null
   if (parsePositiveQueryId(route.query.task_id) !== null) clearTaskDeepLink()
+}
+
+function openRecordings() {
+  if (routeCameraId.value) {
+    void router.push(cameraRecordingsRoute(routeCameraId.value))
+    return
+  }
+  emit('open-recordings')
 }
 
 async function refreshReferences() {
@@ -401,7 +409,7 @@ onBeforeUnmount(() => {
         <span v-if="routeCameraId" class="stream-state live"><i></i>摄像头 #{{ routeCameraId }}</span>
         <span class="stream-state" :class="{ live: streamConnected }"><i></i>{{ streamConnected ? '实时推送' : '正在重连' }}</span>
         <span>显示 {{ filteredTasks.length }} / {{ cameraScopedTasks.length }} 条</span>
-        <el-button @click="emit('open-recordings')">录像管理</el-button>
+        <el-button @click="openRecordings">录像管理</el-button>
         <el-button @click="load()">刷新</el-button>
         <el-button type="primary" :loading="scanning" :disabled="!status?.active" @click="scan">立即扫描</el-button>
       </div>
