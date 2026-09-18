@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
+import type { CameraConnectionRead } from '../camera-editor/types'
 
 export interface RecordingWindow {
   days: number[]
@@ -25,6 +26,7 @@ export interface SharedCamera {
   recording_schedule?: RecordingWindow[]
   timestamp_mode?: 'native' | 'reconstruct' | 'wallclock' | string
   password_set?: boolean
+  connection?: CameraConnectionRead | null
   video_codec?: string | null
   video_profile?: string | null
   width?: number | null
