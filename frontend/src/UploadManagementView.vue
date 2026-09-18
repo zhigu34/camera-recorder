@@ -80,13 +80,24 @@ const recordingMap = computed(() => new Map(recordings.value.map((row) => [row.i
 const cameraMap = computed(() => new Map(cameras.value.map((row) => [row.id, row])))
 const routeCameraId = computed(() => parsePositiveQueryId(route.query.camera_id))
 const counts = computed(() => status.value?.counts || {})
-const totalCount = computed(() => Object.values(counts.value).reduce((sum, value) => sum + Number(value || 0), 0))
-const pendingCount = computed(() => (counts.value.pending || 0) + (counts.value.uploading || 0) + (counts.value.retry_wait || 0))
-const successCount = computed(() => counts.value.success || 0)
-const failedCount = computed(() => counts.value.failed || 0)
+const cameraScopedTasks = computed(() => {
+  if (!routeCameraId.value) return tasks.value
+  return tasks.value.filter((task) => recordingMap.value.get(task.recording_id)?.camera_id === routeCameraId.value)
+})
+const scopedCounts = computed(() => {
+  if (!routeCameraId.value) return counts.value
+  return cameraScopedTasks.value.reduce<Record<string, number>>((result, task) => {
+    result[task.status] = (result[task.status] || 0) + 1
+    return result
+  }, {})
+})
+const totalCount = computed(() => Object.values(scopedCounts.value).reduce((sum, value) => sum + Number(value || 0), 0))
+const pendingCount = computed(() => (scopedCounts.value.pending || 0) + (scopedCounts.value.uploading || 0) + (scopedCounts.value.retry_wait || 0))
+const successCount = computed(() => scopedCounts.value.success || 0)
+const failedCount = computed(() => scopedCounts.value.failed || 0)
 const filteredTasks = computed(() => {
   const keyword = searchText.value.trim().toLowerCase()
-  return tasks.value.filter((task) => {
+  return cameraScopedTasks.value.filter((task) => {
     if (statusFilter.value && task.status !== statusFilter.value) return false
     const recording = recordingMap.value.get(task.recording_id)
     if (routeCameraId.value && recording?.camera_id !== routeCameraId.value) return false
@@ -387,6 +398,7 @@ onBeforeUnmount(() => {
         </el-select>
       </div>
       <div class="toolbar-actions">
+        <span v-if="routeCameraId" class="stream-state live"><i></i>摄像头 #{{ routeCameraId }}</span>
         <span class="stream-state" :class="{ live: streamConnected }"><i></i>{{ streamConnected ? '实时推送' : '正在重连' }}</span>
         <span>显示 {{ filteredTasks.length }} / {{ tasks.length }} 条</span>
         <el-button @click="emit('open-recordings')">录像管理</el-button>
