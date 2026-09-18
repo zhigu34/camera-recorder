@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+import CameraDiscoveryDialog from './CameraDiscoveryDialog.vue'
 import {
   connectionFingerprint,
   createPayloadFromDraft,
@@ -20,6 +21,7 @@ import type {
   CameraFormFactor,
   TimestampMode,
 } from './camera-editor/types'
+import type { CameraDiscoverySelection } from './camera-discovery/types'
 import type { SharedCamera } from './stores/cameras'
 
 const props = defineProps<{
@@ -39,6 +41,7 @@ const saving = ref(false)
 const probing = ref(false)
 const probeResult = ref<CameraConnectionProbeResult | null>(null)
 const probeFingerprint = ref('')
+const discoveryVisible = ref(false)
 
 const formFactorOptions: Array<{ value: CameraFormFactor; label: string }> = [
   { value: 'unknown', label: '未指定' },
@@ -64,6 +67,7 @@ const switchingAdapter = computed(() => Boolean(
 const requiresPassword = computed(() => passwordRequired(props.camera, form.value))
 const selectedCapability = computed(() => adapters.value.find((item) => item.id === form.value.adapter) || null)
 const selectedAdapterUnavailable = computed(() => selectedCapability.value?.available === false)
+const canDiscover = computed(() => form.value.adapter === 'manual_rtsp' || form.value.adapter === 'onvif')
 const title = computed(() => props.camera ? `编辑摄像头 #${props.camera.id}` : '添加摄像头')
 
 function apiError(error: unknown, fallback: string) {
@@ -81,6 +85,40 @@ function adapterLabel(adapter: CameraAdapterId | null) {
   if (!adapter) return '未配置'
   return adapters.value.find((item) => item.id === adapter)?.label
     || ({ manual_rtsp: 'Manual RTSP', onvif: 'ONVIF', hik_sdk: 'Hikvision SDK' }[adapter])
+}
+
+function normalizedHost(value: string) {
+  return value.trim().replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
+}
+
+function onvifServiceAuthorityMatches(serviceUrl: string, host: string, port: number) {
+  try {
+    const parsed = new URL(serviceUrl)
+    const parsedPort = parsed.port ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80
+    return normalizedHost(parsed.hostname) === normalizedHost(host) && parsedPort === port
+  } catch {
+    return false
+  }
+}
+
+function openDiscovery() {
+  if (!canDiscover.value) return
+  discoveryVisible.value = true
+}
+
+function applyDiscoverySelection(selection: CameraDiscoverySelection) {
+  if (selection.adapter === 'manual_rtsp' && form.value.adapter === 'manual_rtsp') {
+    form.value.host = selection.host
+    form.value.port = 554
+    discoveryVisible.value = false
+    return
+  }
+  if (selection.adapter === 'onvif' && form.value.adapter === 'onvif') {
+    form.value.host = selection.host
+    form.value.port = selection.port
+    form.value.device_service_url = selection.device_service_url
+    discoveryVisible.value = false
+  }
 }
 
 function commonDraft() {
@@ -117,6 +155,7 @@ function changeAdapter(adapter: CameraAdapterId) {
       sub_stream_type: 1,
     }
   }
+  discoveryVisible.value = false
   probeResult.value = null
   probeFingerprint.value = ''
 }
@@ -248,6 +287,19 @@ watch(
     }
   },
 )
+
+watch(
+  () => form.value.adapter === 'onvif'
+    ? [form.value.host, form.value.port] as const
+    : null,
+  (authority) => {
+    if (!authority || form.value.adapter !== 'onvif' || !form.value.device_service_url) return
+    const [host, port] = authority
+    if (!onvifServiceAuthorityMatches(form.value.device_service_url, host, port)) {
+      form.value.device_service_url = ''
+    }
+  },
+)
 </script>
 
 <template>
@@ -331,7 +383,17 @@ watch(
 
         <div class="camera-editor-grid camera-editor-grid-connection">
           <el-form-item label="设备地址">
-            <el-input v-model="form.host" placeholder="192.168.1.120" />
+            <div class="camera-editor-address-row">
+              <el-input v-model="form.host" placeholder="192.168.1.120" />
+              <el-button
+                v-if="form.adapter === 'manual_rtsp' || form.adapter === 'onvif'"
+                plain
+                :disabled="saving || probing"
+                @click="openDiscovery"
+              >
+                扫描局域网
+              </el-button>
+            </div>
           </el-form-item>
           <el-form-item label="用户名">
             <el-input v-model="form.username" maxlength="128" autocomplete="username" />
@@ -410,6 +472,13 @@ watch(
         </div>
       </section>
     </div>
+
+    <CameraDiscoveryDialog
+      v-if="canDiscover"
+      v-model="discoveryVisible"
+      :adapter="form.adapter === 'onvif' ? 'onvif' : 'manual_rtsp'"
+      @selected="applyDiscoverySelection"
+    />
 
     <template #footer>
       <el-button :disabled="saving || probing" @click="emit('update:modelValue', false)">取消</el-button>
