@@ -188,10 +188,6 @@ def validate_service_url(url: str) -> str:
     return url
 
 
-def validate_service_url(url: str) -> str:
-    return validate_service_url(url)
-
-
 def _wsse_header(username: str, password: str) -> str:
     nonce = os.urandom(16)
     created = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
