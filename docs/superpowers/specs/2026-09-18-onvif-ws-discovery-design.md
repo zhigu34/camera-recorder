@@ -174,7 +174,11 @@ Example runtime socket:
 /run/camera-recorder/onvif-discovery.sock
 ```
 
-Both containers mount the same small runtime volume/path.
+Both containers mount the same small Compose named volume at `/run/camera-recorder`.
+
+Use a named volume rather than a host bind mount so deployment does not depend on host-directory ownership, SELinux labels, or stale socket files from an earlier container instance.
+
+The helper must unlink any stale `onvif-discovery.sock` before binding and must remove it on clean shutdown.
 
 The helper listens on the Unix socket and exposes only an internal scan operation.
 
@@ -279,6 +283,8 @@ Initial limits:
 
 IPv4 discovery is the required first slice. IPv6 WS-Discovery is deferred.
 
+The first supported deployment target for LAN discovery is Linux Docker Engine. If host networking is unavailable on the current container platform, the helper must fail its own readiness cleanly and the backend must expose discovery as unavailable without affecting manual ONVIF configuration or recording core health.
+
 ## Deployment
 
 Add `onvif-discovery` to `docker-compose.yml`.
@@ -287,9 +293,9 @@ It reuses the existing Camera Recorder backend image/runtime rather than introdu
 
 The helper:
 
-- uses `network_mode: host`;
+- uses `network_mode: host` on Linux deployments;
 - has no published ports;
-- mounts only the shared runtime-socket path;
+- mounts only the shared named runtime-socket volume;
 - starts a small dedicated helper entrypoint;
 - has a healthcheck that validates process/socket readiness without performing LAN scans.
 
@@ -299,7 +305,21 @@ Backend mounts the same runtime-socket path and receives:
 CAMREC_ONVIF_DISCOVERY_SOCKET=/run/camera-recorder/onvif-discovery.sock
 ```
 
-The discovery helper is part of the normal core deployment because it contains no proprietary dependency. A helper failure MUST NOT prevent backend/frontend recording core from running.
+The discovery helper is an optional-adjunct stage of the normal deployment because it contains no proprietary dependency but is not required for reliable recording.
+
+Deployment order is:
+
+1. bring the normal recording core (`backend`, `frontend`, `openlist`) to its requested healthy state;
+2. then start/recreate `onvif-discovery`.
+
+A discovery-helper startup/health failure MUST:
+
+- leave healthy core services running;
+- print an actionable warning;
+- record discovery as unavailable for that deployment;
+- still return a successful overall deployment exit status when the recording core succeeded.
+
+This differs intentionally from explicitly enabled HIK capability, where a requested HIK failure returns non-zero. LAN discovery is convenience functionality and must never turn a healthy recording deployment into a failed deployment.
 
 The backend capability behavior is graceful: when the helper is unavailable, only LAN discovery is unavailable; manually configured ONVIF cameras and the existing ONVIF Probe continue to work.
 
@@ -313,9 +333,8 @@ Expected behavior:
 - WS-Discovery/helper backend code changes: rebuild backend image and recreate helper;
 - shared backend runtime/dependency changes: recreate backend and helper;
 - Compose changes: validate/update helper as part of the core deployment plan;
-- helper startup failure: report a warning/error for discovery capability but do not tear down a healthy recorder backend/frontend stack.
-
-The exact deploy-script failure severity should preserve the project principle that optional discovery must not interrupt reliable recording.
+- helper startup failure: warn, leave the healthy recorder backend/frontend stack untouched, and keep the overall deploy exit status successful;
+- a later backend/helper code change should retry helper recreation automatically.
 
 ## Frontend UX
 
